@@ -56,7 +56,9 @@ def _validate_bi_user(request: Request) -> Optional[dict]:
     if resp.status_code != 200:
         return None
 
-    bi_user = resp.json().get("user")
+    data = resp.json()
+    # /api/auth/check returns the user object directly (not wrapped in {user: ...})
+    bi_user = data.get("user") if "user" in data else data
     if not bi_user or not bi_user.get("email"):
         return None
 
