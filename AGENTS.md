@@ -15,11 +15,7 @@
 
 GPCG is now a multi-user platform for automated YouTube channel video generation.
 
-- **Auth:** BI Identity SSO (cookie-based). Reads `bi_auth` cookie, validates
-  via Identity Service at `http://bi-api:3300/api/auth/check`. Admin user
-  (`GPCG_ADMIN_EMAIL`) auto-seeded on first run (linked by email, no password).
-  Auth routes at `src/gpcg/api/auth_routes.py` (`/api/auth/*`).
-  Auth module at `src/gpcg/infrastructure/auth.py` (`get_current_user`, `get_admin_user` deps).
+- **Auth:** BI Identity SSO (cookie-based). Reads `bi_auth` cookie, validates via Identity Service at `http://bi-api:3300/api/auth/check`. Auth module at `src/gpcg/infrastructure/auth.py` (`get_current_user`, `get_admin_user`, `get_optional_user` deps). Local User is find-or-created by email match. No local login/register routes — login is handled by BI Identity at `/id/login`.
 - **Data isolation:** All models have `user_id` column. API routes filter by
   `user.id` from the local User (found/created from BI Identity email). Migration via `_ensure_column()` in `init_db()`.
 - **Automation model:** One per user (`Automation` table). Stores all video
