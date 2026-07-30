@@ -98,17 +98,21 @@ def init_db() -> None:
     _ensure_column(engine, "content_plans", "user_id", "INTEGER")
     _ensure_column(engine, "jobs", "user_id", "INTEGER")
     _ensure_column(engine, "videos", "user_id", "INTEGER")
-    # Seed admin user if not exists
+    # SSO migration: add bi_identity_id column, make password_hash nullable
+    _ensure_column(engine, "users", "bi_identity_id", "VARCHAR(100)")
+    # Seed admin user if not exists (linked to BI Identity by email)
     _seed_admin_user()
 
 
 def _seed_admin_user() -> None:
-    """Create the admin user if it doesn't exist. The admin email comes from
-    GPCG_ADMIN_EMAIL config. The admin must set their password via the UI
-    on first login (the account is created with a random password that is
-    logged once).
+    """Create the admin user if it doesn't exist, linked to BI Identity by email.
+
+    With SSO, BI Identity handles authentication. This just creates a local
+    User row for the configured admin email so that data isolation works
+    before the admin first logs in. No password is set (BI Identity manages
+    credentials). The is_admin flag is set locally for backward compatibility,
+    but actual admin authorization is determined by BI Identity roles.
     """
-    import secrets
     import logging
     from gpcg.domain.models import User
     from gpcg.config import get_settings
@@ -120,26 +124,21 @@ def _seed_admin_user() -> None:
         return
 
     with session_scope() as session:
-        existing = session.query(User).filter(User.email == admin_email).first()
+        existing = session.query(User).filter(User.email == admin_email.lower()).first()
         if existing:
-            # Ensure admin flag is set
+            # Ensure admin flag is set for backward compatibility
             if not existing.is_admin:
                 existing.is_admin = True
                 session.flush()
             return
-        # Create admin with a random password (must be reset via UI)
-        random_pw = secrets.token_urlsafe(24)
-        from gpcg.infrastructure.auth import hash_password
+        # Create admin linked to BI Identity (no local password)
         admin = User(
-            email=admin_email,
+            email=admin_email.lower(),
             name="Admin",
-            password_hash=hash_password(random_pw),
+            password_hash=None,
             is_admin=True,
             is_active=True,
         )
         session.add(admin)
         session.flush()
-        log.info(f"Seeded admin user '{admin_email}' with temporary password (reset via UI)")
-        # Store temp password in metadata for first-login flow
-        admin.metadata_json = {"temp_password": random_pw, "must_reset": True}
-        session.flush()
+        log.info(f"Seeded admin user '{admin_email}' (BI Identity SSO — no local password)")

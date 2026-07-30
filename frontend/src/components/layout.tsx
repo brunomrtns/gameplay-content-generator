@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet } from "react-router-dom";
 import { LayoutDashboard, FileText, Settings, Video, Shield, LogOut, ChevronDown, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
 import { Toaster } from "sonner";
 
 const NAV = [
@@ -14,7 +15,6 @@ const NAV = [
 
 export function Layout() {
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const navItems = [...NAV];
@@ -22,9 +22,14 @@ export function Layout() {
     navItems.push({ to: "/admin", label: "Admin", icon: Shield });
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await api.logout();
+    } catch {
+      // ignore — logout endpoint may not be reachable
+    }
     logout();
-    navigate("/login");
+    window.location.href = "/id/login?redirect=/gpcg/dashboard";
   };
 
   return (

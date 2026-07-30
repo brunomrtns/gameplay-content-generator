@@ -37,17 +37,38 @@ function parseColor(input: string, fallback: string): string {
 
 /**
  * Maps subtitle position string to CSS vertical placement.
- * "top" → near top, "middle" → center, "bottom" → near bottom, "" → default (near bottom)
+ * Returns the `bottom` offset (distance from bottom edge).
+ * "top" → near top (large bottom value), "middle" → center, "bottom" → near bottom (small bottom value)
  */
-function positionToCss(pos: string): string {
+function positionToBottomOffset(pos: string): string {
   switch (pos) {
     case "top":
-      return "8%";
+      return "82%"; // near top = far from bottom
     case "middle":
       return "50%";
     default:
-      return "82%"; // bottom / default
+      return "8%"; // bottom / default = close to bottom
   }
+}
+
+/**
+ * Maps FFmpeg font names to CSS font-family strings.
+ * These are the fonts available in the Docker container (DejaVu, Liberation).
+ */
+const FONT_MAP: Record<string, string> = {
+  "DejaVuSans-Bold": "'DejaVu Sans', sans-serif",
+  "DejaVuSans": "'DejaVu Sans', sans-serif",
+  "LiberationSans-Bold": "'Liberation Sans', 'Arial', sans-serif",
+  "LiberationSans": "'Liberation Sans', 'Arial', sans-serif",
+  Arial: "Arial, sans-serif",
+  Helvetica: "Helvetica, Arial, sans-serif",
+  "Courier-New": "'Courier New', monospace",
+  "Courier New": "'Courier New', monospace",
+};
+
+function fontToCss(font: string | undefined): string {
+  if (!font) return "Arial, sans-serif";
+  return FONT_MAP[font] || "Arial, sans-serif";
 }
 
 export function SubtitlePreview({ opts }: { opts: VideoCustomization }) {
@@ -76,7 +97,7 @@ export function SubtitlePreview({ opts }: { opts: VideoCustomization }) {
   const boxPadding = opts.subtitle_box_padding || 10;
   const rounded = opts.subtitle_rounded_box ?? false;
 
-  const posCss = positionToCss(opts.subtitle_position || "");
+  const bottomOffset = positionToBottomOffset(opts.subtitle_position || "");
   const textTransform =
     opts.subtitle_case === "upper"
       ? "uppercase"
@@ -111,7 +132,7 @@ export function SubtitlePreview({ opts }: { opts: VideoCustomization }) {
                 : opts.subtitle_position === "middle"
                   ? "50%"
                   : "auto",
-            bottom: opts.subtitle_position === "top" || opts.subtitle_position === "middle" ? "auto" : posCss,
+            bottom: opts.subtitle_position === "top" || opts.subtitle_position === "middle" ? "auto" : bottomOffset,
             transform:
               opts.subtitle_position === "middle"
                 ? "translate(-50%, -50%)"
@@ -124,9 +145,8 @@ export function SubtitlePreview({ opts }: { opts: VideoCustomization }) {
             padding: boxEnabled ? `${boxPadding / 3}px ${boxPadding / 2}px` : "0",
             borderRadius: rounded ? "9999px" : "0",
             maxWidth: "90%",
-            fontFamily: opts.subtitle_font?.includes("Mono")
-              ? "monospace"
-              : "sans-serif",
+            fontFamily: fontToCss(opts.subtitle_font),
+            fontWeight: opts.subtitle_font?.includes("Bold") ? "bold" : "normal",
           }}
         >
           {sampleText}

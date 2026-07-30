@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import {
   Save,
   Play,
+  Pause,
   Film,
   Monitor,
   Type,
@@ -83,9 +84,11 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
       <button
         type="button"
         onClick={() => onChange(!checked)}
-        className={`relative h-6 w-11 rounded-full transition-colors ${checked ? "bg-accent" : "bg-surface-hover"}`}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? "bg-accent" : "bg-surface-hover"}`}
       >
-        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${checked ? "translate-x-5" : "translate-x-0.5"}`} />
+        <span
+          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform duration-200 ${checked ? "translate-x-5" : "translate-x-0"}`}
+        />
       </button>
       <span className="text-sm text-text-secondary">{label}</span>
     </label>
@@ -99,7 +102,7 @@ export function AutomationPage() {
 
   const [config, setConfig] = useState<AutomationConfig>({});
   const [saving, setSaving] = useState(false);
-  const [triggering, setTriggering] = useState(false);
+  const [toggling, setToggling] = useState(false);
   const [uploadingVoice, setUploadingVoice] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const voiceInput = useRef<HTMLInputElement>(null);
@@ -137,15 +140,20 @@ export function AutomationPage() {
     }
   };
 
-  const handleTrigger = async () => {
-    setTriggering(true);
+  const handleToggleAutomation = async () => {
+    setToggling(true);
     try {
-      await api.triggerRun();
-      toast.success("Geração disparada!");
+      if (automation?.status === "running") {
+        await api.pauseAutomation();
+        toast.success("Automação pausada. O vídeo atual será concluído.");
+      } else {
+        await api.startAutomation();
+        toast.success("Automação iniciada! Vídeos serão produzidos continuamente.");
+      }
     } catch (err: any) {
-      toast.error(err.message || "Erro ao disparar");
+      toast.error(err.message || "Erro ao alterar automação");
     } finally {
-      setTriggering(false);
+      setToggling(false);
     }
   };
 
@@ -193,14 +201,24 @@ export function AutomationPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Automação</h1>
-          <p className="mt-1 text-sm text-text-secondary">Configure como os vídeos serão gerados</p>
+          <p className="mt-1 text-sm text-text-secondary">Configure como sua máquina produz vídeos</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleSave} disabled={saving}>
             {saving ? <><Spinner className="h-4 w-4" /> Salvando...</> : <><Save className="h-4 w-4" /> Salvar</>}
           </Button>
-          <Button variant="primary" onClick={handleTrigger} disabled={triggering}>
-            {triggering ? <><Spinner className="h-4 w-4" /> Gerando...</> : <><Play className="h-4 w-4" /> Gerar agora</>}
+          <Button
+            variant={automation?.status === "running" ? "danger" : "primary"}
+            onClick={handleToggleAutomation}
+            disabled={toggling}
+          >
+            {toggling ? (
+              <><Spinner className="h-4 w-4" /> Aguarde...</>
+            ) : automation?.status === "running" ? (
+              <><Pause className="h-4 w-4" /> Pausar</>
+            ) : (
+              <><Play className="h-4 w-4" /> Iniciar</>
+            )}
           </Button>
         </div>
       </div>
@@ -492,8 +510,20 @@ export function AutomationPage() {
                 <Button variant="outline" size="sm" className="flex-1" onClick={handleSave} disabled={saving}>
                   <Save className="h-3.5 w-3.5" /> Salvar
                 </Button>
-                <Button variant="primary" size="sm" className="flex-1" onClick={handleTrigger} disabled={triggering}>
-                  {triggering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />} Gerar
+                <Button
+                  variant={automation?.status === "running" ? "danger" : "primary"}
+                  size="sm"
+                  className="flex-1"
+                  onClick={handleToggleAutomation}
+                  disabled={toggling}
+                >
+                  {toggling ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : automation?.status === "running" ? (
+                    <><Pause className="h-3.5 w-3.5" /> Pausar</>
+                  ) : (
+                    <><Play className="h-3.5 w-3.5" /> Iniciar</>
+                  )}
                 </Button>
               </div>
             </Card>

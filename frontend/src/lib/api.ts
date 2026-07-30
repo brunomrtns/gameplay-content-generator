@@ -4,13 +4,11 @@ import { useAuth } from "./auth";
 // In dev, the app is at / and API calls go to /api/ (proxied by Vite)
 const API_BASE = import.meta.env.PROD ? "/gpcg/api" : "/api";
 
-function authHeaders(): Record<string, string> {
-  const token = useAuth.getState().token;
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+// SSO redirect target for BI Identity login
+const SSO_LOGIN_URL = "/id/login?redirect=/gpcg/dashboard";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { ...authHeaders() };
+  const headers: Record<string, string> = {};
   if (options?.body instanceof FormData) {
     // Let browser set Content-Type for FormData
   } else if (options?.body) {
@@ -19,10 +17,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: { ...headers, ...(options?.headers as Record<string, string>) },
+    credentials: "include", // CRITICAL: send bi_auth cookie
   });
   if (res.status === 401) {
     useAuth.getState().logout();
-    window.location.href = "/login";
+    window.location.href = SSO_LOGIN_URL;
     throw new Error("Unauthorized");
   }
   if (!res.ok) {
@@ -47,35 +46,21 @@ export function jsonBody(data: Record<string, any>): string {
 }
 
 export const api = {
-  // ── Auth ──────────────────────────────────────────────────────────────
-  login: (email: string, password: string) =>
-    request<{ token: string; user: any; must_reset_password: boolean }>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    }),
+  // ── Auth (BI Identity SSO) ──────────────────────────────────────────────
   getMe: () => request<any>("/auth/me"),
-  updateMe: (data: { name?: string; password?: string }) =>
-    request<any>("/auth/me", { method: "PUT", body: JSON.stringify(data) }),
-  register: (email: string, name: string, password: string) =>
-    request<any>("/auth/register", {
-      method: "POST",
-      body: JSON.stringify({ email, name, password }),
-    }),
+  ssoRedirect: () => `${API_BASE}/auth/sso-redirect`,
+  logout: () => request<{ redirect: string }>("/auth/logout", { method: "POST" }),
   listUsers: () => request<any[]>("/auth/users"),
   deleteUser: (id: number) => request<any>(`/auth/users/${id}`, { method: "DELETE" }),
-  updateUser: (id: number, data: { name?: string; is_active?: boolean; is_admin?: boolean }) =>
+  updateUser: (id: number, data: { name?: string; is_active?: boolean }) =>
     request<any>(`/auth/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  resetPassword: (id: number, password: string) =>
-    request<any>(`/auth/users/${id}/reset-password`, {
-      method: "POST",
-      body: JSON.stringify({ password }),
-    }),
 
   // ── Automation ─────────────────────────────────────────────────────────
   getAutomation: () => request<any>("/automation"),
   updateAutomation: (data: { name?: string; config?: any; upload_config?: any; schedule?: string }) =>
     request<any>("/automation", { method: "PUT", body: JSON.stringify(data) }),
-  triggerRun: () => request<any>("/automation/run", { method: "POST" }),
+  startAutomation: () => request<{ status: string }>("/automation/start", { method: "POST" }),
+  pauseAutomation: () => request<{ status: string }>("/automation/pause", { method: "POST" }),
 
   // ── YouTube ────────────────────────────────────────────────────────────
   youtubeConnect: () => request<{ url: string }>("/youtube/connect"),

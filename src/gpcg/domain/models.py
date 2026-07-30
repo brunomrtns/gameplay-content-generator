@@ -176,7 +176,10 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
+    # Nullable since SSO migration — BI Identity handles passwords
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # BI Identity user ID — links to the Identity Service user
+    bi_identity_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Google-integration user ID — maps to oauth_credentials.userId in that service.

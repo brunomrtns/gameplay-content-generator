@@ -1,32 +1,11 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Zap, Mail, Lock, ArrowRight } from "lucide-react";
-import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { Button, Input, Label } from "@/components/ui";
-import { toast } from "sonner";
+import { Zap, ArrowRight, LogIn } from "lucide-react";
+import { Button } from "@/components/ui";
+
+const SSO_LOGIN_URL = "/id/login?redirect=/gpcg/dashboard";
 
 export function LoginPage() {
-  const navigate = useNavigate();
-  const { setAuth } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim() || !password) return;
-    setLoading(true);
-    try {
-      const r = await api.login(email.trim(), password);
-      setAuth(r.token, r.user);
-      toast.success(`Bem-vindo, ${r.user.name || r.user.email}`);
-      navigate("/dashboard");
-    } catch (err: any) {
-      toast.error(err.message || "Falha ao entrar");
-    } finally {
-      setLoading(false);
-    }
+  const handleSSO = () => {
+    window.location.href = SSO_LOGIN_URL;
   };
 
   return (
@@ -47,53 +26,22 @@ export function LoginPage() {
         {/* Card */}
         <div className="card-premium p-8">
           <h2 className="mb-1 text-lg font-semibold">Entrar</h2>
-          <p className="mb-6 text-sm text-text-muted">Acesse o painel de automação</p>
+          <p className="mb-6 text-sm text-text-muted">
+            Acesse o painel através da Brunointegrations
+          </p>
 
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <Label>Email</Label>
-              <div className="relative">
-                <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
-                <Input
-                  type="email"
-                  value={email}
-                  onChange={setEmail}
-                  placeholder="voce@email.com"
-                  className="pl-11"
-                  disabled={loading}
-                />
-              </div>
-            </div>
-
-            <div>
-              <Label>Senha</Label>
-              <div className="relative">
-                <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={setPassword}
-                  placeholder="••••••••"
-                  className="pl-11"
-                  disabled={loading}
-                />
-              </div>
-            </div>
-
-            <Button type="submit" variant="primary" size="lg" className="w-full" disabled={loading}>
-              {loading ? (
-                <span className="flex items-center gap-2">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                  Entrando...
-                </span>
-              ) : (
-                <span className="flex items-center gap-2">
-                  Entrar
-                  <ArrowRight className="h-4 w-4" />
-                </span>
-              )}
-            </Button>
-          </form>
+          <Button
+            variant="primary"
+            size="lg"
+            className="w-full"
+            onClick={handleSSO}
+          >
+            <span className="flex items-center gap-2">
+              <LogIn className="h-4 w-4" />
+              Entrar via Brunointegrations
+              <ArrowRight className="h-4 w-4" />
+            </span>
+          </Button>
         </div>
 
         <p className="mt-6 text-center text-xs text-text-muted">

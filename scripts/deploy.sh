@@ -26,6 +26,8 @@ my-vps --rsync "$PROJECT_DIR/" "$VPS_DIR/" \
 
 # ── Step 2: Build and start Docker container ─────────────────────────────────
 echo "🔨 Building and starting Docker container..."
+# Ensure the bi-net external network exists (for BI Identity Service communication)
+my-vps "docker network inspect bi-net >/dev/null 2>&1 || docker network create bi-net"
 my-vps "cd $VPS_DIR && docker compose -f docker-compose.prod.yml build --no-cache && docker compose -f docker-compose.prod.yml up -d"
 
 # ── Step 3: Wait for health check ─────────────────────────────────────────────

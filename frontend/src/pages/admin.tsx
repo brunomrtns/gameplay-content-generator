@@ -2,33 +2,19 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { usePoll } from "@/hooks/usePoll";
 import { useAuth } from "@/lib/auth";
-import { Badge, Button, Card, Input, Label, Spinner, EmptyState } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, Spinner } from "@/components/ui";
 import { fmtDate } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   Shield,
-  UserPlus,
-  KeyRound,
   Trash2,
   CheckCircle2,
   XCircle,
-  Mail,
-  Lock,
 } from "lucide-react";
 
 export function AdminPage() {
   const { user: currentUser } = useAuth();
   const { data: users, setData, loading } = usePoll(() => api.listUsers(), 10000);
-
-  // Create user form
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
-  const [password, setPassword] = useState("");
-  const [creating, setCreating] = useState(false);
-
-  // Reset password state
-  const [resetting, setResetting] = useState<number | null>(null);
-  const [newPassword, setNewPassword] = useState("");
 
   if (!currentUser?.is_admin) {
     return (
@@ -42,57 +28,12 @@ export function AdminPage() {
     );
   }
 
-  const createUser = async () => {
-    if (!email.trim() || !password) {
-      toast.error("Email e senha são obrigatórios");
-      return;
-    }
-    setCreating(true);
-    try {
-      await api.register(email.trim(), name.trim(), password);
-      toast.success(`Usuário "${email}" criado`);
-      setEmail(""); setName(""); setPassword("");
-      const updated = await api.listUsers();
-      setData(updated);
-    } catch (err: any) {
-      toast.error(err.message);
-    } finally {
-      setCreating(false);
-    }
-  };
-
   const toggleActive = async (u: any) => {
     try {
       await api.updateUser(u.id, { is_active: !u.is_active });
       toast.success(u.is_active ? "Usuário desativado" : "Usuário ativado");
       const updated = await api.listUsers();
       setData(updated);
-    } catch (err: any) {
-      toast.error(err.message);
-    }
-  };
-
-  const toggleAdmin = async (u: any) => {
-    try {
-      await api.updateUser(u.id, { is_admin: !u.is_admin });
-      toast.success(u.is_admin ? "Admin removido" : "Admin concedido");
-      const updated = await api.listUsers();
-      setData(updated);
-    } catch (err: any) {
-      toast.error(err.message);
-    }
-  };
-
-  const resetPassword = async (id: number) => {
-    if (!newPassword || newPassword.length < 6) {
-      toast.error("Senha deve ter no mínimo 6 caracteres");
-      return;
-    }
-    try {
-      await api.resetPassword(id, newPassword);
-      toast.success("Senha redefinida");
-      setResetting(null);
-      setNewPassword("");
     } catch (err: any) {
       toast.error(err.message);
     }
@@ -119,39 +60,21 @@ export function AdminPage() {
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Administração</h1>
-        <p className="mt-1 text-sm text-text-secondary">Gerencie usuários e permissões da plataforma</p>
+        <p className="mt-1 text-sm text-text-secondary">Gerencie usuários da plataforma</p>
       </div>
 
-      {/* Create user */}
+      {/* Info banner */}
       <Card>
-        <div className="flex items-center gap-2 mb-4">
-          <UserPlus className="h-5 w-5 text-accent" />
-          <h2 className="text-sm font-semibold">Criar novo usuário</h2>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div>
-            <Label>Email</Label>
-            <div className="relative">
-              <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
-              <Input value={email} onChange={setEmail} placeholder="voce@email.com" className="pl-11" disabled={creating} />
-            </div>
+        <div className="flex items-start gap-3">
+          <Shield className="h-5 w-5 text-accent shrink-0 mt-0.5" />
+          <div className="text-sm text-text-secondary">
+            <p className="font-medium text-text">Autenticação via BI Identity</p>
+            <p className="mt-1">
+              Usuários e credenciais são gerenciados pelo Brunointegrations Identity Service.
+              Novos usuários são criados automaticamente no primeiro login via SSO.
+              Aqui você pode ativar/desativar e excluir usuários locais.
+            </p>
           </div>
-          <div>
-            <Label>Nome</Label>
-            <Input value={name} onChange={setName} placeholder="Nome (opcional)" disabled={creating} />
-          </div>
-          <div>
-            <Label>Senha</Label>
-            <div className="relative">
-              <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
-              <Input type="password" value={password} onChange={setPassword} placeholder="••••••••" className="pl-11" disabled={creating} />
-            </div>
-          </div>
-        </div>
-        <div className="mt-4">
-          <Button variant="primary" onClick={createUser} disabled={creating}>
-            {creating ? <><Spinner className="h-4 w-4" /> Criando...</> : <><UserPlus className="h-4 w-4" /> Criar usuário</>}
-          </Button>
         </div>
       </Card>
 
@@ -210,21 +133,6 @@ export function AdminPage() {
                     </Button>
                     <Button
                       size="sm"
-                      variant="outline"
-                      onClick={() => toggleAdmin(u)}
-                      disabled={u.id === currentUser?.id}
-                    >
-                      {u.is_admin ? "Remover admin" : "Tornar admin"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => { setResetting(resetting === u.id ? null : u.id); setNewPassword(""); }}
-                    >
-                      <KeyRound className="h-3.5 w-3.5" /> Senha
-                    </Button>
-                    <Button
-                      size="sm"
                       variant="danger"
                       onClick={() => deleteUser(u)}
                       disabled={u.id === currentUser?.id}
@@ -233,18 +141,6 @@ export function AdminPage() {
                     </Button>
                   </div>
                 </div>
-
-                {/* Reset password inline */}
-                {resetting === u.id && (
-                  <div className="mt-4 flex items-end gap-2 rounded-lg border border-border bg-surface-elevated/50 p-3">
-                    <div className="flex-1">
-                      <Label>Nova senha</Label>
-                      <Input type="password" value={newPassword} onChange={setNewPassword} placeholder="Mínimo 6 caracteres" />
-                    </div>
-                    <Button size="sm" variant="primary" onClick={() => resetPassword(u.id)}>Redefinir</Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setResetting(null); setNewPassword(""); }}>Cancelar</Button>
-                  </div>
-                )}
               </Card>
             ))}
           </div>

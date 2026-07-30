@@ -24,12 +24,14 @@ services:
       GPCG_ENV: production
       GPCG_HOST: 0.0.0.0
       GPCG_PORT: 8787
+      BI_IDENTITY_URL: http://bi-api:3300
     expose:
       - "8787"
     volumes:
       - gpcg-data:/app/data
     networks:
       - trivestia-net
+      - bi-net
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://127.0.0.1:8787/api/health').raise_for_status()"]
       interval: 30s
@@ -42,6 +44,27 @@ services:
       resources:
         limits:
           cpus: "0.5"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gpcg-api:latest
+    container_name: gpcg-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      GPCG_ENV: production
+    volumes:
+      - gpcg-data:/app/data
+    networks:
+      - trivestia-net
+      - bi-net
+    command: ["gpcg", "worker"]
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
           memory: 512M
         reservations:
           cpus: "0.10"
@@ -54,6 +77,8 @@ services:
 
 networks:
   trivestia-net:
+    external: true
+  bi-net:
     external: true
 
 volumes:

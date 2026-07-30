@@ -30,13 +30,15 @@ class Settings(BaseSettings):
     gpcg_data_dir: str = "./data"
     gpcg_db_path: str = "./data/gpcg.db"
 
-    # ── Authentication ───────────────────────────────────────────────────────
-    # JWT secret for auth tokens. Generate with: openssl rand -hex 32
-    gpcg_jwt_secret: str = "change-me-in-production"
-    # JWT token expiry in seconds (default: 7 days)
-    gpcg_jwt_expiry: int = 7 * 24 * 3600
-    # Admin email — this user gets admin privileges on first login
+    # ── Authentication (BI Identity SSO) ─────────────────────────────────────
+    # BI Identity Service URL (Docker internal network: http://bi-api:3300)
+    bi_identity_url: str = "http://bi-api:3300"
+    # Admin email — used to seed a local User row linked to BI Identity.
+    # Actual admin authorization is determined by BI Identity roles.
     gpcg_admin_email: str = "brunomartinsss@gmail.com"
+    # Deprecated: JWT settings (kept for backward compat, no longer used)
+    gpcg_jwt_secret: str = "deprecated-sso"
+    gpcg_jwt_expiry: int = 7 * 24 * 3600
 
     # ── Gameplay Inbox ───────────────────────────────────────────────────────
     gameplay_inbox_dir: str = "/media/bruno/ToshibaHD"

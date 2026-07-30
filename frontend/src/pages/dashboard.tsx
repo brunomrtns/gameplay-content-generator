@@ -12,27 +12,36 @@ import {
   Video as VideoIcon,
   Send,
   Play,
+  Pause,
   Settings,
   FileText,
   CheckCircle2,
   XCircle,
   Clock,
+  Zap,
 } from "lucide-react";
 
 export function DashboardPage() {
   const navigate = useNavigate();
   const { data: dash, loading } = usePoll(() => api.getDashboard(), 10000);
-  const [triggering, setTriggering] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
-  const handleTrigger = async () => {
-    setTriggering(true);
+  const automationRunning = dash?.automation_status === "running";
+
+  const handleToggleAutomation = async () => {
+    setToggling(true);
     try {
-      await api.triggerRun();
-      toast.success("Geração disparada! Acompanhe em Vídeos.");
+      if (automationRunning) {
+        await api.pauseAutomation();
+        toast.success("Automação pausada. O vídeo atual será concluído.");
+      } else {
+        await api.startAutomation();
+        toast.success("Automação iniciada! Vídeos serão produzidos continuamente.");
+      }
     } catch (err: any) {
-      toast.error(err.message || "Erro ao disparar geração");
+      toast.error(err.message || "Erro ao alterar automação");
     } finally {
-      setTriggering(false);
+      setToggling(false);
     }
   };
 
@@ -61,23 +70,30 @@ export function DashboardPage() {
   const stats = [
     { label: "Gameplays", value: gameplays.total, icon: Film, sub: `${gameplays.ready} prontos`, color: "text-accent" },
     { label: "Processando", value: gameplays.processing, icon: Loader2, sub: gameplays.processing > 0 ? "em análise" : "tudo ok", color: "text-accent-warm" },
-    { label: "Vídeos gerados", value: videos.total, icon: VideoIcon, sub: `${jobs.running} rodando`, color: "text-accent" },
+    { label: "Vídeos produzidos", value: videos.total, icon: VideoIcon, sub: jobs.running > 0 ? "produzindo agora" : "em pausa", color: "text-accent" },
     { label: "Publicados", value: videos.published, icon: Send, sub: "no YouTube", color: "text-accent-warm" },
   ];
 
   return (
     <div className="space-y-8 animate-fade-in">
-      {/* Header */}
+      {/* Header com controle da automação */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="mt-1 text-sm text-text-secondary">Visão geral da sua automação de conteúdo</p>
+          <p className="mt-1 text-sm text-text-secondary">Sua máquina de produção de conteúdo</p>
         </div>
-        <Button variant="primary" size="lg" onClick={handleTrigger} disabled={triggering}>
-          {triggering ? (
-            <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Disparando...</>
+        <Button
+          variant={automationRunning ? "danger" : "primary"}
+          size="lg"
+          onClick={handleToggleAutomation}
+          disabled={toggling}
+        >
+          {toggling ? (
+            <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Aguarde...</>
+          ) : automationRunning ? (
+            <><Pause className="h-4 w-4" /> Pausar automação</>
           ) : (
-            <><Play className="h-4 w-4" /> Gerar agora</>
+            <><Play className="h-4 w-4" /> Iniciar automação</>
           )}
         </Button>
       </div>
@@ -129,22 +145,26 @@ export function DashboardPage() {
           )}
         </Card>
 
-        {/* Automation status */}
+        {/* Automation status — destaque visual */}
         <Card className="lg:col-span-1">
           <div className="flex items-center gap-2 mb-4">
-            <Settings className="h-5 w-5 text-accent" />
+            <Zap className={`h-5 w-5 ${automationRunning ? "text-accent" : "text-text-muted"}`} />
             <h2 className="text-sm font-semibold">Automação</h2>
           </div>
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-text-secondary">Status</span>
-              <Badge variant={dash?.automation_status === "running" ? "success" : "default"}>
-                {dash?.automation_status || "idle"}
+              <Badge variant={automationRunning ? "success" : "default"}>
+                {automationRunning ? (
+                  <><span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" /> Produzindo</>
+                ) : (
+                  dash?.automation_status === "paused" ? "Pausada" : "Parada"
+                )}
               </Badge>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-text-secondary">Jobs ativos</span>
-              <span className="text-sm font-medium">{jobs.running}</span>
+              <span className="text-sm text-text-secondary">Sendo produzido</span>
+              <span className="text-sm font-medium">{jobs.running} {jobs.running === 1 ? "vídeo" : "vídeos"}</span>
             </div>
             <Button variant="ghost" size="sm" className="w-full" onClick={() => navigate("/automation")}>
               Configurar automação
@@ -171,14 +191,14 @@ export function DashboardPage() {
               className="flex w-full items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm transition-all hover:border-border-bright hover:bg-surface-hover"
             >
               <Settings className="h-4 w-4 text-accent" />
-              <span>Configurar geração</span>
+              <span>Configurar produção</span>
             </button>
             <button
               onClick={() => navigate("/videos")}
               className="flex w-full items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm transition-all hover:border-border-bright hover:bg-surface-hover"
             >
               <VideoIcon className="h-4 w-4 text-accent" />
-              <span>Ver vídeos</span>
+              <span>Ver vídeos produzidos</span>
             </button>
           </div>
         </Card>
@@ -186,14 +206,18 @@ export function DashboardPage() {
 
       {/* Recent videos */}
       <div>
-        <h2 className="mb-4 text-lg font-semibold">Vídeos recentes</h2>
+        <h2 className="mb-4 text-lg font-semibold">Vídeos produzidos</h2>
         {recentVideos.length === 0 ? (
           <Card>
             <EmptyState
               icon={<VideoIcon className="h-10 w-10" />}
-              title="Nenhum vídeo ainda"
-              description="Dispare uma geração para começar a produzir conteúdo."
-              action={<Button variant="primary" onClick={handleTrigger} disabled={triggering}><Play className="h-4 w-4" /> Gerar agora</Button>}
+              title="Nenhum vídeo produzido ainda"
+              description="Inicie a automação para começar a produzir conteúdo continuamente."
+              action={
+                <Button variant="primary" onClick={handleToggleAutomation} disabled={toggling}>
+                  <Play className="h-4 w-4" /> Iniciar automação
+                </Button>
+              }
             />
           </Card>
         ) : (

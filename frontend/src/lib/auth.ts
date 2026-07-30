@@ -13,9 +13,8 @@ export interface User {
 }
 
 interface AuthState {
-  token: string | null;
   user: User | null;
-  setAuth: (token: string, user: User) => void;
+  setUser: (user: User) => void;
   logout: () => void;
   updateUser: (user: User) => void;
 }
@@ -23,10 +22,9 @@ interface AuthState {
 export const useAuth = create<AuthState>()(
   persist(
     (set) => ({
-      token: null,
       user: null,
-      setAuth: (token, user) => set({ token, user }),
-      logout: () => set({ token: null, user: null }),
+      setUser: (user) => set({ user }),
+      logout: () => set({ user: null }),
       updateUser: (user) => set({ user }),
     }),
     { name: "gpcg-auth" }

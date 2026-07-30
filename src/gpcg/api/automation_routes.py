@@ -106,14 +106,17 @@ def update_automation(
         }
 
 
-@router.post("/automation/run")
-def trigger_run(
+@router.post("/automation/start")
+def start_automation(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Trigger a manual run of the automation.
+    """Inicia a automação. A automação passa a produzir vídeos continuamente.
 
-    This creates a job using the automation's config. The worker picks it up.
+    Marca o status como 'running'. O worker verifica se há job em andamento;
+    se não houver, cria um novo automaticamente. Quando o job termina,
+    o worker cria o próximo, e assim por diante até o usuário pausar
+    ou acabarem os gameplays.
     """
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     if not auto:
@@ -131,46 +134,109 @@ def trigger_run(
     if sources == 0:
         raise HTTPException(status_code=400, detail="Envie gameplays primeiro")
 
-    # Create job via generation service
-    from gpcg.application.generation_service import GenerationService
-    from gpcg.infrastructure.llm import get_llm
-
-    service = GenerationService(llm=get_llm())
-    config = auto.config or {}
-
-    job_id = service.create_curiosity_job(
-        user_id=user.id,
-        background_game_id=config.get("background_game_id"),
-        target_duration=config.get("target_duration", 60),
-        scene_duration=config.get("scene_duration"),
-        video_format=config.get("video_format"),
-        subtitle_font=config.get("subtitle_font"),
-        subtitle_font_size=config.get("subtitle_font_size"),
-        subtitle_color=config.get("subtitle_color"),
-        subtitle_outline_color=config.get("subtitle_outline_color"),
-        subtitle_position=config.get("subtitle_position"),
-        subtitle_case=config.get("subtitle_case"),
-        subtitle_box_enabled=config.get("subtitle_box_enabled"),
-        subtitle_box_color=config.get("subtitle_box_color"),
-        subtitle_box_padding=config.get("subtitle_box_padding"),
-        subtitle_stroke_color=config.get("subtitle_stroke_color"),
-        subtitle_stroke_width=config.get("subtitle_stroke_width"),
-        subtitle_rounded_box=config.get("subtitle_rounded_box"),
-        transition_type=config.get("transition_type"),
-        transition_duration=config.get("transition_duration"),
-        voice=config.get("voice"),
-        creative_style=config.get("creative_style"),
-    )
-
-    # Update automation last_run_at
     with session_scope() as session:
         a = session.get(Automation, auto.id)
-        from datetime import datetime, timezone
-        a.last_run_at = datetime.now(timezone.utc)
         a.status = "running"
         session.flush()
 
-    return {"job_id": job_id, "status": "running"}
+    return {"status": "running"}
+
+
+@router.post("/automation/pause")
+def pause_automation(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Pausa a automação. O vídeo sendo gerado no momento continua até o fim,
+    mas nenhum novo vídeo será iniciado até que o usuário retome.
+    """
+    auto = db.query(Automation).filter(Automation.user_id == user.id).first()
+    if not auto:
+        raise HTTPException(status_code=404, detail="Automação não encontrada")
+
+    with session_scope() as session:
+        a = session.get(Automation, auto.id)
+        a.status = "paused"
+        session.flush()
+
+    return {"status": "paused"}
+
+
+def create_job_from_automation(user_id: int) -> int | None:
+    """Cria um job a partir da configuração da automação do usuário.
+
+    Chamada pelo worker quando:
+    - automation.status == 'running'
+    - não há job em andamento (queued/running) para o usuário
+
+    Retorna o job_id ou None se não puder criar (sem gameplays, sem YouTube, etc).
+    """
+    with session_scope() as session:
+        user = session.get(User, user_id)
+        if not user or not user.is_active:
+            return None
+
+        auto = session.query(Automation).filter(Automation.user_id == user_id).first()
+        if not auto or auto.status != "running":
+            return None
+
+        # Check YouTube connection
+        if not user.google_user_id:
+            return None
+
+        # Check if there are gameplays available
+        ready_count = session.query(GameplaySource).filter(
+            GameplaySource.user_id == user_id,
+            GameplaySource.ingestion_status == IngestionStatus.ready.value,
+        ).count()
+        if ready_count == 0:
+            return None
+
+        # Check if there's already a running/queued job
+        active_jobs = session.query(Job).filter(
+            Job.user_id == user_id,
+            Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
+        ).count()
+        if active_jobs > 0:
+            return None
+
+        # Create the job
+        from gpcg.application.generation_service import GenerationService
+        from gpcg.infrastructure.llm import get_llm
+
+        service = GenerationService(llm=get_llm())
+        config = auto.config or {}
+
+        job = service.create_curiosity_job(
+            user_id=user_id,
+            background_game_id=config.get("background_game_id"),
+            target_duration=config.get("target_duration", 60),
+            scene_duration=config.get("scene_duration"),
+            video_format=config.get("video_format"),
+            subtitle_font=config.get("subtitle_font"),
+            subtitle_font_size=config.get("subtitle_font_size"),
+            subtitle_color=config.get("subtitle_color"),
+            subtitle_outline_color=config.get("subtitle_outline_color"),
+            subtitle_position=config.get("subtitle_position"),
+            subtitle_case=config.get("subtitle_case"),
+            subtitle_box_enabled=config.get("subtitle_box_enabled"),
+            subtitle_box_color=config.get("subtitle_box_color"),
+            subtitle_box_padding=config.get("subtitle_box_padding"),
+            subtitle_stroke_color=config.get("subtitle_stroke_color"),
+            subtitle_stroke_width=config.get("subtitle_stroke_width"),
+            subtitle_rounded_box=config.get("subtitle_rounded_box"),
+            transition_type=config.get("transition_type"),
+            transition_duration=config.get("transition_duration"),
+            voice=config.get("voice"),
+            creative_style=config.get("creative_style"),
+        )
+
+        # Update last_run_at
+        from datetime import datetime, timezone
+        auto.last_run_at = datetime.now(timezone.utc)
+        session.flush()
+
+        return job.id
 
 
 # ── YouTube OAuth ─────────────────────────────────────────────────────────────

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.requests import Request
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from gpcg.api import routes
@@ -55,7 +57,29 @@ def create_app() -> FastAPI:
     # Serve built frontend in production
     frontend_dist = PROJECT_ROOT / "frontend" / "dist"
     if frontend_dist.exists():
-        app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+        index_html = frontend_dist / "index.html"
+
+        # Serve static assets (js, css, images, etc.) with long cache
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(frontend_dist / "assets")),
+            name="frontend-assets",
+        )
+
+        # SPA fallback: any non-API path returns index.html
+        # This allows React Router to handle client-side routing
+        @app.get("/{full_path:path}")
+        async def spa_fallback(request: Request, full_path: str):
+            # Try to serve an actual file first (favicon, icons, etc.)
+            candidate = frontend_dist / full_path
+            if full_path and candidate.is_file():
+                return FileResponse(str(candidate))
+
+            # Otherwise return index.html for SPA routing
+            if index_html.exists():
+                return FileResponse(str(index_html))
+
+            raise HTTPException(status_code=404, detail="Not found")
     else:
         @app.get("/")
         def root():

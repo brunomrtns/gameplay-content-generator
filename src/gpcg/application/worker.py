@@ -66,6 +66,8 @@ def run_worker() -> None:
             if job_id is not None:
                 _process_job(gen, job_id)
             else:
+                # No pending jobs — check if any automation needs a new job
+                _check_running_automations()
                 time.sleep(settings.gpcg_worker_poll_interval)
         except KeyboardInterrupt:
             log.info("worker interrupted, exiting")
@@ -179,3 +181,30 @@ def _strip_artifacts_after(artifacts: dict, stage: str) -> dict:
     elif stage == JobStage.tts.value:
         keep = {"content_plan_id", "script_id"}
     return {k: v for k, v in artifacts.items() if k in keep}
+
+
+def _check_running_automations() -> None:
+    """Verifica se há automações ativas que precisam de novos jobs.
+
+    Para cada automação com status='running', se não houver job em andamento
+    para aquele usuário, cria um novo job automaticamente.
+    Isso implementa o loop contínuo de produção de vídeos.
+    """
+    try:
+        from gpcg.api.automation_routes import create_job_from_automation
+        from gpcg.domain.models import Automation
+
+        with session_scope() as session:
+            running = session.query(Automation).filter(
+                Automation.status == "running"
+            ).all()
+
+        for auto in running:
+            job_id = create_job_from_automation(auto.user_id)
+            if job_id:
+                log.info(
+                    f"automação #{auto.id} (user={auto.user_id}): "
+                    f"criado job #{job_id} para produção contínua"
+                )
+    except Exception as e:
+        log.debug(f"automation check skipped: {e}")
