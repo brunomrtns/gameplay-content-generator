@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Testing / linting
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+.env.prod
+.env.local
+
+# Data (keep dir structure via .gitkeep, ignore contents)
+data/inbox/*
+!data/inbox/.gitkeep
+data/videos/*
+!data/videos/.gitkeep
+data/docs/*
+!data/docs/.gitkeep
+data/uploads/*
+!data/uploads/.gitkeep
+data/jobs/*
+!data/jobs/.gitkeep
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Model weights
+yolov8m.pt
+*.pt
+*.onnx
+
+# Devin temp files
+.devin/
+
+# Data root (keep structure, ignore contents)
+data/gameplays/
+data/gameplay_analysis/
+data/voices/
+data/gpcg.db
+data/*.db
+

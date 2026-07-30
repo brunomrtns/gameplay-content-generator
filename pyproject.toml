@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gameplay-content-generator"
+version = "0.1.0"
+description = "Local-first gameplay-to-YouTube-Shorts content generator for the Bruno Integrations ecosystem"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "UNLICENSED" }
+authors = [{ name = "Bruno" }]
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "python-multipart>=0.0.18",
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+    "httpx>=0.28",
+    "ollama>=0.4",
+    "Pillow>=10.0",
+    "pypdf>=4.0",
+    "python-docx>=1.1",
+    "watchdog>=5.0",
+    "rich>=13.0",
+    "typer>=0.15",
+    "pyjwt>=2.8",
+    "bcrypt>=4.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "httpx>=0.28",
+]
+
+[project.scripts]
+gpcg = "gpcg.cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

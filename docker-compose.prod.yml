@@ -1,0 +1,60 @@
+# =============================================================================
+# docker-compose.prod.yml — GPCG Production Stack
+#
+# Usage:   docker compose -f docker-compose.prod.yml up -d
+# VPS path: /opt/gpcg/docker-compose.prod.yml
+#
+# Services: api (serves both API + frontend on port 8787)
+#
+# No postgres — uses SQLite (data/gpcg.db) for simplicity.
+# No nginx — trivestia-nginx handles reverse proxying via /gpcg/ prefix.
+# The api container connects to trivestia-net so trivestia-nginx can reach it.
+# =============================================================================
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gpcg-api:latest
+    container_name: gpcg-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      GPCG_ENV: production
+      GPCG_HOST: 0.0.0.0
+      GPCG_PORT: 8787
+    expose:
+      - "8787"
+    volumes:
+      - gpcg-data:/app/data
+    networks:
+      - trivestia-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://127.0.0.1:8787/api/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  trivestia-net:
+    external: true
+
+volumes:
+  gpcg-data:

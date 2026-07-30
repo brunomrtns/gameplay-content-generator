@@ -1,0 +1,656 @@
+"""Script service — draft → optimize → originality check → final narration.
+
+The script must be:
+- In pt-BR
+- ~800-1000 chars (for ~60s TTS)
+- Suitable for TTS (clean punctuation, no weird symbols)
+- Retention-optimized (strong hook, good pacing, no redundancy)
+- Factually grounded in the source fact
+- ORIGINAL: anti-plagiarism check via n-gram overlap against source documents;
+  automatic rewrite if too similar (up to gpcg_max_originality_rewrites)
+
+When a CreativeMaterial is provided (from the CreativeEngine stage), the
+draft prompt is enriched with hooks/angles/punchlines/observations to steer
+the script toward a more creative, natural, and engaging tone.
+
+When a VideoCreativePlan is provided (from the EditorialPlanner stage), the
+draft uses the plan's central idea, narrative beats, tone weights, and humor
+plan to orient the script. The model is also selected from the plan.
+"""
+
+from __future__ import annotations
+
+from typing import Optional, TYPE_CHECKING
+
+from sqlalchemy.orm import Session
+
+from gpcg.config import get_settings
+from gpcg.domain.creative_plan import VideoCreativePlan
+from gpcg.domain.models import ContentPlan, Fact, Script, ScriptStatus
+from gpcg.domain.originality import check_originality
+from gpcg.infrastructure.llm import LLMClient, LLMError
+from gpcg.logging import get_logger
+
+if TYPE_CHECKING:
+    from gpcg.application.creative_engine import CreativeMaterial
+
+log = get_logger(__name__)
+
+
+DRAFT_SYSTEM = """You are a scriptwriter for a gaming YouTube Shorts channel.
+Write a narration script in Brazilian Portuguese (pt-BR) for a vertical Short.
+
+Rules:
+- Start with a STRONG hook (the first sentence must grab attention)
+- Tell ONE fact/curiosity clearly and engagingly
+- Use clean punctuation (commas, periods) — avoid special chars, emojis, asterisks
+- Speak directly to the viewer ("você", "sabia que...")
+- End with a call to action or intriguing question
+- Do NOT invent facts — only use what's provided
+- Plain text only, no markdown, no headers
+- IMPORTANT: Write enough content to fill the target duration. Do NOT write a short
+  script — aim for the target character count specified in the user prompt.
+
+CRITICAL — ANTI-PLAGIARISM:
+The fact you are telling comes from THIRD-PARTY source documents. You MUST write
+the script entirely in your own words. NEVER reuse phrasing, sentence structures,
+or distinctive word sequences from the source. Reframe the fact with your own
+narrative voice, use synonyms, reorganize the information, and add your own
+commentary/perspective. The goal is a 100% original narration that conveys the
+same fact but reads as your own creative work, not a paraphrase close to the
+source.
+
+Return JSON: {"script": "<the narration text>"}"""
+
+
+# ── Plan-oriented draft system (used when a VideoCreativePlan is provided) ───
+
+PLAN_DRAFT_SYSTEM = """You are a scriptwriter for a Brazilian gaming YouTube Shorts channel.
+Write a narration script in Brazilian Portuguese (pt-BR) for a vertical Short.
+
+You are following an EDITORIAL PLAN. Respect the plan's central idea, narrative
+beats, tone, and humor strategy. The plan is your editorial guide.
+
+## Core Rules
+
+1. CENTRAL IDEA: The script must develop the plan's central idea. Not a list of
+   facts — a perspective on the topic.
+
+2. NARRATIVE BEATS: Follow the beat structure. Each beat has a purpose:
+   - hook: grabs attention in 3 seconds
+   - context: sets up the topic
+   - development: explores the idea
+   - escalation: raises stakes or reveals something surprising
+   - payoff: delivers on the promise
+   - conclusion: lands the idea
+   The script should flow naturally through these beats — do NOT label them
+   or make the structure obvious.
+
+3. TONE: Match the tone weights. If sarcastic=0.1, don't be sarcastic. If
+   casual=0.7, speak casually. The tone is subtle — it's personality, not
+   a caricature.
+
+4. HUMOR (CRITICAL):
+   - If humor.enabled=false: NO jokes. Zero. Informative and natural only.
+   - If humor.intensity=low: occasional natural observations. NOT jokes.
+     A low-intensity observation is "isso é meio irônico" said naturally,
+     not "prepare-se para rir!".
+   - If humor.intensity=medium-low: a few well-placed comments, still mostly
+     informative.
+   - BAD HUMOR PATTERNS (NEVER use these):
+     * "Já imaginou se..." / "Imagine um jogo onde..."
+     * "Isso é mais X do que Y" / "É como se X encontrasse Y"
+     * "O jogo basicamente disse: agora é guerra!"
+     * "E aí você percebe que..."
+     * "Prepare-se para..." / "Você não vai acreditar..."
+     * Consecutive rhetorical questions
+     * Forced punchlines
+   - GOOD HUMOR comes from: observation, sarcasm, wording, understatement,
+     dry commentary, contextual humor. It arises naturally from what's being
+     said, not from a "joke structure".
+   - SILENCE IS BETTER THAN A BAD JOKE. If you can't find a natural observation,
+     just say it normally.
+
+5. NATURALNESS (CRITICAL):
+   - Write like someone SPEAKING, not writing
+   - Short sentences mixed with longer ones
+   - Varied rhythm, natural pauses
+   - No essay structure ("Neste vídeo iremos explorar...")
+   - No over-explanation
+   - No generic YouTube presenter tone
+   - No unnecessary metaphors
+   - No excess adjectives
+   - Like someone telling you about something they find interesting
+
+6. FACTUAL ACCURACY (CRITICAL — ANTI-HALLUCINATION):
+   - You are writing about a REAL game. The FACT TO TELL is the ONLY verified
+     information you have about this topic.
+   - Do NOT invent gameplay mechanics, features, or details that are not in
+     the FACT TO TELL. If the fact says "you can scrape the back of cars with
+     your skateboard", you CANNOT invent that "you can also use the skateboard
+     to block punches" or "attack enemies with spins" — those are HALLUCINATIONS.
+   - You MAY add commentary, context, and opinions about the fact, but you
+     may NOT describe game mechanics, abilities, or features that were not
+     provided to you.
+   - If you want to mention something about the game, only mention what is
+     explicitly stated in the FACT TO TELL.
+   - Adding plausible-sounding but invented gameplay details is the WORST
+     error you can make — it misleads viewers and damages credibility.
+   - When in doubt, say LESS. A shorter script that's accurate is infinitely
+     better than a longer script with invented content.
+
+7. ANTI-PLAGIARISM: The fact comes from third-party sources. Write entirely in
+   your own words. Never reuse phrasing from the source.
+
+8. FORMAT: Plain text, no markdown, no headers. Clean punctuation for TTS.
+   Target the character count specified in the user prompt.
+
+Return JSON: {"script": "<the narration text>"}"""
+
+
+# ── Revision system (used when the ScriptCritic requests a revision) ─────────
+
+REVISION_SYSTEM = """You are revising a narration script for a Brazilian gaming YouTube Shorts channel.
+A script critic reviewed the previous draft and found issues. Your job is to
+produce an improved version that addresses the critic's feedback.
+
+## Rules
+
+1. Address each issue the critic raised. If the critic says "REMOVE this passage",
+   REMOVE it. Do NOT replace it with another joke or comment. Silence > bad content.
+
+2. Maintain the central idea and narrative arc from the editorial plan.
+
+3. Keep what works. Don't rewrite the whole script — fix the specific problems.
+
+4. For humor issues: if the critic flagged a joke as forced or bad, REMOVE it.
+   Do NOT try to write a "better" joke. Just say the thing normally.
+
+5. For naturalness issues: rewrite the flagged phrases to sound more spoken,
+   less written. Shorter sentences, more direct, less explanatory.
+
+6. For structure issues: ensure there's a clear hook → development → conclusion
+   arc with a central idea.
+
+7. For factual accuracy issues: REMOVE any invented gameplay mechanics, features,
+   or details that are not in the FACT TO TELL. Do NOT replace them with other
+   invented details — just remove them. If the script said "you can use the
+   skateboard to block punches" and that's not in the fact, REMOVE that sentence
+   entirely. Do NOT invent a replacement mechanic.
+
+8. Keep it in pt-BR. Plain text. Clean punctuation for TTS.
+
+Return JSON: {"script": "<revised narration>"}"""
+
+
+OPTIMIZE_SYSTEM = """You are a script optimizer for YouTube Shorts TTS narration.
+Given a draft script, improve it for:
+- Retention (tighten pacing, remove redundancy)
+- TTS suitability (clean punctuation, natural pauses, no hard-to-pronounce symbols)
+- Hook strength (make the first line punchier if needed)
+- Duration (match the target character count specified in the user prompt)
+- Factual accuracy (do NOT add new facts; only rephrase existing ones)
+- FACTUAL ACCURACY (CRITICAL): Do NOT invent gameplay mechanics, features, or
+  details that were not in the draft. When expanding the script to reach the
+  target length, add commentary, context, or opinions — NOT new factual claims
+  about game mechanics. If the draft says "you can scrape cars with your
+  skateboard", you CANNOT add "you can also use it to block punches" — that's
+  a hallucination. Expand with commentary, not invented facts.
+- ORIGINALITY (if any phrase sounds like it could be from a third-party source,
+  rewrite it completely with different words and sentence structure)
+- LENGTH: If the draft is too short, EXPAND it with more commentary, opinions,
+  or context about the existing fact. Do NOT invent new game mechanics to fill
+  space. Do NOT shorten an already-short script.
+
+Keep it in pt-BR. Plain text only.
+
+Return JSON: {"script": "<optimized narration>", "changes": "<brief list of changes>"}"""
+
+
+REWRITE_SYSTEM = """You are a script rewriter specializing in anti-plagiarism rewrites.
+The given script is too similar to third-party source text. Rewrite it COMPLETELY
+so that it conveys the same fact and narrative arc but uses entirely different:
+- Vocabulary (use synonyms and alternative expressions)
+- Sentence structure (reorder clauses, change voice, merge/split sentences)
+- Narrative framing (rephrase the hook, change transitions, reorder ideas)
+
+Constraints:
+- Keep it in pt-BR
+- Keep the same FACT (do not invent or omit information)
+- Keep clean punctuation for TTS
+- Match the target character count specified in the user prompt
+- The result must read as 100% original work, not a paraphrase
+
+Return JSON: {"script": "<completely rewritten narration>"}"""
+
+
+class ScriptService:
+    def __init__(self, llm: Optional[LLMClient] = None) -> None:
+        self.llm = llm
+        self.settings = get_settings()
+
+    def generate_script(
+        self,
+        session: Session,
+        content_plan_id: int,
+        *,
+        creative_material: Optional["CreativeMaterial"] = None,
+        creative_plan: Optional[VideoCreativePlan] = None,
+        critic_feedback: Optional[str] = None,
+        previous_script: Optional[str] = None,
+    ) -> Optional[Script]:
+        """Generate draft → optimize → final script for a content plan.
+
+        When `creative_material` is provided (non-None and successful), the
+        draft prompt is enriched with hooks/angles/punchlines/observations
+        produced by the CreativeEngine. This steers the script toward a more
+        creative and natural tone without changing the underlying LLM.
+
+        When `creative_plan` is provided (non-None and successful), the draft
+        uses the plan's central idea, narrative beats, tone, and humor strategy.
+        The LLM model is also selected from the plan (gemma3 vs qwen3).
+
+        When `critic_feedback` + `previous_script` are provided, this is a
+        REVISION pass — the script is regenerated using the critic's feedback
+        instead of drafting from scratch.
+        """
+        plan = session.get(ContentPlan, content_plan_id)
+        if plan is None:
+            raise ValueError(f"content plan #{content_plan_id} not found")
+
+        fact_text = ""
+        if plan.fact_id:
+            fact = session.get(Fact, plan.fact_id)
+            if fact:
+                fact_text = fact.claim
+
+        llm = self.llm or LLMClient()
+        s = self.settings
+
+        # Determine the model to use
+        # Priority: creative_plan.model > creative_material model > default
+        model_override = None
+        if creative_plan is not None and creative_plan.success and creative_plan.model.model:
+            model_override = creative_plan.model.model
+            log.info(f"using plan-recommended model: {model_override}")
+
+        # Build context — game name if game-specific, else "general curiosity"
+        if plan.game is not None:
+            context_line = f"Game: {plan.game.canonical_name}\n"
+        elif plan.background_game is not None:
+            context_line = (
+                f"Context: General curiosity (NOT about the game)\n"
+                f"Background gameplay: {plan.background_game.canonical_name} (just visual filler)\n"
+            )
+        else:
+            context_line = "Context: General curiosity\n"
+
+        # ── Revision pass (critic feedback) ────────────────────────────────
+        if critic_feedback and previous_script:
+            revision_prompt = self._build_revision_prompt(
+                plan, fact_text, previous_script, critic_feedback, creative_plan, s
+            )
+            try:
+                rev_data = llm.chat_json(
+                    REVISION_SYSTEM, revision_prompt,
+                    model=model_override,
+                    temperature=0.6, max_tokens=2500,
+                )
+                revised = (rev_data.get("script") or "").strip()
+                if not revised:
+                    log.error("empty revision script")
+                    return None
+                # Skip optimize for revisions — the critic already reviewed
+                final = revised
+                char_count = len(final)
+                # Still run originality check
+                source_texts, fact_claims = self._collect_sources(session, plan)
+                all_sources = list(source_texts)
+                if fact_claims:
+                    all_sources.append(("extracted_facts", " ".join(fact_claims)))
+                report = check_originality(
+                    final, all_sources,
+                    n=s.gpcg_originality_ngram_size,
+                    threshold=s.gpcg_originality_threshold,
+                )
+                script = Script(
+                    content_plan_id=content_plan_id,
+                    draft=previous_script,
+                    optimized=revised,
+                    final=final,
+                    status=ScriptStatus.final.value,
+                    char_count=char_count,
+                    originality_score=report.score,
+                    originality_report=report.to_dict(),
+                    rewrite_count=0,
+                )
+                session.add(script)
+                session.flush()
+                log.info(f"revised script #{script.id}: {char_count} chars, originality={report.score:.1f}")
+                return script
+            except LLMError as e:
+                log.error(f"revision failed: {e}")
+                return None
+
+        # ── Draft ──────────────────────────────────────────────────────────
+        # Choose system prompt: plan-oriented if plan available, else legacy
+        if creative_plan is not None and creative_plan.success:
+            draft_system = PLAN_DRAFT_SYSTEM
+            draft_prompt = self._build_plan_draft_prompt(
+                plan, fact_text, creative_plan, s
+            )
+        else:
+            draft_system = DRAFT_SYSTEM
+            draft_prompt = (
+                f"{context_line}"
+                f"Topic: {plan.topic}\n"
+                f"Tone: {plan.tone}\n"
+                f"Energy: {plan.energy}\n"
+                f"Hook idea: {plan.hook}\n"
+                f"Fact to tell: {fact_text}\n"
+                f"Target: {s.gpcg_narration_min_chars}-{s.gpcg_narration_max_chars} characters, "
+                f"~{plan.target_duration} seconds of TTS narration.\n"
+                f"CRITICAL: The script MUST be at least {s.gpcg_narration_min_chars} characters long. "
+                f"Do NOT write a short script. Expand with context, examples, and commentary "
+                f"about the fact to fill the time."
+            )
+
+        # Enrich with creative material when available
+        if creative_material is not None and creative_material.success:
+            draft_prompt += self._format_creative_material(creative_material)
+        try:
+            draft_data = llm.chat_json(
+                draft_system, draft_prompt,
+                model=model_override,
+                temperature=0.7, max_tokens=2500,
+            )
+        except LLMError as e:
+            log.error(f"draft generation failed: {e}")
+            return None
+        draft = (draft_data.get("script") or "").strip()
+        if not draft:
+            log.error("empty draft script")
+            return None
+
+        # ── Optimize ────────────────────────────────────────────────────────
+        opt_prompt = (
+            f"Draft script:\n\n{draft}\n\n"
+            f"Optimize for ~{plan.target_duration}s Short, tone={plan.tone}, "
+            f"target {s.gpcg_narration_min_chars}-{s.gpcg_narration_max_chars} characters. "
+            f"Current length: {len(draft)} chars. "
+            f"{'TOO SHORT — must expand to at least ' + str(s.gpcg_narration_min_chars) + ' chars.' if len(draft) < s.gpcg_narration_min_chars else ''}"
+        )
+        try:
+            opt_data = llm.chat_json(OPTIMIZE_SYSTEM, opt_prompt, temperature=0.4, max_tokens=2500)
+            optimized = (opt_data.get("script") or "").strip()
+            if not optimized:
+                optimized = draft
+        except LLMError as e:
+            log.warning(f"optimization failed, using draft: {e}")
+            optimized = draft
+
+        # Choose final (prefer optimized if within char bounds, else draft)
+        final = optimized
+        char_count = len(final)
+        if char_count < s.gpcg_narration_min_chars or char_count > s.gpcg_narration_max_chars:
+            # Try draft if it's closer
+            if s.gpcg_narration_min_chars <= len(draft) <= s.gpcg_narration_max_chars:
+                final = draft
+                char_count = len(final)
+
+        # ── Anti-plagiarism: originality check + automatic rewrite ─────────
+        # Compare the final script against source documents + fact claims.
+        # If too similar, rewrite via LLM and re-check (up to max_rewrites).
+        source_texts, fact_claims = self._collect_sources(session, plan)
+        ngram_n = s.gpcg_originality_ngram_size
+        threshold = s.gpcg_originality_threshold
+        rewrite_count = 0
+        max_rewrites = s.gpcg_max_originality_rewrites
+
+        # Include fact claims as a source to check against
+        all_sources = list(source_texts)
+        if fact_claims:
+            all_sources.append(("extracted_facts", " ".join(fact_claims)))
+        report = check_originality(final, all_sources, n=ngram_n, threshold=threshold)
+
+        log.info(
+            f"originality check: score={report.score:.1f} overlap={report.max_overlap:.4f} "
+            f"source={report.matched_source} matches={len(report.longest_matches)}"
+        )
+
+        while not report.is_original and rewrite_count < max_rewrites:
+            rewrite_count += 1
+            log.warning(
+                f"script not original (score={report.score:.1f}), "
+                f"rewriting attempt {rewrite_count}/{max_rewrites}"
+            )
+            # Show the LLM what matched so it knows what to avoid
+            matches_str = "\n".join(f"- \"{m}\"" for m in report.longest_matches[:5])
+            rewrite_prompt = (
+                f"Current script:\n\n{final}\n\n"
+                f"Source text it's too similar to (from '{report.matched_source}'):\n"
+                f"{(dict(source_texts).get(report.matched_source, '')[:1500])}\n\n"
+                f"Matching phrases to avoid:\n{matches_str}\n\n"
+                f"Rewrite COMPLETELY. Same fact, totally different words. "
+                f"Target {s.gpcg_narration_min_chars}-{s.gpcg_narration_max_chars} chars."
+            )
+            try:
+                rw_data = llm.chat_json(REWRITE_SYSTEM, rewrite_prompt, temperature=0.8, max_tokens=1500)
+                rewritten = (rw_data.get("script") or "").strip()
+                if rewritten and len(rewritten) >= 100:
+                    final = rewritten
+                    char_count = len(final)
+                    # Re-check
+                    report = check_originality(final, all_sources, n=ngram_n, threshold=threshold)
+                    log.info(
+                        f"rewrite {rewrite_count}: score={report.score:.1f} "
+                        f"overlap={report.max_overlap:.4f}"
+                    )
+                else:
+                    log.warning("rewrite produced empty/short result, keeping previous")
+                    break
+            except LLMError as e:
+                log.error(f"rewrite failed: {e}")
+                break
+
+        # Final verdict
+        if not report.is_original:
+            log.warning(
+                f"script still not fully original after {rewrite_count} rewrite(s) "
+                f"(score={report.score:.1f}). Proceeding but flagging for review."
+            )
+
+        script = Script(
+            content_plan_id=content_plan_id,
+            draft=draft,
+            optimized=optimized,
+            final=final,
+            status=ScriptStatus.final.value,
+            char_count=char_count,
+            originality_score=report.score,
+            originality_report=report.to_dict(),
+            rewrite_count=rewrite_count,
+        )
+        session.add(script)
+        session.flush()
+        log.info(
+            f"script #{script.id} for plan #{content_plan_id}: {char_count} chars, "
+            f"originality={report.score:.1f} (rewrites={rewrite_count})"
+        )
+        return script
+
+    def _format_creative_material(self, material: "CreativeMaterial") -> str:
+        """Format CreativeMaterial as an extra prompt section for the draft LLM.
+
+        The material is offered as INSPIRATION, not as text to copy. The
+        anti-plagiarism check still runs after, so originality is enforced.
+        """
+        def _bullet_list(items: list[str], limit: int = 5) -> str:
+            if not items:
+                return "  (nenhum)\n"
+            return "".join(f"  - {it}\n" for it in items[:limit])
+
+        return (
+            f"\nMATERIAL CRIATIVO (use como inspiração de tom/estilo, NÃO copie verbatim):\n"
+            f"Hooks sugeridos:\n{_bullet_list(material.hooks)}"
+            f"Ângulos criativos:\n{_bullet_list(material.angles)}"
+            f"Punchlines:\n{_bullet_list(material.punchlines)}"
+            f"Observações:\n{_bullet_list(material.observations)}"
+            f"Escolha o melhor hook, desenvolva o melhor ângulo, e termine "
+            f"com a punchline mais marcante. Mantenha o tom natural e espontâneo.\n"
+        )
+
+    def _build_plan_draft_prompt(
+        self,
+        plan: ContentPlan,
+        fact_text: str,
+        creative_plan: VideoCreativePlan,
+        s,
+    ) -> str:
+        """Build the draft prompt oriented by the VideoCreativePlan."""
+        # Context line
+        if plan.game is not None:
+            context_line = f"Game: {plan.game.canonical_name}\n"
+        elif plan.background_game is not None:
+            context_line = (
+                f"Context: General curiosity (NOT about the game)\n"
+                f"Background gameplay: {plan.background_game.canonical_name} (visual filler only)\n"
+            )
+        else:
+            context_line = "Context: General curiosity\n"
+
+        parts = [
+            context_line,
+            f"VIDEO TYPE: {creative_plan.video_type}",
+            f"",
+            f"CENTRAL IDEA: {creative_plan.central_idea}",
+            f"",
+            f"FACT TO TELL: {fact_text}",
+            f"",
+            f"TARGET: {s.gpcg_narration_min_chars}-{s.gpcg_narration_max_chars} characters, "
+            f"~{plan.target_duration} seconds of TTS narration.",
+            f"CRITICAL: The script MUST be at least {s.gpcg_narration_min_chars} characters long.",
+            f"",
+        ]
+
+        # Narrative beats
+        if creative_plan.narrative_beats:
+            parts.append("NARRATIVE BEATS (follow this structure, but don't label it):")
+            for beat in creative_plan.narrative_beats:
+                parts.append(f"  {beat.label}: {beat.description}")
+            parts.append("")
+
+        # Tone
+        tone = creative_plan.tone
+        parts.append(f"TONE WEIGHTS: informative={tone.informative} casual={tone.casual} "
+                     f"sarcastic={tone.sarcastic} comedic={tone.comedic} "
+                     f"dramatic={tone.dramatic} energetic={tone.energetic}")
+        parts.append("")
+
+        # Humor plan
+        humor = creative_plan.humor
+        parts.append(f"HUMOR PLAN:")
+        parts.append(f"  enabled: {humor.enabled}")
+        if humor.enabled:
+            parts.append(f"  intensity: {humor.intensity}")
+            parts.append(f"  styles: {', '.join(humor.styles) if humor.styles else 'any'}")
+            parts.append(f"  frequency: {humor.frequency}")
+            parts.append(f"  REMEMBER: low intensity = natural observations, NOT jokes.")
+            parts.append(f"  REMEMBER: SILENCE > BAD JOKE. If no natural observation, just say it normally.")
+        else:
+            parts.append(f"  NO HUMOR. Zero jokes. Informative and natural only.")
+        parts.append("")
+
+        # Original hook idea from content plan (as inspiration)
+        if plan.hook:
+            parts.append(f"HOOK INSPIRATION (from content planner): {plan.hook}")
+            parts.append(f"Use this as inspiration, but write your own hook that fits the central idea.")
+            parts.append("")
+
+        parts.append("Write the narration script now. Follow the editorial plan. Return JSON.")
+
+        return "\n".join(parts)
+
+    def _build_revision_prompt(
+        self,
+        plan: ContentPlan,
+        fact_text: str,
+        previous_script: str,
+        critic_feedback: str,
+        creative_plan: Optional[VideoCreativePlan],
+        s,
+    ) -> str:
+        """Build the revision prompt using the critic's feedback."""
+        parts = [
+            f"PREVIOUS SCRIPT (to be revised):",
+            f"---",
+            f"{previous_script}",
+            f"---",
+            f"",
+            f"CRITIC FEEDBACK:",
+            f"{critic_feedback}",
+            f"",
+            f"FACT TO TELL (the ONLY verified information): {fact_text}",
+            f"",
+            f"CRITICAL — ANTI-HALLUCINATION:",
+            f"The FACT TO TELL above is the ONLY verified information about this topic.",
+            f"If the critic flagged invented gameplay mechanics, features, or details,",
+            f"REMOVE them entirely. Do NOT replace them with other invented details.",
+            f"Commentary and opinions about the fact are OK — invented mechanics are NOT.",
+            f"",
+            f"TARGET: {s.gpcg_narration_min_chars}-{s.gpcg_narration_max_chars} characters.",
+            f"",
+        ]
+
+        if creative_plan is not None and creative_plan.success:
+            parts.append(f"CENTRAL IDEA: {creative_plan.central_idea}")
+            parts.append(f"HUMOR: enabled={creative_plan.humor.enabled} intensity={creative_plan.humor.intensity}")
+            parts.append("")
+
+        parts.append("Produce the revised script. Address the critic's issues. Return JSON.")
+
+        return "\n".join(parts)
+
+    def _collect_sources(
+        self, session: Session, plan: ContentPlan
+    ) -> tuple[list[tuple[str, str]], list[str]]:
+        """Collect source texts (documents) and fact claims for originality checking.
+
+        For game-specific plans: loads docs/facts for that game.
+        For general curiosity plans (game_id=None): loads general docs/facts (game_id IS NULL).
+        """
+        from gpcg.domain.models import Document, Fact
+        from sqlalchemy import select
+
+        # Load documents — game-specific or general (game_id IS NULL)
+        if plan.game_id is not None:
+            docs = session.execute(
+                select(Document).where(Document.game_id == plan.game_id)
+            ).scalars().all()
+            facts = session.execute(
+                select(Fact).where(Fact.game_id == plan.game_id)
+            ).scalars().all()
+        else:
+            # General curiosity — load general docs/facts (game_id IS NULL)
+            docs = session.execute(
+                select(Document).where(Document.game_id.is_(None))
+            ).scalars().all()
+            facts = session.execute(
+                select(Fact).where(Fact.game_id.is_(None))
+            ).scalars().all()
+
+        source_texts: list[tuple[str, str]] = []
+        for doc in docs:
+            try:
+                from gpcg.infrastructure.document_parser import parse_document, DocumentParseError
+                text = parse_document(doc.file_path, doc.file_type)
+                source_texts.append((doc.filename, text))
+            except DocumentParseError:
+                continue
+            except Exception as e:
+                log.debug(f"could not load document {doc.filename}: {e}")
+                continue
+
+        fact_claims = [f.claim for f in facts if f.claim]
+
+        return source_texts, fact_claims
