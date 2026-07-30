@@ -24,7 +24,17 @@ def _ensure_engine():
             settings.db_url,
             echo=False,
             connect_args={"check_same_thread": False} if settings.db_url.startswith("sqlite") else {},
+            pool_pre_ping=True,
         )
+        # Enable WAL mode for SQLite to allow concurrent reads during writes
+        if settings.db_url.startswith("sqlite"):
+            from sqlalchemy import event
+            @event.listens_for(_engine, "connect")
+            def set_sqlite_pragma(dbapi_conn, conn_record):
+                cursor = dbapi_conn.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=5000")
+                cursor.close()
         _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False, expire_on_commit=False)
     return _engine
 

@@ -47,12 +47,11 @@ def get_automation(
     """Get the current user's automation config."""
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     if not auto:
-        # Auto-create
-        with session_scope() as session:
-            auto = Automation(user_id=user.id, name="Minha Automação", config={}, upload_config={})
-            session.add(auto)
-            session.flush()
-            session.refresh(auto)
+        # Auto-create using the same session (SQLite doesn't support concurrent writes)
+        auto = Automation(user_id=user.id, name="Minha Automação", config={}, upload_config={})
+        db.add(auto)
+        db.commit()
+        db.refresh(auto)
     return {
         "id": auto.id,
         "name": auto.name,
