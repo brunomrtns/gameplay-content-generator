@@ -42,6 +42,38 @@ def worker() -> None:
     run_worker()
 
 
+def remote_worker(
+    vps_url: str = typer.Option("", "--vps-url", help="VPS API URL (e.g., https://brunointegrations.com/gpcg)"),
+    worker_id: str = typer.Option("", "--worker-id", help="Unique worker ID (e.g., home-pc)"),
+    api_key: str = typer.Option("", "--api-key", help="Worker API key (shared secret)"),
+    storage_dir: str = typer.Option("", "--storage-dir", help="Local storage directory for gameplay files"),
+    capabilities: str = typer.Option("", "--capabilities", help="Comma-separated capabilities (e.g., mapping,generation)"),
+) -> None:
+    """Run the remote worker (Compute Plane — connects to VPS Control Plane).
+
+    The worker registers with the VPS, sends heartbeats, polls for jobs,
+    downloads gameplays, runs processing locally (GPU), and reports results.
+
+    All config can be passed via CLI flags or environment variables:
+      GPCG_VPS_URL, GPCG_WORKER_ID, GPCG_WORKER_API_KEY,
+      GPCG_WORKER_STORAGE, GPCG_WORKER_CAPABILITIES
+
+    Examples:
+        gpcg remote-worker --vps-url https://brunointegrations.com/gpcg \\
+            --worker-id home-pc --api-key <secret>
+    """
+    from gpcg.worker.remote_worker import run_remote_worker
+
+    configure_logging()
+    run_remote_worker(
+        vps_url=vps_url,
+        worker_id=worker_id,
+        api_key=api_key,
+        storage_dir=storage_dir,
+        capabilities=capabilities,
+    )
+
+
 def serve() -> None:
     """Run the FastAPI server (serves API + built frontend)."""
     configure_logging()

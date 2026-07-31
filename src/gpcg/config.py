@@ -175,9 +175,14 @@ class Settings(BaseSettings):
     # Pass threshold (0-100). Below this, script is revised.
     gpcg_script_critic_pass_threshold: float = 70.0
 
-    # ── Worker ───────────────────────────────────────────────────────────────
+    # ── Worker (Compute Plane) ───────────────────────────────────────────────
     gpcg_worker_poll_interval: int = 5
     gpcg_worker_concurrency: int = 1
+    # Shared secret for worker API authentication. Workers send this as
+    # X-Worker-Key header. If empty, worker endpoints are disabled.
+    gpcg_worker_api_key: str = ""
+    # Seconds without heartbeat before a worker is considered offline.
+    gpcg_worker_heartbeat_timeout: int = 30
 
     # ── YouTube Upload (google-integration service) ──────────────────────────
     # Master switch for automatic YouTube upload after QA passes.
@@ -247,6 +252,18 @@ class Settings(BaseSettings):
     @property
     def uploads_dir(self) -> Path:
         p = self.data_dir / "uploads"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    @property
+    def temp_uploads_dir(self) -> Path:
+        """Temporary storage for gameplay uploads on VPS.
+
+        Files here are deleted after a worker confirms download (checksum OK).
+        This is the only place the VPS stores heavy media files — and only
+        transiently. All permanent storage is on the worker's local disk.
+        """
+        p = self.data_dir / "temp_uploads"
         p.mkdir(parents=True, exist_ok=True)
         return p
 

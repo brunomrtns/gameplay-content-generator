@@ -162,12 +162,16 @@ def list_sources(
             "codec": s.codec,
             "has_audio": s.has_audio,
             "ingestion_status": s.ingestion_status,
+            "processing_status": s.processing_status,
             "resolution_method": s.resolution_method,
             "resolution_confidence": s.resolution_confidence,
             "resolution_notes": s.resolution_notes,
             "capture_source": s.capture_source,
             "recorded_at": s.recorded_at.isoformat() if s.recorded_at else None,
             "created_at": s.created_at.isoformat() if s.created_at else None,
+            "file_size": s.file_size,
+            "downloaded_at": s.downloaded_at.isoformat() if s.downloaded_at else None,
+            "analysis_status": s.analysis_status,
         }
         for s in sources
     ]
@@ -211,15 +215,19 @@ def upload_gameplay(
 ):
     """Upload a gameplay recording file for the current user.
 
-    Saves the file to data/gameplays/{user_id}/ and creates a GameplaySource
-    record. The ingestion service will process it (probe media metadata,
-    attempt game resolution).
+    Saves the file to temp_uploads/ (VPS temporary storage) and creates a
+    GameplaySource record with processing_status=uploaded. The file stays
+    on the VPS only until a worker downloads it (then it's deleted).
+
+    A mapping job can be created separately via /api/gameplays/{id}/create-mapping-job.
     """
     import hashlib
     from gpcg.config import get_settings
+    from gpcg.domain.models import GameplayProcessingStatus
 
     settings = get_settings()
-    upload_dir = Path(settings.gpcg_data_dir) / "gameplays" / str(user.id)
+    # Use temp_uploads_dir — files here are deleted after worker confirms download
+    upload_dir = settings.temp_uploads_dir / f"user_{user.id}"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     # Read and hash
@@ -234,26 +242,32 @@ def upload_gameplay(
     if existing:
         raise HTTPException(409, "Este arquivo já foi enviado")
 
-    # Save file
+    # Save file to temp storage
     filename = file.filename or "upload.mp4"
     safe_name = f"{file_hash[:8]}_{filename}"
     file_path = upload_dir / safe_name
     file_path.write_bytes(content)
+
+    # storage_key is relative to temp_uploads_dir — opaque to the application
+    storage_key = f"user_{user.id}/{safe_name}"
 
     # Create source record
     with session_scope() as session:
         source = GameplaySource(
             user_id=user.id,
             file_path=str(file_path),
+            storage_key=storage_key,
             filename=filename,
             file_hash=file_hash,
             file_size=len(content),
             ingestion_status=IngestionStatus.discovered.value,
+            processing_status=GameplayProcessingStatus.uploaded.value,
         )
         session.add(source)
         session.flush()
 
-        # Trigger async probing (runs in background — non-fatal if it fails)
+        # Trigger async probing (lightweight: FFprobe for media metadata only.
+        # Heavy analysis (VLM, ASR) is done by the worker, not the VPS.)
         try:
             svc = IngestionService()
             svc._ingest_file(file_path)
@@ -263,7 +277,8 @@ def upload_gameplay(
         return {
             "id": source.id,
             "filename": source.filename,
-            "status": source.ingestion_status,
+            "processing_status": source.processing_status,
+            "ingestion_status": source.ingestion_status,
             "file_size": source.file_size,
         }
 

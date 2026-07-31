@@ -5,6 +5,7 @@ import { Layout } from "@/components/layout";
 import { LoginPage } from "@/pages/login";
 import { DashboardPage } from "@/pages/dashboard";
 import { ContentPage } from "@/pages/content";
+import { JobsPage } from "@/pages/jobs";
 import { AutomationPage } from "@/pages/automation";
 import { VideosPage } from "@/pages/videos";
 import { AdminPage } from "@/pages/admin";
@@ -80,6 +81,7 @@ const router = createBrowserRouter(
           children: [
             { path: "/dashboard", element: <DashboardPage /> },
             { path: "/content", element: <ContentPage /> },
+            { path: "/jobs", element: <JobsPage /> },
             { path: "/automation", element: <AutomationPage /> },
             { path: "/videos", element: <VideosPage /> },
             { path: "/admin", element: <AdminRoute /> },

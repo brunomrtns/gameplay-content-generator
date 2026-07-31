@@ -1,0 +1,60 @@
+# systemd service file for the GPCG remote worker (Compute Plane)
+#
+# This runs on the LOCAL PC with GPU, not on the VPS.
+# It connects to the VPS API and processes jobs (mapping, generation).
+#
+# INSTALL:
+#   1. Copy to: ~/.config/systemd/user/gpcg-worker.service
+#   2. Edit paths/credentials below to match your setup
+#   3. Reload systemd:  systemctl --user daemon-reload
+#   4. Enable + start:  systemctl --user enable --now gpcg-worker
+#   5. Check logs:      journalctl --user -u gpcg-worker -f
+#
+# The worker needs:
+#   - GPCG venv with all dependencies (including GPU ones: torch, ultralytics)
+#   - Ollama running locally (for VLM/LLM)
+#   - video-generate project installed (for rendering)
+#   - HD mounted at /media/bruno/ToshibaHD (or wherever GPCG_WORKER_STORAGE points)
+
+[Unit]
+Description=GPCG Remote Worker (Compute Plane)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/bruno/Desenvolvimento/brunointegrations/gameplay-content-generator
+
+# Use the project venv
+ExecStart=/home/bruno/Desenvolvimento/brunointegrations/gameplay-content-generator/.venv/bin/gpcg remote-worker
+
+# Environment — configure these!
+Environment=GPCG_VPS_URL=https://brunointegrations.com/gpcg
+Environment=GPCG_WORKER_ID=home-pc
+Environment=GPCG_WORKER_API_KEY=CHANGE_ME
+Environment=GPCG_WORKER_STORAGE=/media/bruno/ToshibaHD/gpcg
+Environment=GPCG_WORKER_CAPABILITIES=mapping,generation
+
+# Local AI services
+Environment=OLLAMA_HOST=http://localhost:11434
+Environment=GPCG_GAMEPLAY_VISION_MODEL=gemma3:12b
+Environment=GPCG_GAMEPLAY_ASR_DEVICE=cuda
+
+# video-generate integration
+Environment=VIDEO_GENERATE_DIR=/home/bruno/Desenvolvimento/brunointegrations/video-generate
+Environment=AI_MEDIA_CORE_DIR=/home/bruno/Desenvolvimento/brunointegrations/ai-media-core/src
+Environment=VIDEO_GENERATE_PYTHON=/home/bruno/Desenvolvimento/brunointegrations/video-generate/.venv/bin/python
+
+# Restart on failure (network issues, VPS restarts, etc.)
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gpcg-worker
+
+[Install]
+WantedBy=default.target

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { usePoll } from "@/hooks/usePoll";
 import { Badge, Button, Card, Spinner, EmptyState } from "@/components/ui";
+import { WorkerStatusCard } from "@/components/worker-status";
 import { fmtDate, fmtDuration } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -117,6 +118,9 @@ export function DashboardPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
+        {/* Worker status card */}
+        <WorkerStatusCard />
+
         {/* YouTube card */}
         <Card className="lg:col-span-1">
           <div className="flex items-center gap-2 mb-4">

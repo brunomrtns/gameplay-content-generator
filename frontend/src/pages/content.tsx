@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import { api } from "@/lib/api";
 import { usePoll } from "@/hooks/usePoll";
 import { Badge, Button, Card, Spinner, EmptyState } from "@/components/ui";
-import { fmtDuration } from "@/lib/utils";
+import { fmtDuration, fmtBytes } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   Upload,
@@ -13,6 +13,8 @@ import {
   Loader2,
   Monitor,
   Clock,
+  Cpu,
+  Server,
 } from "lucide-react";
 
 const STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string }> = {
@@ -22,6 +24,20 @@ const STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning"
   error: { variant: "error", label: "Erro" },
   needs_review: { variant: "warning", label: "Revisão" },
   duplicate: { variant: "default", label: "Duplicado" },
+};
+
+const PROCESSING_STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string }> = {
+  uploading: { variant: "info", label: "Enviando" },
+  uploaded: { variant: "info", label: "Aguardando worker" },
+  waiting_worker: { variant: "info", label: "Na fila" },
+  downloading: { variant: "info", label: "Baixando" },
+  downloaded: { variant: "info", label: "Baixado" },
+  mapping: { variant: "info", label: "Mapeando" },
+  mapped: { variant: "success", label: "Mapeado" },
+  ready: { variant: "success", label: "Pronto" },
+  generating: { variant: "info", label: "Gerando vídeo" },
+  finished: { variant: "success", label: "Vídeo pronto" },
+  failed: { variant: "error", label: "Falhou" },
 };
 
 export function ContentPage() {
@@ -63,6 +79,15 @@ export function ContentPage() {
       toast.error(err.message);
     } finally {
       setScanning(false);
+    }
+  };
+
+  const handleCreateMappingJob = async (sourceId: number, filename: string) => {
+    try {
+      await api.createMappingJob(sourceId);
+      toast.success(`Mapeamento solicitado para "${filename}". O worker processará em breve.`);
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao solicitar mapeamento");
     }
   };
 
@@ -156,15 +181,21 @@ export function ContentPage() {
             {sources.map((s: any) => {
               const cfg = STATUS_CONFIG[s.ingestion_status] || STATUS_CONFIG.discovered;
               const isProcessing = ["discovered", "probing"].includes(s.ingestion_status);
+              const procCfg = PROCESSING_STATUS_CONFIG[s.processing_status] || PROCESSING_STATUS_CONFIG.uploaded;
+              const isMapping = ["uploading", "uploaded", "waiting_worker", "downloading", "downloaded", "mapping"].includes(s.processing_status);
+              const canMap = s.ingestion_status === "ready" && (s.processing_status === "uploaded" || !s.processing_status);
+              const isReady = s.processing_status === "ready" || s.processing_status === "mapped";
               return (
                 <Card key={s.id} className="!p-4">
                   <div className="flex items-center gap-4">
                     {/* Icon */}
                     <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-surface-elevated border border-border">
-                      {isProcessing ? (
-                        <Loader2 className="h-5 w-5 text-accent-warm animate-spin" />
-                      ) : s.ingestion_status === "ready" ? (
+                      {isMapping ? (
+                        <Cpu className="h-5 w-5 text-accent animate-pulse" />
+                      ) : isReady ? (
                         <CheckCircle2 className="h-5 w-5 text-accent" />
+                      ) : isProcessing ? (
+                        <Loader2 className="h-5 w-5 text-accent-warm animate-spin" />
                       ) : s.ingestion_status === "error" ? (
                         <AlertCircle className="h-5 w-5 text-red-400" />
                       ) : (
@@ -184,25 +215,50 @@ export function ContentPage() {
                             <Monitor className="h-3 w-3" /> {s.width}×{s.height}
                           </span>
                         )}
+                        {s.file_size > 0 && (
+                          <span>{fmtBytes(s.file_size)}</span>
+                        )}
                         {s.game_name && (
                           <span className="text-text-secondary">{s.game_name}</span>
                         )}
                       </div>
                     </div>
 
-                    {/* Status */}
-                    <div className="shrink-0">
+                    {/* Status badges */}
+                    <div className="flex shrink-0 flex-col items-end gap-1.5">
                       <Badge variant={cfg.variant}>
                         {isProcessing && <Loader2 className="h-3 w-3 animate-spin" />}
                         {cfg.label}
                       </Badge>
+                      {s.processing_status && s.processing_status !== "ready" && (
+                        <Badge variant={procCfg.variant}>
+                          {isMapping && <Server className="h-3 w-3 animate-pulse" />}
+                          {procCfg.label}
+                        </Badge>
+                      )}
                     </div>
                   </div>
 
                   {/* Progress bar for processing */}
-                  {isProcessing && (
+                  {(isProcessing || isMapping) && (
                     <div className="mt-3 h-1 overflow-hidden rounded-full bg-surface-elevated">
-                      <div className="h-full w-1/3 animate-pulse-glow rounded-full bg-accent-warm" />
+                      <div className={`h-full ${isMapping ? "w-2/3" : "w-1/3"} animate-pulse-glow rounded-full ${isMapping ? "bg-accent" : "bg-accent-warm"}`} />
+                    </div>
+                  )}
+
+                  {/* Map button */}
+                  {canMap && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleCreateMappingJob(s.id, s.filename)}
+                      >
+                        <Cpu className="h-3.5 w-3.5" /> Solicitar mapeamento
+                      </Button>
+                      <span className="text-xs text-text-muted">
+                        Envia para o worker analisar (VLM + ASR)
+                      </span>
                     </div>
                   )}
 

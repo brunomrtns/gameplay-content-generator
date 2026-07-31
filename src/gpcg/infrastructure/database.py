@@ -110,6 +110,22 @@ def init_db() -> None:
     _ensure_column(engine, "videos", "user_id", "INTEGER")
     # SSO migration: add bi_identity_id column, make password_hash nullable
     _ensure_column(engine, "users", "bi_identity_id", "VARCHAR(100)")
+    # Control Plane + Compute Plane: worker orchestration columns
+    # GameplaySource: storage abstraction + processing lifecycle
+    _ensure_column(engine, "gameplay_sources", "storage_key", "VARCHAR(500)")
+    _ensure_column(engine, "gameplay_sources", "upload_token", "VARCHAR(64)")
+    _ensure_column(engine, "gameplay_sources", "processing_status", "VARCHAR(30) DEFAULT 'uploaded'")
+    _ensure_column(engine, "gameplay_sources", "downloaded_at", "DATETIME")
+    _ensure_column(engine, "gameplay_sources", "downloaded_by_worker", "VARCHAR(100)")
+    # Job: worker assignment + priority + capabilities + gameplay_source link
+    _ensure_column(engine, "jobs", "worker_id", "INTEGER")
+    _ensure_column(engine, "jobs", "priority", "VARCHAR(10) DEFAULT 'normal'")
+    _ensure_column(engine, "jobs", "required_capabilities", "JSON")
+    _ensure_column(engine, "jobs", "gameplay_source_id", "INTEGER")
+    # Video: storage abstraction + YouTube publication
+    _ensure_column(engine, "videos", "storage_key", "VARCHAR(500)")
+    _ensure_column(engine, "videos", "youtube_url", "VARCHAR(500)")
+    _ensure_column(engine, "videos", "youtube_video_id", "VARCHAR(20)")
     # Seed admin user if not exists (linked to BI Identity by email)
     _seed_admin_user()
 

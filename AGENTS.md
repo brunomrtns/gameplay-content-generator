@@ -5,11 +5,75 @@
 - **Setup:** `./scripts/dev.sh setup` (creates venv, installs deps, builds frontend)
 - **DB init:** `./scripts/dev.sh db` or `.venv/bin/gpcg db-init` (auto-runs on app startup)
 - **Dev mode:** `./scripts/dev.sh run` (API :8787 + frontend :5173)
-- **Worker:** `./scripts/dev.sh worker` (inbox watcher + job processor)
+- **Worker (legacy):** `./scripts/dev.sh worker` (inbox watcher + job processor — runs on VPS)
+- **Remote Worker (Compute Plane):** `gpcg remote-worker --vps-url <url> --worker-id <id> --api-key <secret>`
+  (runs on local PC with GPU, connects to VPS API, processes mapping + generation jobs)
 - **Tests:** `.venv/bin/pytest tests/ -q` (198 tests, ~45s)
 - **Frontend build:** `cd frontend && npm run build`
 - **Frontend typecheck:** `cd frontend && npm run typecheck`
 - **Deploy:** `./scripts/deploy.sh` (syncs to VPS, builds Docker, updates nginx)
+
+## Control Plane + Compute Plane Architecture (v0.3.0)
+
+GPCG now uses a split architecture: the **VPS** acts as Control Plane
+(web UI, API, DB, job orchestration) and a **local PC with GPU** acts as
+Compute Plane (heavy processing: VLM, ASR, FFmpeg, rendering).
+
+### Control Plane (VPS — `src/gpcg/api/worker_routes.py`)
+- **Worker registry:** `workers` table tracks worker_id, status, heartbeat,
+  GPU/CPU/RAM usage, current activity, capabilities, version.
+- **Job queue:** `jobs` table with `worker_id`, `priority`, `required_capabilities`,
+  `gameplay_source_id`. Atomic claim via conditional UPDATE.
+- **File transfer:** Gameplays uploaded to VPS temp dir → worker downloads via
+  token-authenticated streaming → worker confirms checksum → VPS deletes temp.
+- **Result sync:** Worker sends mapping events (structured data only, no frames)
+  and video files. VPS persists to DB.
+- **Auth:** Workers use `X-Worker-Key` header (shared secret via
+  `GPCG_WORKER_API_KEY`). NOT BI Identity SSO (which is for human users).
+- **Endpoints:** `/api/workers/*` (register, heartbeat, status, list),
+  `/api/jobs/claim`, `/api/jobs/{id}/status`, `/api/jobs/{id}/result`,
+  `/api/jobs/{id}/data` (fetch all data for generation), `/api/jobs/{id}/sync`
+  (sync results back), `/api/gameplays/{id}/download`,
+  `/api/gameplays/{id}/confirm-download`, `/api/gameplays/{id}/mapping-result`,
+  `/api/gameplays/{id}/events`, `/api/jobs/{id}/upload-video`,
+  `/api/gameplays/{id}/create-mapping-job`.
+
+### Compute Plane (Local PC — `src/gpcg/worker/remote_worker.py`)
+- **RemoteWorker class:** registers with VPS, sends heartbeats (background
+  thread), polls for jobs, downloads gameplays, runs processing, reports results.
+- **Mapping jobs:** Downloads gameplay → confirms checksum → runs
+  `GameplayAnalyzer` locally (VLM + ASR + merge + interesting score) →
+  sends structured events to VPS → saves analysis JSON locally.
+- **Generation jobs:** Fetches all data from VPS (`GET /api/jobs/{id}/data`)
+  → populates local temp SQLite DB (`local_db_sync.py`) → runs
+  `GenerationService` locally (GPU + video-generate subprocess) → uploads
+  rendered video → syncs ContentPlan/Script/Video records back to VPS.
+- **Local storage:** `/media/bruno/ToshibaHD/gpcg/{gameplays,mapped,renders,outputs}/`
+- **CLI:** `gpcg remote-worker` (flags: `--vps-url`, `--worker-id`, `--api-key`,
+  `--storage-dir`, `--capabilities`). Also reads from env vars.
+- **systemd:** `scripts/gpcg-worker.service` (user service, auto-restart).
+
+### Data Model Changes
+- **Worker table:** `worker_id`, `hostname`, `status`, `last_heartbeat`,
+  `gpu_name`, `gpu_usage`, `cpu_usage`, `ram_usage`, `current_job_id`,
+  `current_activity`, `capabilities` (JSON), `worker_version`, `git_commit`.
+- **Job:** Added `worker_id`, `priority` (low/normal/high),
+  `required_capabilities` (JSON), `gameplay_source_id`.
+- **GameplaySource:** Added `storage_key`, `upload_token`,
+  `processing_status` (uploading→uploaded→waiting_worker→downloading→
+  downloaded→mapping→mapped→ready→generating→finished→failed),
+  `downloaded_at`, `downloaded_by_worker`.
+- **Video:** Added `storage_key`, `youtube_url`, `youtube_video_id`.
+- **New enums:** `WorkerStatus`, `WorkerCapability`, `JobPriority`,
+  `GameplayProcessingStatus`. `JobType.mapping` added.
+
+### Frontend
+- **Dashboard:** WorkerStatusCard shows live worker status (online/busy/offline,
+  GPU/CPU/RAM usage, current activity, capabilities, heartbeat).
+- **Jobs page:** `/jobs` — queue visualization with filters (queued/running/
+  completed/failed), progress bars, stage labels, worker assignment.
+- **Content page:** Shows `processing_status` badge (uploaded→mapping→ready),
+  "Solicitar mapeamento" button to create mapping jobs manually.
 
 ## Multi-User Platform (v0.2.0)
 

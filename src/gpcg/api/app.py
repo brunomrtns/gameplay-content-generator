@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from gpcg.api import routes
 from gpcg.api.auth_routes import router as auth_router
 from gpcg.api.automation_routes import router as automation_router
+from gpcg.api.worker_routes import router as worker_router
 from gpcg.config import PROJECT_ROOT, get_settings
 from gpcg.infrastructure.database import init_db
 
@@ -47,6 +48,7 @@ def create_app() -> FastAPI:
     # API routes
     app.include_router(auth_router, prefix="/api")
     app.include_router(automation_router, prefix="/api")
+    app.include_router(worker_router, prefix="/api")
     app.include_router(routes.router, prefix="/api")
 
     # Health

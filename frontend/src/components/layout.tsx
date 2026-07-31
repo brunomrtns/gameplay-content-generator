@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { LayoutDashboard, FileText, Settings, Video, Shield, LogOut, ChevronDown, Zap } from "lucide-react";
+import { LayoutDashboard, FileText, Settings, Video, Shield, LogOut, ChevronDown, Zap, ListChecks } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -9,6 +9,7 @@ import { Toaster } from "sonner";
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/content", label: "Conteúdo", icon: FileText },
+  { to: "/jobs", label: "Jobs", icon: ListChecks },
   { to: "/automation", label: "Automação", icon: Settings },
   { to: "/videos", label: "Vídeos", icon: Video },
 ];

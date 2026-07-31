@@ -10,9 +10,14 @@ Entities:
   Fact            — extracted fact/curiosity from documents
   ContentPlan     — AI-decided plan for a video (topic, hook, tone, music_mood)
   Script          — draft → optimized → final narration text
-  Job             — pipeline job with stage/progress/status
+  Job             — pipeline job with stage/progress/status/priority
   Video           — generated output video with QA report
+  Worker          — compute worker (local PC with GPU) registered with the VPS
   ResearchCache   — (reserved for future web search; unused in MVP)
+
+Architecture: Control Plane (VPS) + Compute Plane (Workers).
+The VPS stores only metadata and orchestrates jobs. Workers do all heavy
+processing (VLM, ASR, FFmpeg, rendering) on their own GPU/storage.
 """
 
 from __future__ import annotations
@@ -105,6 +110,8 @@ class JobType(str, enum.Enum):
     ingest = "ingest"
     extract_facts = "extract_facts"
     re_render = "re_render"
+    # Control Plane + Compute Plane: mapping is a worker job
+    mapping = "mapping"  # analyze a gameplay (download → VLM → ASR → index events)
 
 
 class JobStatus(str, enum.Enum):
@@ -115,6 +122,13 @@ class JobStatus(str, enum.Enum):
     failed = "failed"
     retrying = "retrying"
     cancelled = "cancelled"
+
+
+class JobPriority(str, enum.Enum):
+    """Job priority. Higher priority jobs are claimed by workers first."""
+    low = "low"
+    normal = "normal"
+    high = "high"
 
 
 class JobStage(str, enum.Enum):
@@ -136,6 +150,53 @@ class JobStage(str, enum.Enum):
     youtube_upload = "youtube_upload"  # NEW: auto-upload to YouTube
     output = "output"
     done = "done"
+    # Worker stages (Control Plane + Compute Plane)
+    download = "download"  # worker downloading gameplay from VPS
+    confirm_download = "confirm_download"  # verifying checksum, confirming integrity
+    mapping = "mapping"  # running GameplayAnalyzer (VLM + ASR + merge + score)
+
+
+class WorkerStatus(str, enum.Enum):
+    """Worker lifecycle status. Reported via heartbeat/status, not assumed."""
+    online = "online"  # registered, heartbeat recent, idle
+    busy = "busy"  # actively processing a job
+    offline = "offline"  # heartbeat timeout or explicit deregister
+    error = "error"  # worker reported an error
+
+
+class WorkerCapability(str, enum.Enum):
+    """Capabilities a worker can fulfill. Used for job-to-worker matching.
+    A worker may have multiple capabilities (e.g., mapping + generation).
+    Future workers may be specialized (e.g., only youtube upload).
+    """
+    mapping = "mapping"  # gameplay analysis (VLM, ASR, YOLO, frame extraction)
+    generation = "generation"  # video generation (TTS, render, FFmpeg)
+    youtube = "youtube"  # YouTube upload via google-integration
+    future_ai = "future_ai"  # reserved for future AI capabilities
+
+
+class GameplayProcessingStatus(str, enum.Enum):
+    """Lifecycle of a gameplay from upload to ready-to-use.
+
+    Flow:
+      UPLOADING → UPLOADED → WAITING_WORKER → DOWNLOADING → DOWNLOADED
+      → MAPPING → MAPPED → READY
+      (FAILED can occur at any step)
+
+    The VPS stores the file only until DOWNLOADED is confirmed (checksum
+    verified). After that, the temp file is deleted and only metadata remains.
+    """
+    uploading = "uploading"  # user is uploading the file
+    uploaded = "uploaded"  # upload complete, no mapping job yet
+    waiting_worker = "waiting_worker"  # mapping job queued, waiting for a worker
+    downloading = "downloading"  # worker is downloading the file
+    downloaded = "downloaded"  # worker confirmed download (checksum OK), VPS can delete temp
+    mapping = "mapping"  # worker is running analysis (VLM + ASR)
+    mapped = "mapped"  # analysis complete, events reported to VPS
+    ready = "ready"  # ready to be used for video generation
+    generating = "generating"  # a generation job is using this gameplay
+    finished = "finished"  # a generation job completed using this gameplay
+    failed = "failed"  # something went wrong
 
 
 class AnalysisStatus(str, enum.Enum):
@@ -264,7 +325,18 @@ class GameplaySource(Base):
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     game_id: Mapped[Optional[int]] = mapped_column(ForeignKey("games.id"), nullable=True, index=True)
 
-    file_path: Mapped[str] = mapped_column(String(1024))
+    # Legacy physical path (kept for backward compat with existing local data).
+    # New uploads use storage_key instead — the physical path is resolved by
+    # the storage layer, not stored in the DB.
+    file_path: Mapped[str] = mapped_column(String(1024), default="")
+    # Opaque storage key (e.g., "gameplays/user_1/abc12345_Bully.mp4").
+    # The storage layer resolves this to a physical path. Allows swapping
+    # filesystem/S3/MinIO without changing the DB.
+    storage_key: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, index=True)
+    # One-time token authorizing a worker to download the temp file from VPS.
+    # Generated when a mapping job is claimed; invalidated after download confirmed.
+    upload_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+
     filename: Mapped[str] = mapped_column(String(255), index=True)
     file_hash: Mapped[str] = mapped_column(String(64), index=True)
     file_size: Mapped[int] = mapped_column(Integer, default=0)
@@ -280,11 +352,20 @@ class GameplaySource(Base):
     codec: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     has_audio: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # Ingestion state
+    # Ingestion state (legacy: discovered/probing/ready/duplicate/error/needs_review)
     ingestion_status: Mapped[str] = mapped_column(String(30), default=IngestionStatus.discovered.value, index=True)
     resolution_method: Mapped[str] = mapped_column(String(30), default=GameResolutionMethod.unknown.value)
     resolution_confidence: Mapped[float] = mapped_column(Float, default=0.0)
     resolution_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Control Plane + Compute Plane: processing lifecycle
+    # Tracks the gameplay from upload through mapping to ready-to-use.
+    # The VPS only stores the temp file until DOWNLOADED is confirmed.
+    processing_status: Mapped[str] = mapped_column(
+        String(30), default=GameplayProcessingStatus.uploaded.value, index=True
+    )
+    downloaded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    downloaded_by_worker: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     # Flexible metadata: compatibility flags, analysis status, etc.
     # {"compatibility": {"game_related": bool, "general_topic": bool},
@@ -544,6 +625,63 @@ class Script(Base):
         return f"<Script #{self.id} [{self.status}] orig={self.originality_score}"
 
 
+class Worker(Base):
+    """A compute worker (local PC with GPU) registered with the VPS.
+
+    The VPS is a Control Plane: it only orchestrates jobs and stores metadata.
+    Workers do all heavy processing (VLM, ASR, FFmpeg, rendering) on their own
+    GPU and storage. Multiple workers can register (home-pc, office-pc, etc.).
+
+    Heartbeat vs Status:
+      - Heartbeat: just "I'm alive" (last_heartbeat timestamp). Frequent (10s).
+      - Status: "what I'm doing" (current_activity, gpu/cpu/ram, current_job).
+        Less frequent, sent when state changes or periodically.
+
+    Capabilities: a worker declares what it can do (mapping, generation, etc.).
+    Jobs declare required_capabilities. The claim endpoint matches them.
+    """
+    __tablename__ = "workers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Human-readable unique identifier (e.g., "home-pc", "gpu-server")
+    worker_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    hostname: Mapped[str] = mapped_column(String(255), default="")
+
+    # Lifecycle
+    status: Mapped[str] = mapped_column(
+        String(20), default=WorkerStatus.offline.value, index=True
+    )
+    last_heartbeat: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    last_status_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # What the worker is currently doing (reported via status, not heartbeat)
+    current_job_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("jobs.id"), nullable=True, index=True
+    )
+    current_activity: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    # Hardware info (reported via status, updated periodically)
+    gpu_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    gpu_usage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0-100 %
+    cpu_usage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0-100 %
+    ram_usage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # GB
+
+    # Capabilities: ["mapping", "generation", "youtube", ...]
+    capabilities: Mapped[list] = mapped_column(JSON, default=list)
+
+    # Versioning for production diagnostics
+    worker_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    git_commit: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    build_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    registered_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    def __repr__(self) -> str:
+        return f"<Worker {self.worker_id} [{self.status}]>"
+
+
 class Job(Base):
     __tablename__ = "jobs"
 
@@ -553,6 +691,10 @@ class Job(Base):
     type: Mapped[str] = mapped_column(String(30), default=JobType.generate_short.value, index=True)
     game_id: Mapped[Optional[int]] = mapped_column(ForeignKey("games.id"), nullable=True, index=True)
     content_plan_id: Mapped[Optional[int]] = mapped_column(ForeignKey("content_plans.id"), nullable=True)
+    # GameplaySource being processed (for mapping jobs)
+    gameplay_source_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("gameplay_sources.id"), nullable=True, index=True
+    )
 
     status: Mapped[str] = mapped_column(String(20), default=JobStatus.queued.value, index=True)
     stage: Mapped[str] = mapped_column(String(30), default=JobStage.ingest.value)
@@ -561,13 +703,28 @@ class Job(Base):
     max_attempts: Mapped[int] = mapped_column(Integer, default=3)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     artifacts: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    # Control Plane + Compute Plane: worker assignment and priority
+    worker_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("workers.id"), nullable=True, index=True
+    )
+    priority: Mapped[str] = mapped_column(
+        String(10), default=JobPriority.normal.value, index=True
+    )
+    # Required capabilities (JSON array of WorkerCapability strings).
+    # The claim endpoint only offers jobs whose required_capabilities are a
+    # subset of the worker's declared capabilities.
+    required_capabilities: Mapped[list] = mapped_column(JSON, default=list)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    worker: Mapped[Optional["Worker"]] = relationship(foreign_keys=[worker_id])
+
     def __repr__(self) -> str:
-        return f"<Job #{self.id} [{self.status}/{self.stage}]>"
+        return f"<Job #{self.id} [{self.status}/{self.stage}] prio={self.priority}>"
 
 
 class Video(Base):
@@ -579,7 +736,10 @@ class Video(Base):
     content_plan_id: Mapped[Optional[int]] = mapped_column(ForeignKey("content_plans.id"), nullable=True, index=True)
     game_id: Mapped[Optional[int]] = mapped_column(ForeignKey("games.id"), nullable=True, index=True)
 
-    file_path: Mapped[str] = mapped_column(String(1024))
+    # Legacy physical path (kept for backward compat). New videos use storage_key.
+    file_path: Mapped[str] = mapped_column(String(1024), default="")
+    # Opaque storage key for the video file on VPS (or future: just YouTube link)
+    storage_key: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, index=True)
     duration: Mapped[float] = mapped_column(Float, default=0.0)
     width: Mapped[int] = mapped_column(Integer, default=0)
     height: Mapped[int] = mapped_column(Integer, default=0)
@@ -587,6 +747,11 @@ class Video(Base):
     qa_report: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(20), default=VideoStatus.pending.value)
     thumbnail_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+
+    # YouTube publication (future: video may only exist as a YouTube link)
+    youtube_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    youtube_video_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     content_plan: Mapped[Optional["ContentPlan"]] = relationship(back_populates="videos")

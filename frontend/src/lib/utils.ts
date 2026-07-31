@@ -29,3 +29,16 @@ export function fmtDate(iso: string | null | undefined): string {
     minute: "2-digit",
   });
 }
+
+/** Format bytes into human-readable string (KB, MB, GB) */
+export function fmtBytes(bytes: number | null | undefined): string {
+  if (!bytes || bytes <= 0) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let val = bytes;
+  let unit = 0;
+  while (val >= 1024 && unit < units.length - 1) {
+    val /= 1024;
+    unit++;
+  }
+  return `${val.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}

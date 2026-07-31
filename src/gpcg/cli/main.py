@@ -3,6 +3,7 @@
 Usage:
     gpcg --help
     gpcg worker          # run the background worker (jobs + inbox watcher)
+    gpcg remote-worker   # run the remote worker (Compute Plane — connects to VPS)
     gpcg inbox-scan      # one-shot inbox scan
     gpcg serve           # run the FastAPI + static frontend server
     gpcg dev             # run api + frontend in dev mode (concurrent)
@@ -22,6 +23,7 @@ from gpcg.cli.commands import (
     dev,
     generate,
     inbox_scan,
+    remote_worker,
     serve,
     set_camera_type,
     worker,
@@ -39,6 +41,7 @@ app.command()(creative_test)
 app.command()(dev)
 app.command()(generate)
 app.command()(inbox_scan)
+app.command()(remote_worker)
 app.command()(serve)
 app.command()(set_camera_type)
 app.command()(worker)

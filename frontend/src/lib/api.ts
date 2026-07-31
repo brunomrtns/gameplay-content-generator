@@ -144,4 +144,9 @@ export const api = {
     request<any[]>(`/videos${game_id ? `?game_id=${game_id}` : ""}`),
   videoUrl: (id: number) => `${API_BASE}/videos/${id}/file`,
   thumbUrl: (id: number) => `${API_BASE}/videos/${id}/thumbnail`,
+
+  // ── Workers (Compute Plane) ─────────────────────────────────────────────
+  listWorkers: () => request<{ workers: any[] }>("/workers"),
+  createMappingJob: (source_id: number) =>
+    request<any>(`/gameplays/${source_id}/create-mapping-job`, { method: "POST" }),
 };
