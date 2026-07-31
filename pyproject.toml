@@ -41,6 +41,16 @@ dev = [
     "mypy>=1.13",
     "httpx>=0.28",
 ]
+# GPU dependencies for the Compute Plane (remote worker).
+# Install with: pip install -e ".[gpu]"
+# Requires CUDA toolkit and nvidia-smi working.
+gpu = [
+    "torch>=2.1",
+    "ultralytics>=8.1",
+    "opencv-python-headless>=4.8",
+    "faster-whisper>=1.0",
+    "psutil>=5.9",
+]
 
 [project.scripts]
 gpcg = "gpcg.cli.main:app"

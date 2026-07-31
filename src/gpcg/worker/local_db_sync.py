@@ -268,11 +268,14 @@ def run_generation_locally(
         log.error(f"Failed to populate local DB: {e}", exc_info=True)
         return {"status": "failed", "error": f"DB sync failed: {e}"}
 
-    # Override the DB path in settings so GenerationService uses our temp DB
+    # Override the DB path AND data dir in settings so GenerationService:
+    # 1. Uses our temp DB (not the VPS DB)
+    # 2. Saves rendered videos to the HD (not the SSD)
     import os
     os.environ["GPCG_DB_PATH"] = str(db_path)
+    os.environ["GPCG_DATA_DIR"] = str(storage_root / "data")
 
-    # Clear the settings cache so the new DB path takes effect
+    # Clear the settings cache so the new paths take effect
     from gpcg.config import get_settings
     get_settings.cache_clear()
 
@@ -379,13 +382,14 @@ def run_generation_locally(
         log.error(f"Generation failed for job #{job_id}: {e}", exc_info=True)
         return {"status": "failed", "error": str(e)}
     finally:
-        # Restore original DB path
-        if "GPCG_DB_PATH" in os.environ:
-            del os.environ["GPCG_DB_PATH"]
+        # Restore original env vars
+        for var in ("GPCG_DB_PATH", "GPCG_DATA_DIR"):
+            if var in os.environ:
+                del os.environ[var]
         get_settings.cache_clear()
         database._engine = None
         database._SessionLocal = None
-        # Clean up temp DB
+        # Clean up temp DB (always — it's a throwaway SQLite file)
         try:
             if db_path.exists():
                 db_path.unlink()

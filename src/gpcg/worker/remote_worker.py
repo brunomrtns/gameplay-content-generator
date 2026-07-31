@@ -597,6 +597,14 @@ class RemoteWorker:
         })
         log.info(f"Mapping job #{job_id} completed: {len(events)} events")
 
+        # Clean up downloaded gameplay (HD space is finite — analysis JSON is enough)
+        # The gameplay can be re-downloaded from VPS if re-mapping is needed.
+        try:
+            local_path.unlink()
+            log.info(f"Cleaned up gameplay: {local_path.name} ({local_path.stat().st_size // (1024*1024)}MB freed)")
+        except OSError:
+            pass
+
     def _process_generation_job(self, job: dict) -> None:
         """Process a generation job: fetch data → run pipeline → upload video.
 
@@ -637,6 +645,12 @@ class RemoteWorker:
             self.send_status("busy", "Enviando vídeo", job_id=job_id)
             upload_result = self.upload_video(job_id, Path(video_path))
             result["video"]["storage_key"] = upload_result.get("storage_key")
+            # Clean up local video after successful upload (HD space is finite)
+            try:
+                Path(video_path).unlink()
+                log.info(f"Cleaned up local video: {video_path}")
+            except OSError:
+                pass
 
         # Sync results back to VPS
         self.update_job_status(job_id, status="running", stage="done", progress=0.98)

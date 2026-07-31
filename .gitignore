@@ -23,16 +23,24 @@ htmlcov/
 .env.local
 
 # Data (keep dir structure via .gitkeep, ignore contents)
+# Symlinks to HD are tracked (so the structure is preserved in the repo)
 data/inbox/*
+!data/inbox
 !data/inbox/.gitkeep
 data/videos/*
+!data/videos
 !data/videos/.gitkeep
 data/docs/*
 !data/docs/.gitkeep
 data/uploads/*
 !data/uploads/.gitkeep
 data/jobs/*
+!data/jobs
 !data/jobs/.gitkeep
+data/gameplay_analysis/*
+!data/gameplay_analysis
+data/voices/*
+!data/voices
 *.db
 *.db-journal
 *.sqlite
@@ -63,9 +71,10 @@ yolov8m.pt
 .devin/
 
 # Data root (keep structure, ignore contents)
+# These are symlinks to HD on the local PC — don't commit them
 data/gameplays/
-data/gameplay_analysis/
-data/voices/
+data/gameplay_analysis
+data/voices
 data/gpcg.db
 data/*.db
 
