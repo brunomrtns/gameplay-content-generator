@@ -201,6 +201,44 @@ def _check_worker_offline(worker: Worker) -> bool:
     return elapsed > timeout
 
 
+def _cleanup_orphan_gameplays(db: Session) -> int:
+    """Delete gameplay files from VPS temp_uploads that were never downloaded.
+
+    A gameplay is "orphan" if:
+    - It has a storage_key (file exists on VPS)
+    - processing_status is still 'uploaded' (worker never claimed/downloaded)
+    - created_at is older than 1 hour
+
+    Returns the number of files deleted.
+    """
+    from datetime import timedelta
+    settings = get_settings()
+    cutoff = _utcnow().replace(tzinfo=None) - timedelta(hours=1)
+
+    orphans = db.query(GameplaySource).filter(
+        GameplaySource.storage_key.isnot(None),
+        GameplaySource.processing_status == GameplayProcessingStatus.uploaded.value,
+        GameplaySource.created_at < cutoff,
+    ).all()
+
+    deleted = 0
+    for src in orphans:
+        file_path = _resolve_storage_path(src.storage_key)
+        if file_path.exists():
+            try:
+                file_path.unlink()
+                log.info(f"Cleaned orphan gameplay: {src.storage_key} (never downloaded, age > 1h)")
+                deleted += 1
+            except OSError as e:
+                log.warning(f"Failed to delete orphan {file_path}: {e}")
+        # Clear storage_key so we don't keep trying
+        src.storage_key = None
+
+    if deleted:
+        db.flush()
+    return deleted
+
+
 # ── Worker registration ──────────────────────────────────────────────────────
 
 
@@ -327,7 +365,11 @@ def list_workers(
 
     Public endpoint (uses BI Identity SSO via frontend, not worker auth).
     Automatically marks workers as offline if heartbeat timeout exceeded.
+    Also cleans up orphan gameplay files (uploaded but never downloaded).
     """
+    # Clean up orphan gameplays (runs on every poll — cheap query)
+    _cleanup_orphan_gameplays(db)
+
     workers = db.query(Worker).all()
     result = []
     for w in workers:
