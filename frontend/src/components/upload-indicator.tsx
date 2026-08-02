@@ -30,8 +30,15 @@ export function UploadIndicator() {
         </span>
       </button>
 
-      {/* Dropdown panel — shows on hover */}
-      <div className="invisible absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-surface-elevated shadow-2xl opacity-0 transition-all duration-200 group-hover:visible group-hover:opacity-100">
+      {/* Dropdown panel — always visible when there are active uploads,
+          otherwise only on hover */}
+      <div
+        className={`absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-surface-elevated shadow-2xl transition-all duration-200 ${
+          activeCount > 0
+            ? "visible opacity-100"
+            : "invisible opacity-0 group-hover:visible group-hover:opacity-100"
+        }`}
+      >
         <div className="max-h-96 overflow-y-auto p-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-semibold text-text-secondary">
@@ -54,6 +61,9 @@ export function UploadIndicator() {
               >
                 {/* Status icon */}
                 <div className="flex-shrink-0">
+                  {u.status === "preparing" && (
+                    <Loader2 className="h-3.5 w-3.5 text-accent animate-spin" />
+                  )}
                   {u.status === "uploading" && (
                     <Loader2 className="h-3.5 w-3.5 text-accent animate-spin" />
                   )}
@@ -75,12 +85,18 @@ export function UploadIndicator() {
                       {u.fileName}
                     </span>
                     <span className="flex-shrink-0 text-[10px] text-text-muted">
+                      {u.status === "preparing" && "Preparando…"}
                       {u.status === "uploading" && `${u.progress}%`}
                       {u.status === "processing" && "Processando…"}
                       {u.status === "done" && "OK"}
                       {u.status === "error" && "Erro"}
                     </span>
                   </div>
+                  {u.status === "preparing" && (
+                    <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-surface-elevated">
+                      <div className="h-full w-1/4 rounded-full bg-accent/60 animate-pulse" />
+                    </div>
+                  )}
                   {u.status === "uploading" && (
                     <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-surface-elevated">
                       <div

@@ -5,7 +5,7 @@ export interface UploadItem {
   fileName: string;
   fileSize: number;
   progress: number;
-  status: "uploading" | "processing" | "done" | "error";
+  status: "preparing" | "uploading" | "processing" | "done" | "error";
   error?: string;
   /** "gameplay" for video files, "knowledge" for knowledge documents */
   kind: "gameplay" | "knowledge";
@@ -36,10 +36,10 @@ export const useUploadStore = create<UploadState>((set) => ({
   removeUpload: (id) =>
     set((s) => ({ uploads: s.uploads.filter((u) => u.id !== id) })),
   clearCompleted: () =>
-    set((s) => ({ uploads: s.uploads.filter((u) => u.status === "uploading" || u.status === "processing") })),
+    set((s) => ({ uploads: s.uploads.filter((u) => u.status === "preparing" || u.status === "uploading" || u.status === "processing") })),
 }));
 
 /** Helper: count active uploads (uploading or processing) */
 export function activeUploadCount(uploads: UploadItem[]): number {
-  return uploads.filter((u) => u.status === "uploading" || u.status === "processing").length;
+  return uploads.filter((u) => u.status === "preparing" || u.status === "uploading" || u.status === "processing").length;
 }

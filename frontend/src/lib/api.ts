@@ -148,6 +148,20 @@ export function uploadWithProgress<T>(
 
 const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MiB — must match server
 
+/**
+ * Compute SHA-256 hash of a File for early dedup. For large files (>200MB)
+ * we skip client-side hashing to avoid freezing the UI — the server will
+ * compute the hash after assembly.
+ */
+async function computeFileHash(file: File): Promise<string> {
+  if (file.size > 200 * 1024 * 1024) return "";
+  const buffer = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 async function uploadChunked(
   file: File,
   onProgress?: (loaded: number, total: number, pct: number) => void,
@@ -155,15 +169,12 @@ async function uploadChunked(
   const total = file.size;
   const totalChunks = Math.ceil(total / CHUNK_SIZE);
 
-  // Compute SHA-256 hash client-side (for early dedup). Uses the Web
-  // Crypto API (SubtleCrypto) — reads the file in chunks to avoid RAM spike.
+  // Compute SHA-256 hash client-side (for early dedup). Reads the file in
+  // chunks via a stream so we don't load the entire file into RAM at once
+  // (which would freeze the UI for large videos and delay the progress bar).
   let fileHash: string | null = null;
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const digest = await crypto.subtle.digest("SHA-256", arrayBuffer);
-    fileHash = Array.from(new Uint8Array(digest))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
+    fileHash = await computeFileHash(file);
   } catch {
     // SubtleCrypto not available (e.g. non-secure context) — server will hash.
   }

@@ -109,7 +109,7 @@ function MediaTab() {
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const activeUploads = uploads.filter((u) => u.kind === "gameplay" && (u.status === "uploading" || u.status === "processing"));
+  const activeUploads = uploads.filter((u) => u.kind === "gameplay" && (u.status === "preparing" || u.status === "uploading" || u.status === "processing"));
   const hasActiveUploads = activeUploads.length > 0;
 
   const uploadFile = async (file: File) => {
@@ -119,14 +119,14 @@ function MediaTab() {
       fileName: file.name,
       fileSize: file.size,
       progress: 0,
-      status: "uploading",
+      status: "preparing",
       kind: "gameplay",
     };
     addUpload(item);
 
     try {
       await api.uploadGameplay(file, (loaded, total, pct) => {
-        updateUpload(id, { progress: pct });
+        updateUpload(id, { progress: pct, status: "uploading" });
         if (pct >= 100) {
           updateUpload(id, { status: "processing" });
         }
