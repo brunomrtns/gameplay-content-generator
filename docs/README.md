@@ -200,6 +200,25 @@ Relatório curto da revisão de coerência do V1 à luz dos estudos:
 - Simplificações aplicadas (5)
 - Hipóteses que permanecem como conhecimento editorial (12)
 
+### [EDITORIAL_EVALUATION.md](EDITORIAL_EVALUATION.md) — Metodologia de Avaliação Editorial
+
+Processo permanente para avaliação de melhorias editoriais. **Não é
+implementação — é processo e critérios.**
+
+- Como comparar duas versões de um roteiro (A/B com 3 camadas:
+  estrutural, editorial, público)
+- 6 métricas humanas que importam (descoberta, curiosidade, voz
+  humana, clareza, ritmo, payoff) + factual accuracy como gate
+- Como validar novas hipóteses (observação → hipótese → experimento
+  → resultado → decisão)
+- Formato de registro de experimentos (`docs/editorial_experiments/`)
+- 4 filtros para evitar crescimento infinito (evidência,
+  proporcionalidade, consistência, irreversibilidade)
+- Hierarquia de conceitos: opinião → hipótese → princípio →
+  requisito → implementação
+- Cadência de avaliação e limpeza periódica
+- Aplicação imediata para a Fase 1
+
 ### [EDITORIAL_PRINCIPLES.md](EDITORIAL_PRINCIPLES.md) — Princípios Editoriais (Pesquisa)
 
 Documento vivo de pesquisa editorial. **Não é plano de implementação.**
