@@ -159,6 +159,34 @@ Análise semântica automática de gameplays:
 - Interesting score (activity + VLM assessment)
 - Semantic event index (GameplayEvent) para clip selection
 
+### [EDITORIAL_REFACTOR_PLAN.md](EDITORIAL_REFACTOR_PLAN.md) — Plano de Refatoração Editorial
+
+Plano técnico **aprovado** para evolução da arquitetura editorial do GPCG:
+
+- Crítica da arquitetura atual (7 gargalos identificados)
+- Nova arquitetura: 7 estágios (2 novos: Story Finder, Humanization)
+- Novos componentes: Curiosity Scorer, Story Finder, Humanization Pass
+- Alterações em 6 componentes existentes (Fact Scoring, Content Planning,
+  Editorial Planner, Creative Engine, Script Service, Script Critic)
+- Plano incremental em 8 fases, cada uma gated por feature flag
+- **Não modificar automaticamente** — ideias novas em EDITORIAL_PRINCIPLES.md
+
+### [EDITORIAL_PRINCIPLES.md](EDITORIAL_PRINCIPLES.md) — Princípios Editoriais (Pesquisa)
+
+Documento vivo de pesquisa editorial. **Não é plano de implementação.**
+
+- O que diferencia roteiro correto de viciante
+- Padrões que denunciam IA vs. padrões que denunciam humano
+- Como grandes canais mantêm retenção (5 princípios)
+- Princípios psicológicos: curiosity gap, open loops, pattern interruption,
+  identification, anticipation, reciprocity
+- Como curiosidade realmente funciona (anatomia: lacuna + relevância + atingibilidade)
+- O que faz compartilhar, comentar, assistir até o payoff
+- Reward pacing: micro-recompensas ao longo do vídeo
+- Crítica ao GPCG sob ótica editorial (7 pontos)
+- 10 hipóteses para exploração futura
+- Exemplos comparativos (GTA IV Euphoria, Bully química)
+
 ---
 
 ## Status do Projeto
