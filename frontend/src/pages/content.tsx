@@ -22,6 +22,10 @@ import {
   FileText,
   Save,
   Search,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  Activity,
 } from "lucide-react";
 
 const STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string }> = {
@@ -99,6 +103,109 @@ export function ContentPage() {
     </div>
   );
 }
+
+// ── Mapping Timeline (expandable view of VLM analysis) ─────────────────────
+
+const EVENT_TYPE_COLORS: Record<string, string> = {
+  COMBAT: "text-red-400 bg-red-500/10 border-red-500/30",
+  VEHICLE: "text-blue-400 bg-blue-500/10 border-blue-500/30",
+  IDLE: "text-text-muted bg-surface-elevated border-border",
+  CUTSCENE: "text-purple-400 bg-purple-500/10 border-purple-500/30",
+  MENU: "text-yellow-400 bg-yellow-500/10 border-yellow-500/30",
+  EXPLORATION: "text-green-400 bg-green-500/10 border-green-500/30",
+  DIALOGUE: "text-cyan-400 bg-cyan-500/10 border-cyan-500/30",
+};
+
+function MappingTimeline({ sourceId, filename }: { sourceId: number; filename: string }) {
+  const [events, setEvents] = useState<any[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadEvents = async () => {
+    if (events !== null) return; // already loaded
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.getSourceEvents(sourceId);
+      setEvents(res.events || []);
+    } catch (e: any) {
+      setError(e.message || "Erro ao carregar eventos");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 border-t border-border pt-3">
+      <div
+        className="flex cursor-pointer items-center gap-2 text-xs font-medium text-text-secondary hover:text-text"
+        onClick={loadEvents}
+      >
+        <Activity className="h-3.5 w-3.5" />
+        {events === null && !loading && "Ver análise do mapeamento"}
+        {loading && "Carregando..."}
+        {error && <span className="text-red-400">{error}</span>}
+        {events !== null && `${events.length} eventos detectados`}
+      </div>
+
+      {events !== null && events.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {/* Timeline bar */}
+          <div className="flex h-2 w-full overflow-hidden rounded-full bg-surface-elevated">
+            {events.map((e, i) => {
+              const color = EVENT_TYPE_COLORS[e.event_type]?.split(" ")[1] || "bg-surface-elevated";
+              return (
+                <div
+                  key={i}
+                  className={color}
+                  style={{ flex: Math.max(1, (e.end_time - e.start_time) / 10) }}
+                  title={`${e.event_type} [${e.start_time.toFixed(0)}-${e.end_time.toFixed(0)}s]`}
+                />
+              );
+            })}
+          </div>
+
+          {/* Event list */}
+          <div className="max-h-64 overflow-y-auto space-y-1.5 rounded-lg border border-border bg-surface p-2">
+            {events.map((e, i) => {
+              const colorClass = EVENT_TYPE_COLORS[e.event_type] || EVENT_TYPE_COLORS.IDLE;
+              return (
+                <div key={i} className="flex gap-2 rounded-md px-2 py-1.5 hover:bg-surface-hover">
+                  {/* Time */}
+                  <span className="flex-shrink-0 font-mono text-[10px] text-text-muted pt-0.5">
+                    {e.start_time.toFixed(0)}s
+                  </span>
+                  {/* Type badge */}
+                  <span className={`flex-shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${colorClass}`}>
+                    {e.event_type}
+                  </span>
+                  {/* Description */}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-text-secondary leading-snug">{e.description}</p>
+                    {e.transcript && (
+                      <p className="mt-0.5 text-[10px] text-text-muted italic">"{e.transcript.substring(0, 80)}..."</p>
+                    )}
+                  </div>
+                  {/* Interesting score */}
+                  {e.interesting_score >= 0.7 && (
+                    <span className="flex-shrink-0 text-[9px] text-accent font-semibold">
+                      ★ {e.interesting_score.toFixed(1)}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {events !== null && events.length === 0 && (
+        <p className="mt-2 text-xs text-text-muted">Nenhum evento encontrado.</p>
+      )}
+    </div>
+  );
+}
+
 
 // ── Media Tab (gameplay upload + list) ───────────────────────────────────────
 
@@ -334,6 +441,9 @@ function MediaTab() {
                   )}
                   {s.error_message && (
                     <p className="mt-2 text-xs text-red-400">{s.error_message}</p>
+                  )}
+                  {isReady && (
+                    <MappingTimeline sourceId={s.id} filename={s.filename} />
                   )}
                 </Card>
               );

@@ -40,6 +40,7 @@ from gpcg.domain.models import (
     Fact,
     Game,
     GameplayAsset,
+    GameplayEvent,
     GameplaySource,
     Job,
     JobStatus,
@@ -177,6 +178,48 @@ def list_sources(
         }
         for s in sources
     ]
+
+
+@router.get("/sources/{source_id}/events")
+def get_source_events(
+    source_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List mapping events for a gameplay source (timeline of what the VLM saw)."""
+    source = db.query(GameplaySource).filter(
+        GameplaySource.id == source_id,
+        GameplaySource.user_id == user.id,
+    ).first()
+    if not source:
+        raise HTTPException(404, "Source not found")
+
+    events = db.query(GameplayEvent).filter(
+        GameplayEvent.source_id == source_id,
+    ).order_by(GameplayEvent.start_time.asc()).all()
+
+    return {
+        "source_id": source_id,
+        "filename": source.filename,
+        "duration": source.duration,
+        "event_count": len(events),
+        "events": [
+            {
+                "id": e.id,
+                "start_time": e.start_time,
+                "end_time": e.end_time,
+                "event_type": e.event_type,
+                "description": e.description,
+                "characters": e.characters,
+                "location": e.location,
+                "tags": e.tags,
+                "transcript": e.transcript,
+                "visual_confidence": e.visual_confidence,
+                "interesting_score": e.interesting_score,
+            }
+            for e in events
+        ],
+    }
 
 
 @router.post("/sources/{source_id}/assign-game")

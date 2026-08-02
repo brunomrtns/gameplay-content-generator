@@ -306,6 +306,8 @@ export const api = {
     request<any[]>(
       `/sources${game_id ? `?game_id=${game_id}` : ""}${status ? `${game_id ? "&" : "?"}status=${status}` : ""}`
     ),
+  getSourceEvents: (source_id: number) =>
+    request<any>(`/sources/${source_id}/events`),
   assignGame: (source_id: number, game_id: number) =>
     request<any>(`/sources/${source_id}/assign-game`, { method: "POST", body: form({ game_id }) }),
   scanInbox: () => request<any>("/inbox/scan", { method: "POST" }),
