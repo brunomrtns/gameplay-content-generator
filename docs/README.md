@@ -159,9 +159,11 @@ Análise semântica automática de gameplays:
 - Interesting score (activity + VLM assessment)
 - Semantic event index (GameplayEvent) para clip selection
 
-### [EDITORIAL_REFACTOR_PLAN.md](EDITORIAL_REFACTOR_PLAN.md) — Plano de Refatoração Editorial
+### [EDITORIAL_REFACTOR_PLAN.md](EDITORIAL_REFACTOR_PLAN.md) — Plano de Refatoração Editorial (V1)
 
-Plano técnico **aprovado** para evolução da arquitetura editorial do GPCG:
+Plano técnico **aprovado** para evolução da arquitetura editorial do GPCG.
+Versão original, preservada como referência. Para a versão consolidada
+atual, ver `EDITORIAL_REFACTOR_PLAN_V2.md`.
 
 - Crítica da arquitetura atual (7 gargalos identificados)
 - Nova arquitetura: 7 estágios (2 novos: Story Finder, Humanization)
@@ -170,6 +172,33 @@ Plano técnico **aprovado** para evolução da arquitetura editorial do GPCG:
   Editorial Planner, Creative Engine, Script Service, Script Critic)
 - Plano incremental em 8 fases, cada uma gated por feature flag
 - **Não modificar automaticamente** — ideias novas em EDITORIAL_PRINCIPLES.md
+
+### [EDITORIAL_REFACTOR_PLAN_V2.md](EDITORIAL_REFACTOR_PLAN_V2.md) — Plano de Refatoração Editorial (V2, consolidado)
+
+Versão consolidada do plano após revisão de coerência com o diário de
+pesquisa e o manifesto. **Esta é a versão atual para implementação.**
+
+- Alterações mínimas e bem fundamentadas sobre o V1
+- Curiosity Scorer: 6 → 5 sub-scores (removidos `comment_potential`,
+  `tension`; adicionados `familiarity`, `insight_quality`)
+- StoryConcept: 11 → 9 campos (removidos redundantes; adicionados
+  `frame`, `is_insight`)
+- Editorial Planner: removido `retention_plan` (over-engineering)
+- Script Critic v2: "edições cirúrgicas" → "revisão por seção"
+- Humanization: adicionada "identificação com a ignorância"
+- Fases: 8 → 6 (Fase 6 mergeada na 2, Fase 7 removida)
+- Ver `EDITORIAL_CONSOLIDATION_REPORT.md` para justificativa de cada mudança
+
+### [EDITORIAL_CONSOLIDATION_REPORT.md](EDITORIAL_CONSOLIDATION_REPORT.md) — Relatório de Consolidação
+
+Relatório curto da revisão de coerência do V1 à luz dos estudos:
+
+- O que foi confirmado (5 decisões fortalecidas)
+- O que perdeu força (7 ideias removidas ou simplificadas)
+- O que realmente merece entrar no plano (4 hipóteses promovidas)
+- Contradições encontradas e resolvidas (5)
+- Simplificações aplicadas (5)
+- Hipóteses que permanecem como conhecimento editorial (12)
 
 ### [EDITORIAL_PRINCIPLES.md](EDITORIAL_PRINCIPLES.md) — Princípios Editoriais (Pesquisa)
 
