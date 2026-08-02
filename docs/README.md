@@ -187,6 +187,40 @@ Documento vivo de pesquisa editorial. **Não é plano de implementação.**
 - 10 hipóteses para exploração futura
 - Exemplos comparativos (GTA IV Euphoria, Bully química)
 
+### [EDITORIAL_RESEARCH_JOURNAL.md](EDITORIAL_RESEARCH_JOURNAL.md) — Diário de Pesquisa Editorial
+
+Registro do estudo de quatro obras fundamentais sobre comunicação,
+narrativa, curiosidade e cognição. **Não é plano de implementação.**
+
+- **Made to Stick** (Heath) — framework SUCCESs, Maldição do Conhecimento,
+  Teoria Velcro, curiosity gap vs. surpresa
+- **Building a StoryBrand** (Miller) — SB7, espectador como herói,
+  transformação vs. informação, stakes, clareza
+- **The Psychology of Curiosity** (Loewenstein) — information-gap theory,
+  curva invertida U, saciação da curiosidade, insight vs. trivia
+- **Thinking, Fast and Slow** (Kahneman) — System 1/2, peak-end rule,
+  duration neglect, WYSIATI, framing, loss aversion, focusing illusion
+- Síntese transversal: convergências, divergências, descobertas
+  transformadoras, 18 hipóteses consolidadas por tema
+
+### [EDITORIAL_MANIFESTO.md](EDITORIAL_MANIFESTO.md) — Manifesto Editorial
+
+A identidade editorial do GPCG. Responde a uma pergunta:
+**que tipo de conteúdo o GPCG existe para criar?**
+
+- O GPCG existe para criar **descobertas**, não fatos
+- O espectador é o protagonista; o fato é o veículo
+- A lacuna antes da resposta; o fato é o payoff, não o começo
+- A emoção é o mecanismo; a informação é o pretexto
+- O familiar é mais poderoso que o obscuro
+- Filtro editorial: "eu assistira isso até o fim?"
+- O que recusamos: enciclopédia, apresentador genérico, humor forçado,
+  perfeição artificial, fato como fim em si
+- A voz: alguém que se importa com detalhes, tem opinião, confia no
+  espectador
+- O compromisso: 10 princípios que definem o conteúdo
+- **Filtro para qualquer decisão técnica ou editorial futura**
+
 ---
 
 ## Status do Projeto
