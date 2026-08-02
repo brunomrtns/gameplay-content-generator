@@ -387,16 +387,26 @@ class RemoteWorker:
         analysis_version: str = "v1",
         config_hash: str = "",
         compatibility: Optional[dict] = None,
+        media_info: Optional[dict] = None,
     ) -> dict:
-        """Send gameplay analysis events to VPS."""
+        """Send gameplay analysis events to VPS.
+
+        Args:
+            media_info: Optional dict with duration, width, height, fps, codec,
+                has_audio from ffprobe. Synced back to the GameplaySource so
+                the VPS has accurate media metadata without probing the file.
+        """
+        payload = {
+            "events": events,
+            "analysis_version": analysis_version,
+            "config_hash": config_hash,
+            "compatibility": compatibility or {},
+        }
+        if media_info:
+            payload.update(media_info)
         resp = self.client.post(
             f"/api/gameplays/{source_id}/mapping-result",
-            json={
-                "events": events,
-                "analysis_version": analysis_version,
-                "config_hash": config_hash,
-                "compatibility": compatibility or {},
-            },
+            json=payload,
         )
         resp.raise_for_status()
         return resp.json()
@@ -585,12 +595,20 @@ class RemoteWorker:
         analysis_json_path.parent.mkdir(parents=True, exist_ok=True)
         analysis_json_path.write_text(timeline.to_json(indent=2))
 
-        # Stage 4: Submit mapping result (events only, no frames)
+        # Stage 4: Submit mapping result (events + media metadata)
         self.update_job_status(job_id, status="running", stage="mapping", progress=0.90)
         events = [e.to_dict() for e in timeline.events]
 
         # Compute compatibility flags
         compatibility = {"game_related": True, "general_topic": True}
+
+        # Send media metadata (duration, has_audio) back to VPS so the
+        # source record has accurate info without the VPS probing the
+        # (now-deleted) temp file. EventTimeline has duration + has_audio.
+        media_info = {
+            "duration": timeline.duration,
+            "has_audio": timeline.has_audio,
+        }
 
         self.submit_mapping_result(
             source_id=source["id"],
@@ -598,6 +616,7 @@ class RemoteWorker:
             analysis_version=timeline.analysis_version,
             config_hash=timeline.config_hash,
             compatibility=compatibility,
+            media_info=media_info,
         )
 
         # Done

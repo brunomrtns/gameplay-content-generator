@@ -354,13 +354,35 @@ def complete_upload(
     # Clean up the chunked session
     _cleanup_session(upload_id)
 
-    # Trigger async probing (non-fatal)
+    # Resolve game from filename and update the source's game_id.
+    # We call the game resolver directly (NOT IngestionService._ingest_file,
+    # which would create a duplicate source without user_id).
     try:
-        from gpcg.application.ingestion_service import IngestionService
-        svc = IngestionService()
-        svc._ingest_file(file_path)
-    except Exception:
-        pass
+        from gpcg.domain.game_resolver import resolve
+        from gpcg.infrastructure.database import session_scope
+        with session_scope() as session:
+            result = resolve(file_path, filename, session)
+            if result and not result.needs_review and result.game_name:
+                from gpcg.domain.models import Game
+                game = session.query(Game).filter(
+                    Game.canonical_name == result.game_name
+                ).first()
+                if game:
+                    source = session.get(GameplaySource, source_id)
+                    if source:
+                        source.game_id = game.id
+                        source.resolution_method = result.method
+                        source.resolution_confidence = result.confidence
+                        source.resolution_notes = result.notes
+                        if hasattr(result, "capture_source") and result.capture_source:
+                            source.capture_source = result.capture_source
+                        session.flush()
+                        log.info(
+                            f"Resolved game '{game.canonical_name}' for source #{source_id} "
+                            f"(method={result.method}, conf={result.confidence:.2f})"
+                        )
+    except Exception as e:
+        log.warning(f"Game resolution failed for source #{source_id}: {e}")
 
     log.info(
         f"Chunked upload complete: {filename} ({file_size} bytes, "

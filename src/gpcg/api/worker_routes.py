@@ -171,6 +171,14 @@ class MappingResultRequest(BaseModel):
         default_factory=dict,
         description="Compatibility flags {game_related: bool, general_topic: bool}",
     )
+    # Media metadata from ffprobe (synced back to GameplaySource so the VPS
+    # has accurate duration/width/height without needing to probe the file)
+    duration: Optional[float] = Field(None, description="File duration in seconds (from ffprobe)")
+    width: Optional[int] = Field(None, description="Video width in pixels")
+    height: Optional[int] = Field(None, description="Video height in pixels")
+    fps: Optional[float] = Field(None, description="Frames per second")
+    codec: Optional[str] = Field(None, description="Video codec name")
+    has_audio: Optional[bool] = Field(None, description="Whether the file has an audio stream")
 
 
 class JobResultRequest(BaseModel):
@@ -1022,8 +1030,26 @@ def submit_mapping_result(
     source.metadata_json = meta
     source.processing_status = GameplayProcessingStatus.mapped.value
 
+    # Sync media metadata from worker's ffprobe results. The worker probes
+    # the file locally and sends duration/width/height/etc. back so the VPS
+    # doesn't need to access the (now-deleted) temp file.
+    if req.duration is not None:
+        source.duration = req.duration
+    if req.width is not None:
+        source.width = req.width
+    if req.height is not None:
+        source.height = req.height
+    if req.fps is not None:
+        source.fps = req.fps
+    if req.codec is not None:
+        source.codec = req.codec
+    if req.has_audio is not None:
+        source.has_audio = req.has_audio
+
     # Auto-create a GameplayAsset covering the full duration of the source so
     # the GameplaySelector always has at least one asset to choose from.
+    # Uses the (now-synced) source.duration.
+    effective_duration = source.duration or req.duration or 0.0
     existing_asset = db.query(GameplayAsset).filter(
         GameplayAsset.source_id == source_id
     ).first()
@@ -1032,12 +1058,16 @@ def submit_mapping_result(
             source_id=source_id,
             label="full_gameplay",
             start_sec=0,
-            end_sec=source.duration or 0.0,
-            duration=source.duration or 0.0,
+            end_sec=effective_duration,
+            duration=effective_duration,
             used_count=0,
         )
         db.add(asset)
-        log.info(f"Auto-created full_gameplay asset for source #{source_id}")
+        log.info(f"Auto-created full_gameplay asset for source #{source_id} (dur={effective_duration}s)")
+    elif existing_asset.duration == 0.0 and effective_duration > 0:
+        # Fix asset that was created with duration=0 before duration sync
+        existing_asset.end_sec = effective_duration
+        existing_asset.duration = effective_duration
 
     db.commit()
     log.info(
