@@ -312,6 +312,9 @@ class RemoteWorker:
     def download_gameplay(self, source: dict) -> Path:
         """Download a gameplay file from VPS to local storage.
 
+        Tries SCP first (faster, more robust for large files — bypasses
+        nginx/HTTP). Falls back to HTTP streaming if SCP is not available.
+
         Returns the local file path. Raises on error.
         """
         source_id = source["id"]
@@ -325,7 +328,14 @@ class RemoteWorker:
         log.info(f"Downloading gameplay #{source_id} ({filename})...")
         self.send_status("busy", f"Baixando {filename}", job_id=self._current_job["id"] if self._current_job else None)
 
-        # Stream download
+        # Try SCP first (bypasses nginx, much more robust for large files)
+        if self._try_scp_download(source, local_path):
+            file_size = local_path.stat().st_size
+            log.info(f"Downloaded {filename} via SCP ({file_size} bytes) → {local_path}")
+            return local_path
+
+        # Fallback: HTTP streaming download
+        log.info(f"SCP unavailable, falling back to HTTP download for {filename}")
         with self.client.stream(
             "GET",
             f"/api/gameplays/{source_id}/download",
@@ -337,8 +347,67 @@ class RemoteWorker:
                     f.write(chunk)
 
         file_size = local_path.stat().st_size
-        log.info(f"Downloaded {filename} ({file_size} bytes) → {local_path}")
+        log.info(f"Downloaded {filename} via HTTP ({file_size} bytes) → {local_path}")
         return local_path
+
+    def _try_scp_download(self, source: dict, local_path: Path) -> bool:
+        """Try to download via SCP directly from VPS host.
+
+        Returns True if successful, False if SCP is not available.
+        Reads SSH config from env vars:
+        - GPCG_SSH_HOST: VPS host (default: extracted from vps_url or 10.0.0.1)
+        - GPCG_SSH_USER: SSH user (default: root)
+        - GPCG_DOCKER_VOLUME: Docker volume mount path on host
+          (default: /var/lib/docker/volumes/gpcg_gpcg-data/_data)
+        """
+        import shutil as _shutil
+        import urllib.parse
+
+        if _shutil.which("scp") is None:
+            return False
+
+        ssh_host = os.environ.get("GPCG_SSH_HOST", "")
+        if not ssh_host:
+            # Extract host from vps_url
+            parsed = urllib.parse.urlparse(self.config.vps_url)
+            ssh_host = parsed.hostname or "10.0.0.1"
+
+        ssh_user = os.environ.get("GPCG_SSH_USER", "root")
+        volume_path = os.environ.get(
+            "GPCG_DOCKER_VOLUME",
+            "/var/lib/docker/volumes/gpcg_gpcg-data/_data",
+        )
+
+        # Build remote path from storage_key
+        storage_key = source.get("storage_key", "")
+        if not storage_key:
+            return False
+
+        # storage_key is like "user_2/filename" → temp_uploads/user_2/filename
+        remote_rel = f"temp_uploads/{storage_key}"
+        remote_path = f"{volume_path}/{remote_rel}"
+
+        ssh_target = f"{ssh_user}@{ssh_host}"
+        log.info(f"SCP download: {ssh_target}:{remote_path} → {local_path}")
+
+        try:
+            result = subprocess.run(
+                ["scp", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no",
+                 f"{ssh_target}:{remote_path}", str(local_path)],
+                capture_output=True, text=True, timeout=600,
+            )
+            if result.returncode != 0:
+                log.warning(f"SCP failed (exit {result.returncode}): {result.stderr[:200]}")
+                # Clean up partial file
+                if local_path.exists():
+                    local_path.unlink()
+                return False
+            return True
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            log.warning(f"SCP error: {e}")
+            if local_path.exists():
+                local_path.unlink()
+            return False
 
     # ── Confirm download (checksum) ──────────────────────────────────────────
 
