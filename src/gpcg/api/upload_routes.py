@@ -359,7 +359,6 @@ def complete_upload(
     # which would create a duplicate source without user_id).
     try:
         from gpcg.domain.game_resolver import resolve
-        from gpcg.infrastructure.database import session_scope
         with session_scope() as session:
             result = resolve(file_path, filename, session)
             if result and not result.needs_review and result.game_name:
