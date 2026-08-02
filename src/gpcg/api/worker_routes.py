@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile, File
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -904,10 +904,23 @@ def download_gameplay(
         raise HTTPException(status_code=404, detail="Temp file no longer available on VPS")
 
     log.info(f"Worker downloading gameplay #{source_id} ({source.filename})")
-    return FileResponse(
-        path=str(file_path),
+
+    def _stream_file(path: Path, chunk_size: int = 1024 * 1024):
+        """Stream file in 1MB chunks to avoid loading entire file into RAM."""
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+
+    return StreamingResponse(
+        _stream_file(file_path),
         media_type="video/mp4",
-        filename=source.filename,
+        headers={
+            "Content-Disposition": f'attachment; filename="{source.filename}"',
+            "Content-Length": str(file_path.stat().st_size),
+        },
     )
 
 
