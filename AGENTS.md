@@ -200,6 +200,79 @@ GPCG is now a multi-user platform for automated YouTube channel video generation
     **Defensive parsing:** `dimension_scores` from the LLM is parsed
     defensively (handles malformed values, non-numeric entries, missing keys).
   See `docs/EDITORIAL_PIPELINE.md`.
+- **Editorial Architecture V2 (NEW):** Refined editorial pipeline with 5 new
+  components, all gated by feature flags (default: off). See
+  `docs/EDITORIAL_REFACTOR_PLAN_V2.md` for the full plan. Pipeline stages
+  (V2): `content_planning` → `story_finding` → `editorial_planning` →
+  `creative_engine` → `script` → `humanization` → `script_review` → ...
+  - **Curiosity Scoring** (`src/gpcg/application/curiosity_scorer.py`):
+    Scores facts for editorial curiosity potential (0-100) from 5 editorial
+    sub-scores (curiosity_gap 0.30, surprise_potential 0.25,
+    retention_potential 0.20, familiarity 0.15, insight_quality 0.10) + 1
+    technical sub-score (visual_potential, excluded from the weighted mean).
+    Based on Loewenstein's information gap theory. Gated by
+    `GPCG_CURIOSITY_SCORING_ENABLED`. When on, `content_planning_service`
+    ranks facts by curiosity_score instead of quality*novelty. Config:
+    `GPCG_CURIOSITY_SCORER_MODEL`, `GPCG_CURIOSITY_SCORER_TEMPERATURE`,
+    `GPCG_CURIOSITY_MIN_THRESHOLD` (default 30). DB: `Fact.curiosity_score`
+    + `Fact.curiosity_subscores` (JSON). Schema evolution in `init_db()`.
+  - **Story Finder** (`src/gpcg/application/story_finder.py`): Transforms a
+    fact into a story by finding the editorial ANGLE. Produces a
+    `StoryConcept` (9 fields: fact_claim, angle, curiosity_gap,
+    narrative_hook, frame, is_insight, is_story, confidence, success/error).
+    If `is_story=false` or confidence < threshold, the fact has no narrative
+    potential. Gated by `GPCG_STORY_FINDER_ENABLED`. Config:
+    `GPCG_STORY_FINDER_MODEL`, `GPCG_STORY_FINDER_MIN_CONFIDENCE` (0.5).
+    Stage `story_finding` (between `content_planning` and
+    `editorial_planning`). Persisted to `job.artifacts["story_concept"]`.
+    The StoryConcept flows into the EditorialPlanner (angle → central_idea)
+    and ScriptService (narrative_hook → opening line, frame → presentation).
+  - **Beat-oriented Creative Engine** (`creative_engine.py`):
+    `generate_beat_oriented_material()` generates material ORIENTED BY
+    NARRATIVE BEAT (3 hooks for "hook", 3 angles for "development", 3
+    payoffs for "payoff", 3 observations for commentary) instead of generic
+    5-of-each. Gated by `GPCG_CREATIVE_ENGINE_BEAT_ORIENTED`. Falls back to
+    generic when off or when no beats available. Gate: skipped when
+    `humor.enabled=false` (purely informative videos don't need creative
+    material).
+  - **Humanization Layer** (`src/gpcg/application/humanization.py`):
+    Hybrid pass (regex detection + LLM correction) that breaks AI patterns
+    and ensures orality. Regex detects: AI-isms ("você não vai acreditar",
+    "prepare-se para"), redundancy ("ou seja", "em outras palavras"),
+    repetitive structures (3+ sentences starting with same word), uniform
+    rhythm, and MISSING identification with ignorance (Curse of Knowledge
+    correction — "eu também não sabia"). LLM corrects the detected issues.
+    Gated by `GPCG_HUMANIZATION_ENABLED`. Stage `humanization` (between
+    `script` and `script_review`). Updates `Script.final` in-place. Config:
+    `GPCG_HUMANIZATION_MODEL`, `GPCG_HUMANIZATION_TEMPERATURE` (0.4),
+    `GPCG_HUMANIZATION_MAX_TOKENS`. Non-fatal: on failure, original kept.
+  - **Section-based Script Critic** (`script_critic.py`):
+    `review_sections()` reviews each SECTION of the script (hook,
+    development, payoff) separately, producing per-section scores and
+    issues. Per-section issues are merged into the top-level issues list
+    with location prefixed by section label (e.g. "[hook] first sentence").
+    Gated by `GPCG_SCRIPT_CRITIC_SECTION_BASED`. Falls back to holistic
+    `review()` when off. `_split_into_sections()` aligns sections with
+    narrative beats when available, else splits by sentence groups.
+  - **New JobStage values:** `story_finding` (between `content_planning`
+    and `editorial_planning`), `humanization` (between `script` and
+    `script_review`). Stage order in `_set_stage()` updated.
+  - **New config flags:** `GPCG_CURIOSITY_SCORING_ENABLED`,
+    `GPCG_CURIOSITY_SCORER_MODEL`, `GPCG_CURIOSITY_SCORER_TEMPERATURE`,
+    `GPCG_CURIOSITY_SCORER_MAX_TOKENS`, `GPCG_CURIOSITY_MIN_THRESHOLD`,
+    `GPCG_STORY_FINDER_ENABLED`, `GPCG_STORY_FINDER_MODEL`,
+    `GPCG_STORY_FINDER_TEMPERATURE`, `GPCG_STORY_FINDER_MAX_TOKENS`,
+    `GPCG_STORY_FINDER_MIN_CONFIDENCE`,
+    `GPCG_CREATIVE_ENGINE_BEAT_ORIENTED`,
+    `GPCG_HUMANIZATION_ENABLED`, `GPCG_HUMANIZATION_MODEL`,
+    `GPCG_HUMANIZATION_TEMPERATURE`, `GPCG_HUMANIZATION_MAX_TOKENS`,
+    `GPCG_SCRIPT_CRITIC_SECTION_BASED`.
+  - **Tests:** `tests/test_curiosity_scoring.py` (9 tests),
+    `tests/test_story_finder.py` (11 tests),
+    `tests/test_creative_engine.py::TestBeatOrientedCreativeEngine` (7 tests),
+    `tests/test_humanization.py` (12 tests),
+    `tests/test_script_critic_sections.py` (8 tests). Total: 47 new tests.
+    All 245 tests pass.
 - **Editorial Planner gameplay_query fallback:** When the LLM doesn't generate
   a `gameplay_query` (leaves it empty) but `gameplay_strategy` is "related" or
   "thematic_match", the planner extracts a keyword from the fact claim

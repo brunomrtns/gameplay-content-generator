@@ -71,8 +71,18 @@ class GoogleIntegrationAdapter:
 
         Calls POST /api/upload/youtube to enqueue, then polls
         GET /api/upload/status/:jobId until the BullMQ job completes.
+
+        Note: video_path is the path on the GPCG container (/app/data/videos/...).
+        The google-integration container mounts the gpcg-data volume at
+        /app/gpcg-data, so we translate the path accordingly.
         """
-        video_path = str(video_path)
+        video_path_str = str(video_path)
+        # Translate /app/data/... (gpcg-api mount) → /app/gpcg-data/... (google-integration mount)
+        if video_path_str.startswith("/app/data/"):
+            remote_path = "/app/gpcg-data/" + video_path_str[len("/app/data/"):]
+        else:
+            remote_path = video_path_str
+
         uid = user_id or self.settings.gpcg_youtube_user_id
         priv = privacy or self.settings.gpcg_youtube_privacy
         cat = str(category_id or self.settings.gpcg_youtube_category_id)
@@ -80,7 +90,7 @@ class GoogleIntegrationAdapter:
 
         body = {
             "userId": uid,
-            "videoPath": video_path,
+            "videoPath": remote_path,
             "title": title,
             "description": description,
             "tags": all_tags,

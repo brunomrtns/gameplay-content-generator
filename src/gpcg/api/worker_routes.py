@@ -37,6 +37,8 @@ from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
 from gpcg.domain.models import (
+    Document,
+    GameplayAsset,
     GameplayEvent,
     GameplayProcessingStatus,
     GameplaySource,
@@ -45,6 +47,7 @@ from gpcg.domain.models import (
     JobStage,
     JobStatus,
     JobType,
+    KnowledgeChunk,
     User,
     Worker,
     WorkerCapability,
@@ -55,6 +58,28 @@ from gpcg.infrastructure.database import get_db, session_scope
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["workers"])
+
+
+def _ensure_dict(value) -> dict:
+    """Coerce a JSON column value to dict.
+
+    SQLite/Postgres JSON columns normally return dicts, but older rows or
+    rows written by other code paths may store a JSON string. This helper
+    transparently parses strings so callers can always do dict operations.
+    """
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        import json
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            log.warning(f"_ensure_dict: could not parse JSON string: {value[:80]!r}")
+            return {}
+    return {}
 
 
 # ── Auth dependency ───────────────────────────────────────────────────────────
@@ -445,10 +470,24 @@ def claim_job(
         .all()
     )
 
-    # Filter by capability matching in Python (JSON array subset check)
+    # Filter by capability matching in Python (comma-separated string or JSON array)
     matched = []
     for job in candidates:
-        required = set(job.required_capabilities or [])
+        raw = job.required_capabilities
+        if not raw:
+            required = set()
+        elif isinstance(raw, list):
+            required = set(raw)
+        elif isinstance(raw, str):
+            # Try JSON parse first, fall back to comma-separated
+            import json as _json
+            try:
+                parsed = _json.loads(raw)
+                required = set(parsed) if isinstance(parsed, list) else {raw}
+            except (ValueError, TypeError):
+                required = {c.strip() for c in raw.split(",") if c.strip()}
+        else:
+            required = set()
         if required.issubset(worker_caps):
             matched.append(job)
 
@@ -481,6 +520,7 @@ def claim_job(
             return {
                 "job": _serialize_job(job),
                 "gameplay_source": _serialize_gameplay_source_for_job(job, db),
+                "document": _serialize_document_for_job(job, db),
             }
 
     db.commit()
@@ -492,6 +532,7 @@ def _serialize_job(job: Job) -> dict:
     return {
         "id": job.id,
         "job_uuid": job.job_uuid,
+        "user_id": job.user_id,
         "type": job.type,
         "status": job.status,
         "stage": job.stage,
@@ -530,6 +571,29 @@ def _serialize_gameplay_source_for_job(job: Job, db: Session) -> Optional[dict]:
     }
 
 
+def _serialize_document_for_job(job: Job, db: Session) -> Optional[dict]:
+    """Serialize document info if the job is a knowledge_index job."""
+    if job.type != JobType.knowledge_index.value:
+        return None
+    doc_id = job.artifacts.get("document_id") if job.artifacts else None
+    if not doc_id:
+        return None
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        return None
+    return {
+        "id": doc.id,
+        "filename": doc.filename,
+        "file_path": doc.file_path,
+        "file_type": doc.file_type,
+        "file_size": doc.file_size,
+        "file_hash": doc.file_hash,
+        "upload_token": doc.upload_token,
+        "game_id": doc.game_id,
+        "user_id": doc.user_id,
+    }
+
+
 # ── Job status update ────────────────────────────────────────────────────────
 
 
@@ -556,8 +620,7 @@ def update_job_status(
     if req.error:
         job.error = req.error
     if req.artifacts:
-        merged = dict(job.artifacts or {})
-        merged.update(req.artifacts)
+        merged = {**_ensure_dict(job.artifacts), **req.artifacts}
         job.artifacts = merged
 
     if req.status == JobStatus.completed.value:
@@ -614,9 +677,10 @@ def submit_job_result(
     if req.error:
         job.error = req.error
     if req.artifacts:
-        merged = dict(job.artifacts or {})
-        merged.update(req.artifacts)
+        merged = {**_ensure_dict(job.artifacts), **req.artifacts}
         job.artifacts = merged
+        has_social = "social_title" in merged
+        print(f"[RESULT] job #{job_id}: {len(req.artifacts)} artifacts received, social_title present: {has_social}", flush=True)
 
     # Create/update Video record if video metadata provided
     if req.status == JobStatus.completed.value and req.video:
@@ -666,6 +730,11 @@ def submit_job_result(
             db.add(video)
         db.flush()
 
+        # Remember to auto-publish after commit (outside the transaction)
+        _pending_auto_publish = (vdata.get("storage_key") and not vdata.get("youtube_url"))
+    else:
+        _pending_auto_publish = False
+
     # Update gameplay source status for mapping jobs
     if job.gameplay_source_id and job.type == JobType.mapping.value:
         source = db.query(GameplaySource).filter(GameplaySource.id == job.gameplay_source_id).first()
@@ -677,7 +746,124 @@ def submit_job_result(
 
     db.commit()
     log.info(f"Job #{job.id} result: {req.status}")
+
+    # Auto-publish OUTSIDE the request transaction to avoid DB lock.
+    # Uses a fresh session so the (potentially slow) YouTube upload doesn't
+    # block other requests.
+    if _pending_auto_publish:
+        _maybe_auto_publish(job_id)
+
     return {"ok": True}
+
+
+def _maybe_auto_publish(job_id: int) -> None:
+    """Auto-publish a video to YouTube if the user's automation has auto_publish=true.
+
+    Runs OUTSIDE the request transaction (uses its own session) so the
+    potentially slow YouTube upload doesn't block other DB operations.
+
+    Reads the user's Automation config. If auto_publish=true, resolves the
+    storage_key to a file path and calls the google-integration service.
+    On success, updates the Video with YouTube URL/ID and status=published.
+    On failure, sets status=publish_failed and logs the error (non-fatal).
+    If auto_publish=false, sets status=pending_approval for manual review.
+    """
+    from gpcg.domain.models import Automation, Video as VideoModel, VideoStatus, ContentPlan
+    from gpcg.infrastructure.google_integration_adapter import GoogleIntegrationAdapter
+
+    settings = get_settings()
+
+    # ── Phase 1: read job/video/config, resolve file path, mark as publishing ─
+    video_path = None
+    title = ""
+    description = ""
+    tags: list = []
+    privacy = settings.gpcg_youtube_privacy
+    category_id = settings.gpcg_youtube_category_id
+
+    with session_scope() as db:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            log.error(f"_maybe_auto_publish: job #{job_id} not found")
+            return
+
+        video = db.query(VideoModel).filter(VideoModel.job_id == job.id).first()
+        if not video or not video.storage_key:
+            log.info(f"_maybe_auto_publish: no video/storage_key for job #{job_id}")
+            return
+
+        auto = db.query(Automation).filter(Automation.user_id == job.user_id).first()
+        if not auto:
+            log.info(f"No automation config for user #{job.user_id}, skipping auto-publish")
+            return
+
+        config = _ensure_dict(auto.config)
+        auto_publish = config.get("auto_publish", False)
+
+        if not auto_publish:
+            video.status = VideoStatus.pending_approval.value
+            log.info(f"Video #{video.id} set to pending_approval (auto_publish=false)")
+            return
+
+        # Resolve video file path (videos_dir is the primary location after upload)
+        storage_key = video.storage_key
+        video_path = settings.videos_dir / storage_key
+        log.info(f"Auto-publish: checking {video_path} (exists={video_path.exists()})")
+        if not video_path.exists():
+            video_path = settings.temp_uploads_dir / storage_key
+            log.info(f"Auto-publish: checking fallback {video_path} (exists={video_path.exists()})")
+        if not video_path.exists():
+            log.error(f"Auto-publish: video file not found: {storage_key}")
+            video.status = VideoStatus.publish_failed.value
+            return
+
+        # Get metadata from job artifacts
+        artifacts = _ensure_dict(job.artifacts)
+        title = artifacts.get("social_title", "")
+        description = artifacts.get("social_description", "")
+        tags = list(artifacts.get("social_tags", []))
+
+        if not title:
+            cp = db.get(ContentPlan, video.content_plan_id) if video.content_plan_id else None
+            title = cp.topic if cp else f"Video #{video.id}"
+
+        privacy = config.get("youtube_privacy", settings.gpcg_youtube_privacy)
+        category_id = int(config.get("youtube_category_id", settings.gpcg_youtube_category_id))
+
+        # Mark as publishing (commit before the slow upload)
+        video.status = VideoStatus.pending_approval.value
+        db.commit()
+
+        log.info(f"Auto-publishing video #{video.id} to YouTube: {title}")
+
+    if video_path is None:
+        return  # auto_publish=false or file not found — already handled above
+
+    # ── Phase 2: upload to YouTube (OUTSIDE the DB session — can take minutes) ─
+    adapter = GoogleIntegrationAdapter(settings=settings)
+    result = adapter.upload_to_youtube(
+        video_path,
+        title=title,
+        description=description,
+        tags=tags,
+        user_id=settings.gpcg_youtube_user_id,
+        privacy=privacy,
+        category_id=category_id,
+    )
+
+    # ── Phase 3: update video status in a fresh session ───────────────────────
+    with session_scope() as db:
+        v = db.query(VideoModel).filter(VideoModel.job_id == job_id).first()
+        if not v:
+            return
+        if result.success:
+            v.youtube_url = result.youtube_url
+            v.youtube_video_id = result.youtube_video_id
+            v.status = VideoStatus.published.value
+            log.info(f"Video #{v.id} published: {result.youtube_url}")
+        else:
+            v.status = VideoStatus.publish_failed.value
+            log.error(f"Video #{v.id} publish failed: {result.error}")
 
 
 # ── Gameplay download (streaming) ────────────────────────────────────────────
@@ -836,6 +1022,23 @@ def submit_mapping_result(
     source.metadata_json = meta
     source.processing_status = GameplayProcessingStatus.mapped.value
 
+    # Auto-create a GameplayAsset covering the full duration of the source so
+    # the GameplaySelector always has at least one asset to choose from.
+    existing_asset = db.query(GameplayAsset).filter(
+        GameplayAsset.source_id == source_id
+    ).first()
+    if not existing_asset:
+        asset = GameplayAsset(
+            source_id=source_id,
+            label="full_gameplay",
+            start_sec=0,
+            end_sec=source.duration or 0.0,
+            duration=source.duration or 0.0,
+            used_count=0,
+        )
+        db.add(asset)
+        log.info(f"Auto-created full_gameplay asset for source #{source_id}")
+
     db.commit()
     log.info(
         f"Mapping result for #{source_id}: {len(req.events)} events persisted "
@@ -876,6 +1079,19 @@ async def upload_video(
     file_size = dest_path.stat().st_size
     log.info(f"Video uploaded for job #{job_id}: {storage_key} ({file_size} bytes)")
 
+    # Generate thumbnail on the VPS from the uploaded video
+    thumb_path: Optional[Path] = None
+    try:
+        from gpcg.infrastructure.media import generate_thumbnail, probe
+        thumb_path = settings.videos_dir / f"{dest_path.stem}_thumb.jpg"
+        info = probe(dest_path)
+        at = min(1.0, max(0.1, (info.duration or 2.0) / 2))
+        generate_thumbnail(dest_path, thumb_path, at=at)
+        log.info(f"Thumbnail generated for job #{job_id}: {thumb_path.name}")
+    except Exception as e:
+        log.warning(f"Thumbnail generation failed for job #{job_id}: {e}")
+        thumb_path = None
+
     # Update or create Video record
     from gpcg.domain.models import Video, VideoStatus
 
@@ -884,6 +1100,8 @@ async def upload_video(
         video.storage_key = storage_key
         video.file_path = str(dest_path)
         video.status = VideoStatus.ready.value
+        if thumb_path:
+            video.thumbnail_path = str(thumb_path)
     else:
         video = Video(
             user_id=job.user_id,
@@ -893,6 +1111,7 @@ async def upload_video(
             file_path=str(dest_path),
             storage_key=storage_key,
             status=VideoStatus.ready.value,
+            thumbnail_path=str(thumb_path) if thumb_path else None,
         )
         db.add(video)
 
@@ -1071,6 +1290,15 @@ def get_job_data(
             "analysis_version": e.analysis_version,
             "metadata_json": e.metadata_json,
         } for e in events]
+        # Assets for this source (clips that the GameplaySelector uses)
+        assets = db.query(GameplayAsset).filter(GameplayAsset.source_id == src.id).all()
+        src_data["assets"] = [{
+            "id": a.id, "source_id": a.source_id,
+            "label": a.label, "start_sec": a.start_sec,
+            "end_sec": a.end_sec, "duration": a.duration,
+            "used_count": a.used_count,
+            "metadata_json": a.metadata_json,
+        } for a in assets]
         data["gameplay_sources"].append(src_data)
 
     # Automation config (for video customization settings)
@@ -1114,9 +1342,14 @@ def sync_job_result(
 
     # Update job artifacts
     if req.artifacts:
-        merged = dict(job.artifacts or {})
-        merged.update(req.artifacts)
+        # IMPORTANT: create a NEW dict (copy) so SQLAlchemy detects the change.
+        # JSON columns don't track in-place mutations — assigning the same
+        # object back is a no-op for the ORM.
+        merged = {**_ensure_dict(job.artifacts), **req.artifacts}
         job.artifacts = merged
+        has_social = "social_title" in merged
+        print(f"[SYNC] job #{job_id}: {len(req.artifacts)} artifacts received, social_title present: {has_social}", flush=True)
+        log.info(f"Sync job #{job_id}: merged {len(req.artifacts)} artifacts, keys={list(merged.keys())[:10]}")
 
     # Sync ContentPlan
     if req.content_plan:
@@ -1236,3 +1469,133 @@ def get_gameplay_events(
             "interesting_score": e.interesting_score,
         } for e in events]
     }
+
+
+# ── Knowledge document endpoints (worker downloads + indexes documents) ──────
+
+
+@router.get("/documents/{doc_id}/download")
+def download_document(
+    doc_id: int,
+    token: str,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Stream a knowledge document file from VPS to the worker.
+
+    Requires a valid upload_token (generated when the knowledge_index job
+    was created). The token is invalidated after download is confirmed.
+    """
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if not doc.upload_token or doc.upload_token != token:
+        raise HTTPException(status_code=403, detail="Invalid or expired download token")
+
+    file_path = Path(doc.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Document file not found on VPS")
+
+    log.info(f"Worker downloading document {doc_id}: {doc.filename} ({doc.file_size} bytes)")
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/octet-stream",
+        filename=doc.filename,
+    )
+
+
+class ConfirmDocumentDownloadRequest(BaseModel):
+    checksum: str
+    worker_id: str
+
+
+@router.post("/documents/{doc_id}/confirm-download")
+def confirm_document_download(
+    doc_id: int,
+    req: ConfirmDocumentDownloadRequest,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Worker confirms document download with checksum verification.
+
+    Verifies SHA256 checksum, invalidates the download token, and optionally
+    deletes the file from VPS (the worker has its own copy now).
+    """
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if not doc.file_hash:
+        raise HTTPException(status_code=400, detail="No file_hash stored for this document")
+
+    if req.checksum != doc.file_hash:
+        log.warning(f"Checksum mismatch for document {doc_id}: expected {doc.file_hash[:16]}..., got {req.checksum[:16]}...")
+        raise HTTPException(status_code=400, detail="Checksum mismatch — file may be corrupted")
+
+    # Invalidate token
+    doc.upload_token = None
+    db.commit()
+
+    log.info(f"Document {doc_id} download confirmed by worker '{req.worker_id}'")
+    return {"ok": True, "doc_id": doc_id}
+
+
+class IndexingResultRequest(BaseModel):
+    """Worker sends knowledge chunks back to VPS after indexing."""
+    chunks: list[dict] = Field(default_factory=list)
+    chunk_count: int = 0
+    error: str = ""
+
+
+@router.post("/documents/{doc_id}/indexing-result")
+def submit_indexing_result(
+    doc_id: int,
+    req: IndexingResultRequest,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Worker sends indexed knowledge chunks back to VPS.
+
+    The worker has parsed the document (possibly with OCR), chunked it,
+    generated embeddings (via Ollama), and now sends the chunks to VPS
+    for storage. The VPS stores them in the knowledge_chunks table for
+    retrieval during video generation.
+    """
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if req.error:
+        doc.knowledge_status = "error"
+        db.commit()
+        log.warning(f"Document {doc_id} indexing failed: {req.error}")
+        return {"ok": False, "error": req.error}
+
+    # Delete existing chunks for this document (re-indexing case)
+    db.query(KnowledgeChunk).filter(KnowledgeChunk.document_id == doc_id).delete()
+
+    # Insert new chunks
+    for chunk_data in req.chunks:
+        chunk = KnowledgeChunk(
+            user_id=doc.user_id,
+            document_id=doc_id,
+            game_id=doc.game_id,
+            content=chunk_data["content"],
+            embedding=chunk_data.get("embedding", []),
+            chunk_index=chunk_data.get("chunk_index", 0),
+            section=chunk_data.get("section"),
+            char_start=chunk_data.get("char_start", 0),
+            char_end=chunk_data.get("char_end", 0),
+            embedding_model=chunk_data.get("embedding_model"),
+        )
+        db.add(chunk)
+
+    # Update document status
+    doc.knowledge_status = "indexed"
+    doc.chunk_count = len(req.chunks)
+    doc.text_extracted = True
+    db.commit()
+
+    log.info(f"Document {doc_id} indexed: {len(req.chunks)} chunks stored on VPS")
+    return {"ok": True, "chunk_count": len(req.chunks)}

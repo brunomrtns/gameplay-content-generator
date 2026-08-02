@@ -112,6 +112,7 @@ class JobType(str, enum.Enum):
     re_render = "re_render"
     # Control Plane + Compute Plane: mapping is a worker job
     mapping = "mapping"  # analyze a gameplay (download → VLM → ASR → index events)
+    knowledge_index = "knowledge_index"  # index a document for RAG (download → OCR → chunk → embed)
 
 
 class JobStatus(str, enum.Enum):
@@ -136,9 +137,11 @@ class JobStage(str, enum.Enum):
     game_resolution = "game_resolution"
     extract_facts = "extract_facts"
     content_planning = "content_planning"
+    story_finding = "story_finding"  # V2: StoryConcept (angle, frame, curiosity_gap)
     editorial_planning = "editorial_planning"  # NEW: VideoCreativePlan
     creative_engine = "creative_engine"  # optional: Qwen3-14B creative material
     script = "script"
+    humanization = "humanization"  # V2: break AI patterns, ensure orality
     script_review = "script_review"  # NEW: ScriptCritic PASS/REVISE
     tts = "tts"
     gameplay_selection = "gameplay_selection"
@@ -154,6 +157,7 @@ class JobStage(str, enum.Enum):
     download = "download"  # worker downloading gameplay from VPS
     confirm_download = "confirm_download"  # verifying checksum, confirming integrity
     mapping = "mapping"  # running GameplayAnalyzer (VLM + ASR + merge + score)
+    knowledge_indexing = "knowledge_indexing"  # worker indexing a document (OCR + chunk + embed)
 
 
 class WorkerStatus(str, enum.Enum):
@@ -171,6 +175,7 @@ class WorkerCapability(str, enum.Enum):
     """
     mapping = "mapping"  # gameplay analysis (VLM, ASR, YOLO, frame extraction)
     generation = "generation"  # video generation (TTS, render, FFmpeg)
+    knowledge_index = "knowledge_index"  # document indexing (OCR, chunking, embeddings)
     youtube = "youtube"  # YouTube upload via google-integration
     future_ai = "future_ai"  # reserved for future AI capabilities
 
@@ -213,7 +218,9 @@ class VideoStatus(str, enum.Enum):
     ready = "ready"
     qa_passed = "qa_passed"
     qa_failed = "qa_failed"
+    pending_approval = "pending_approval"
     published = "published"
+    publish_failed = "publish_failed"
 
 
 class ScriptStatus(str, enum.Enum):
@@ -527,8 +534,14 @@ class Document(Base):
     file_path: Mapped[str] = mapped_column(String(1024))
     file_type: Mapped[str] = mapped_column(String(20))  # pdf, txt, md, docx
     file_size: Mapped[int] = mapped_column(Integer, default=0)
+    file_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # SHA256 for download verification
+    upload_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)  # one-time download token for worker
     text_extracted: Mapped[bool] = mapped_column(Boolean, default=False)
     facts_extracted: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Knowledge processing status: pending → processing → indexed → error
+    # (separate from facts_extracted — knowledge indexing is the RAG layer)
+    knowledge_status: Mapped[str] = mapped_column(String(20), default="pending")
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     game: Mapped[Optional["Game"]] = relationship(back_populates="documents")
@@ -556,6 +569,14 @@ class Fact(Base):
     verification: Mapped[str] = mapped_column(String(20), default=FactVerification.unverified.value)
     quality_score: Mapped[float] = mapped_column(Float, default=0.0)  # 0-100 editorial potential
     novelty_score: Mapped[float] = mapped_column(Float, default=0.0)
+    # Curiosity score (V2 editorial architecture). Composite of 5 editorial
+    # sub-scores + 1 technical sub-score (visual_potential). See
+    # docs/EDITORIAL_REFACTOR_PLAN_V2.md §3.1, §4.2.
+    # curiosity_score = curiosity_gap*0.30 + surprise_potential*0.25
+    #                   + retention_potential*0.20 + familiarity*0.15
+    #                   + insight_quality*0.10
+    curiosity_score: Mapped[float] = mapped_column(Float, default=0.0)
+    curiosity_subscores: Mapped[dict] = mapped_column(JSON, default=dict)
     used_count: Mapped[int] = mapped_column(Integer, default=0)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
@@ -758,3 +779,119 @@ class Video(Base):
 
     def __repr__(self) -> str:
         return f"<Video #{self.id} [{self.status}]>"
+
+
+# ── Channel Knowledge Architecture ───────────────────────────────────────────
+
+
+class ChannelProfile(Base):
+    """Per-user channel identity and editorial direction.
+
+    This is the semantic context that tells the AI WHAT kind of channel the
+    user is building and HOW videos should be narrated. It flows into every
+    LLM call in the pipeline (content planning, editorial planning, script
+    generation) so that generated videos are personalized to the channel
+    rather than generic.
+
+    One per user (unique user_id).
+    """
+    __tablename__ = "channel_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
+
+    # Free-form channel description — the "elevator pitch" of the channel.
+    # Example: "Meu canal é focado em análises de partidas competitivas de FPS.
+    # Quero vídeos com tom educativo, destacando estratégias, erros dos
+    # jogadores e momentos decisivos."
+    channel_description: Mapped[str] = mapped_column(Text, default="")
+
+    # Structured fields (optional but recommended)
+    niche: Mapped[str] = mapped_column(String(200), default="")          # e.g. "FPS competitivo"
+    target_audience: Mapped[str] = mapped_column(String(300), default="")  # e.g. "Jogadores casuais que querem melhorar"
+    tone_of_voice: Mapped[str] = mapped_column(String(100), default="")   # e.g. "educativo, analítico"
+    narrative_style: Mapped[str] = mapped_column(String(100), default="")  # e.g. "storytelling", "análise direta"
+    content_goals: Mapped[str] = mapped_column(Text, default="")          # what the channel wants to achieve
+    special_rules: Mapped[str] = mapped_column(Text, default="")          # specific rules/preferences for the AI
+
+    # Additional metadata (extensible)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    user: Mapped["User"] = relationship()
+
+    def __repr__(self) -> str:
+        return f"<ChannelProfile user={self.user_id} niche={self.niche!r}>"
+
+    def to_prompt_context(self) -> str:
+        """Build a natural-language context block for LLM prompts.
+
+        This is the text that gets injected into system/user prompts across
+        the pipeline so the AI knows the channel's identity and direction.
+        """
+        parts = []
+        if self.channel_description:
+            parts.append(f"Descrição do canal: {self.channel_description}")
+        if self.niche:
+            parts.append(f"Nicho: {self.niche}")
+        if self.target_audience:
+            parts.append(f"Público-alvo: {self.target_audience}")
+        if self.tone_of_voice:
+            parts.append(f"Tom de voz: {self.tone_of_voice}")
+        if self.narrative_style:
+            parts.append(f"Estilo de narrativa: {self.narrative_style}")
+        if self.content_goals:
+            parts.append(f"Objetivos: {self.content_goals}")
+        if self.special_rules:
+            parts.append(f"Regras especiais: {self.special_rules}")
+        return "\n".join(parts) if parts else ""
+
+
+class KnowledgeChunk(Base):
+    """A chunk of a knowledge document, with embedding vector for RAG retrieval.
+
+    When a user uploads a knowledge document (PDF, TXT, MD, DOCX), the
+    document is parsed, chunked (structure-aware), and each chunk is embedded
+    via Ollama's embedding API. The embeddings are stored as JSON arrays
+    (SQLite-compatible) and used for cosine-similarity retrieval during
+    script generation.
+
+    This is the lightweight RAG layer — no external vector DB needed.
+    Retrieval is in-memory cosine similarity, which is fine for hundreds
+    of chunks per channel (typical use case).
+    """
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    document_id: Mapped[Optional[int]] = mapped_column(ForeignKey("documents.id"), nullable=True, index=True)
+
+    # Game association: NULL = general channel knowledge (always retrieved),
+    # non-NULL = game-specific knowledge (only retrieved when generating
+    # content for that game). This prevents cross-game knowledge leakage.
+    game_id: Mapped[Optional[int]] = mapped_column(ForeignKey("games.id"), nullable=True, index=True)
+
+    # The chunk text (the actual content that gets retrieved and injected
+    # into LLM prompts as "channel knowledge context")
+    content: Mapped[str] = mapped_column(Text)
+
+    # Embedding vector stored as JSON array of floats.
+    # SQLite doesn't have a native vector type, so we store as JSON and
+    # compute cosine similarity in Python (fast for hundreds of chunks).
+    embedding: Mapped[list] = mapped_column(JSON, default=list)
+
+    # Chunk metadata for traceability and context building
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0)  # position in document
+    section: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # heading path
+    char_start: Mapped[int] = mapped_column(Integer, default=0)
+    char_end: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Embedding model used (for invalidation if model changes)
+    embedding_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    def __repr__(self) -> str:
+        return f"<KnowledgeChunk #{self.id} doc={self.document_id} idx={self.chunk_index}>"

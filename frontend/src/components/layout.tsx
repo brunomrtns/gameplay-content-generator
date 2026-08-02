@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { Toaster } from "sonner";
+import { UploadIndicator } from "@/components/upload-indicator";
 
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -69,6 +70,9 @@ export function Layout() {
               </NavLink>
             ))}
           </nav>
+
+          {/* Upload indicator (persistent across pages) */}
+          <UploadIndicator />
 
           {/* User menu */}
           <div className="relative">

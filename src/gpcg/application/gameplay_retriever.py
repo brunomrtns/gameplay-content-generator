@@ -192,6 +192,21 @@ class GameplayRetriever:
                 for ev in events:
                     all_events.append((src, ev))
 
+        # Last resort: if still no events (e.g. interesting_score not set),
+        # grab random events regardless of score
+        if not all_events:
+            log.info(f"no interesting events (score>=0.3) for game #{game_id}, "
+                     f"using random events from {len(compatible_sources)} sources")
+            for src in compatible_sources:
+                events = session.execute(
+                    select(GameplayEvent)
+                    .where(GameplayEvent.source_id == src.id)
+                    .order_by(GameplayEvent.id)
+                    .limit(20)
+                ).scalars().all()
+                for ev in events:
+                    all_events.append((src, ev))
+
         if not all_events:
             return []
 
@@ -226,7 +241,7 @@ class GameplayRetriever:
 
             # Build the SelectedClip
             # We need a GameplayAsset — but the semantic index doesn't use assets.
-            # We create a pseudo-clip using the source directly.
+            # We create a pseudo-asset using the source directly.
             # The render stage will extract the segment from the source file.
             from gpcg.domain.models import GameplayAsset
             # Find or create a pseudo-asset for this source
@@ -235,8 +250,18 @@ class GameplayRetriever:
             ).scalars().first()
 
             if asset is None:
-                # No asset registered — skip (the source needs at least one asset)
-                continue
+                # No asset registered — create a pseudo-asset for this source
+                # so we can build a SelectedClip from the event's time range
+                asset = GameplayAsset(
+                    source_id=src.id,
+                    label=f"auto:{src.filename}",
+                    start_sec=0.0,
+                    end_sec=src.duration or 0.0,
+                    duration=src.duration or 0.0,
+                    used_count=0,
+                )
+                session.add(asset)
+                session.flush()
 
             clip = SelectedClip(
                 asset=asset,

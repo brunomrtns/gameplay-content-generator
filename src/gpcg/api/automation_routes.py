@@ -21,6 +21,8 @@ from sqlalchemy.orm import Session
 
 from gpcg.domain.models import (
     Automation,
+    ContentPlan,
+    Game,
     GameplaySource,
     IngestionStatus,
     Job,
@@ -32,6 +34,9 @@ from gpcg.domain.models import (
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db, session_scope
 from gpcg.infrastructure.google_integration_adapter import GoogleIntegrationAdapter
+from gpcg.logging import get_logger
+
+log = get_logger(__name__)
 
 router = APIRouter(tags=["automation"])
 
@@ -168,6 +173,11 @@ def create_job_from_automation(user_id: int) -> int | None:
     - automation.status == 'running'
     - não há job em andamento (queued/running) para o usuário
 
+    O sistema decide autonomamente qual jogo e tema abordar, analisando:
+    - quais jogos têm gameplays prontas
+    - quais jogos têm conhecimento (facts, chunks)
+    - quais temas já foram produzidos (para evitar repetição)
+
     Retorna o job_id ou None se não puder criar (sem gameplays, sem YouTube, etc).
     """
     with session_scope() as session:
@@ -199,36 +209,91 @@ def create_job_from_automation(user_id: int) -> int | None:
         if active_jobs > 0:
             return None
 
-        # Create the job
-        from gpcg.application.generation_service import GenerationService
-        from gpcg.infrastructure.llm import get_llm
+    # ── Editorial decision: decide what to produce ──────────────────────
+    # The system autonomously picks a game + topic based on available
+    # gameplays, knowledge, and production history. The user does NOT
+    # specify a topic — the AI acts as the channel's editor.
+    from gpcg.application.editorial_strategy import EditorialStrategyService
+    from gpcg.infrastructure.llm import get_llm
+
+    editorial = EditorialStrategyService(llm=get_llm())
+    with session_scope() as session:
+        decision = editorial.decide_next_video(session, user_id)
+
+    if not decision.success:
+        log.info(f"automation: editorial decision failed: {decision.error}")
+        return None
+
+    # Create the job using the editorial decision
+    from gpcg.application.generation_service import GenerationService
+
+    with session_scope() as session:
+        auto = session.query(Automation).filter(Automation.user_id == user_id).first()
+        config = auto.config or {} if auto else {}
 
         service = GenerationService(llm=get_llm())
-        config = auto.config or {}
 
-        job = service.create_curiosity_job(
-            user_id=user_id,
-            background_game_id=config.get("background_game_id"),
-            target_duration=config.get("target_duration", 60),
-            scene_duration=config.get("scene_duration"),
-            video_format=config.get("video_format"),
-            subtitle_font=config.get("subtitle_font"),
-            subtitle_font_size=config.get("subtitle_font_size"),
-            subtitle_color=config.get("subtitle_color"),
-            subtitle_outline_color=config.get("subtitle_outline_color"),
-            subtitle_position=config.get("subtitle_position"),
-            subtitle_case=config.get("subtitle_case"),
+        # Common subtitle/transition/voice config from automation
+        subtitle_kwargs = dict(
+            scene_duration=config.get("scene_duration", 0),
+            video_format=config.get("video_format", ""),
+            subtitle_font=config.get("subtitle_font", ""),
+            subtitle_font_size=config.get("subtitle_font_size", 0),
+            subtitle_color=config.get("subtitle_color", ""),
+            subtitle_outline_color=config.get("subtitle_outline_color", ""),
+            subtitle_position=config.get("subtitle_position", ""),
+            subtitle_case=config.get("subtitle_case", ""),
             subtitle_box_enabled=config.get("subtitle_box_enabled"),
-            subtitle_box_color=config.get("subtitle_box_color"),
-            subtitle_box_padding=config.get("subtitle_box_padding"),
-            subtitle_stroke_color=config.get("subtitle_stroke_color"),
-            subtitle_stroke_width=config.get("subtitle_stroke_width"),
+            subtitle_box_color=config.get("subtitle_box_color", ""),
+            subtitle_box_padding=config.get("subtitle_box_padding", 0),
+            subtitle_stroke_color=config.get("subtitle_stroke_color", ""),
+            subtitle_stroke_width=config.get("subtitle_stroke_width", 0),
             subtitle_rounded_box=config.get("subtitle_rounded_box"),
-            transition_type=config.get("transition_type"),
-            transition_duration=config.get("transition_duration"),
-            voice=config.get("voice"),
-            creative_style=config.get("creative_style"),
+            transition_type=config.get("transition_type", ""),
+            transition_duration=config.get("transition_duration", 0),
+            creative_style=config.get("creative_style", ""),
         )
+        # Voice: resolve filename to path
+        voice_name = config.get("voice", "")
+        voice_path = ""
+        if voice_name:
+            from gpcg.config import get_settings
+            settings = get_settings()
+            vp = settings.voices_dir / voice_name
+            if vp.exists():
+                voice_path = str(vp)
+        subtitle_kwargs["voice_path"] = voice_path
+
+        if decision.job_type == "generate_short" and decision.game_id:
+            # Game-specific short: the editorial AI picked a game
+            game = session.get(Game, decision.game_id)
+            if not game:
+                log.warning(f"automation: game {decision.game_id} not found")
+                return None
+            job = service.create_job(
+                game.id,
+                user_id=user_id,
+                **subtitle_kwargs,
+            )
+            # Store editorial decision in artifacts for the content planner
+            with session_scope() as s2:
+                j = s2.get(Job, job.id)
+                j.artifacts = {
+                    **j.artifacts,
+                    "editorial_decision": decision.to_dict(),
+                    "fact_id": decision.fact_id,
+                }
+                s2.flush()
+        elif decision.job_type == "curiosity_short" and decision.background_game_id:
+            job = service.create_curiosity_job(
+                background_game_id=decision.background_game_id,
+                fact_id=decision.fact_id,
+                user_id=user_id,
+                **subtitle_kwargs,
+            )
+        else:
+            log.warning(f"automation: invalid editorial decision: {decision.to_dict()}")
+            return None
 
         # Update last_run_at
         from datetime import datetime, timezone
@@ -356,6 +421,29 @@ def dashboard(
         Video.user_id == user.id
     ).order_by(Video.created_at.desc()).limit(5).all()
 
+    # Build recent video list with social_title from job artifacts
+    recent_list = []
+    for v in recent_videos:
+        social_title = None
+        if v.job_id:
+            job = db.get(Job, v.job_id)
+            if job and isinstance(job.artifacts, dict):
+                social_title = job.artifacts.get("social_title")
+        cp = db.get(ContentPlan, v.content_plan_id) if v.content_plan_id else None
+        recent_list.append({
+            "id": v.id,
+            "status": v.status,
+            "created_at": v.created_at.isoformat() if v.created_at else None,
+            "qa_score": v.qa_score,
+            "qa_passed": v.qa_report.get("passed", False) if v.qa_report else False,
+            "duration": v.duration,
+            "thumbnail_path": v.thumbnail_path,
+            "topic": cp.topic if cp else None,
+            "social_title": social_title,
+            "youtube_url": v.youtube_url,
+            "youtube_video_id": v.youtube_video_id,
+        })
+
     # Automation
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     auto_status = auto.status if auto else "idle"
@@ -377,13 +465,5 @@ def dashboard(
             "published": published_videos,
         },
         "automation_status": auto_status,
-        "recent_videos": [
-            {
-                "id": v.id,
-                "status": v.status,
-                "created_at": v.created_at.isoformat() if v.created_at else None,
-                "qa_score": v.qa_score,
-            }
-            for v in recent_videos
-        ],
+        "recent_videos": recent_list,
     }

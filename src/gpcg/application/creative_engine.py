@@ -43,7 +43,7 @@ from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 
 if TYPE_CHECKING:
-    from gpcg.domain.creative_plan import HumorPlan
+    from gpcg.domain.creative_plan import HumorPlan, NarrativeBeat, VideoCreativePlan
 
 log = get_logger(__name__)
 
@@ -282,6 +282,65 @@ Retorne APENAS JSON válido, sem markdown, sem texto antes ou depois:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Beat-oriented prompt (V2 — material oriented by narrative beats)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+BEAT_ORIENTED_PROMPT_TEMPLATE = """Você é o MOTOR CRIATIVO de um canal brasileiro de Shorts de games.
+
+Você está trabalhando com um PLANO EDITORIAL que define a estrutura narrativa
+em BEATS. Seu trabalho é gerar material criativo ORIENTADO POR BEAT — não
+genérico, mas específico para cada momento da narrativa.
+
+Sua personalidade:
+- Português brasileiro natural, como um criador de conteúdo real falaria
+- Humor espontâneo, não forçado (se o plano permitir humor)
+- Observações inesperadas, analogias criativas
+- Frases que soem faladas por uma pessoa real, não por IA
+
+EVITE:
+- Frases genéricas de IA ("prepare-se para uma jornada", "incrível, não é?")
+- Piadas forçadas ou previsíveis
+- Repetir o que o fato já diz de forma óbvia
+- Material genérico que não se conecta com o beat específico
+
+ESTILO ATUAL:
+{style_block}
+
+IDEIA CENTRAL DO VÍDEO:
+{central_idea}
+
+BEATS DA NARRATIVA (gere material específico para cada beat):
+{beats_block}
+
+Seu trabalho: dado um FATO e um CONTEXTO, gere material criativo ORIENTADO
+pelos beats acima. NÃO gere material genérico — cada item deve servir para
+o beat específico.
+
+Gere:
+- 3 hooks específicos para o beat "hook" (primeiras frases que prendem nos
+  primeiros 3 segundos, alinhadas com a ideia central)
+- 3 ângulos para o beat "development" (formas de desenvolver a ideia central
+  de modo interessante)
+- 3 opções de payoff para o beat "payoff" (frases de impacto que entregam
+  o que o hook promete)
+- 3 observações para os beats de commentary (comentários, analogias,
+  conexões inesperadas que surgem naturalmente do conteúdo)
+
+Cada item deve ser uma frase curta (1-2 linhas), em pt-BR, original e
+específica para o beat. NÃO use placeholders genéricos.
+
+Retorne APENAS JSON válido, sem markdown, sem texto antes ou depois:
+{{
+  "hooks": ["...", "...", "..."],
+  "angles": ["...", "...", "..."],
+  "punchlines": ["...", "...", "..."],
+  "observations": ["...", "...", "..."]
+}}
+"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CreativeEngine
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -369,6 +428,100 @@ class CreativeEngine:
             f"observations={len(material.observations)}"
         )
         return material
+
+    def generate_beat_oriented_material(
+        self,
+        *,
+        topic: str,
+        fact: str,
+        context: str = "",
+        style: Optional[CreativeStyle] = None,
+        humor_plan: Optional["HumorPlan"] = None,
+        model_override: Optional[str] = None,
+        narrative_beats: Optional[list["NarrativeBeat"]] = None,
+        central_idea: str = "",
+    ) -> CreativeMaterial:
+        """Generate beat-oriented creative material (V2).
+
+        Instead of generic hooks/angles/punchlines/observations, this method
+        generates material ORIENTED BY NARRATIVE BEAT — 3 hooks for the
+        "hook" beat, 3 angles for "development", 3 payoffs for "payoff",
+        3 observations for commentary beats.
+
+        Gated by GPCG_CREATIVE_ENGINE_BEAT_ORIENTED. When off, falls back
+        to generate_creative_material (generic).
+
+        Gate: only runs if humor.enabled OR tone.casual >= 0.5. For purely
+        informative videos, the engine is skipped.
+        """
+        s = self.settings
+        if not s.gpcg_creative_engine_enabled:
+            return CreativeMaterial.empty(style="disabled", error="creative engine disabled")
+
+        # V2 gate: skip for purely informative videos
+        if humor_plan is not None and not humor_plan.enabled:
+            # Check tone.casual — if we don't have the plan, we can't check,
+            # so we rely on the caller to pass humor_plan. If humor is off
+            # and we have no tone info, skip (conservative).
+            log.info("creative_engine skipped: humor disabled (beat-oriented gate)")
+            return CreativeMaterial.empty(style="no_humor", error="humor disabled (beat-oriented gate)")
+
+        # If beat-oriented is disabled or no beats provided, fall back to generic
+        if not getattr(s, "gpcg_creative_engine_beat_oriented", False) or not narrative_beats:
+            return self.generate_creative_material(
+                topic=topic, fact=fact, context=context, style=style,
+                humor_plan=humor_plan, model_override=model_override,
+            )
+
+        style = style or get_style(s.gpcg_creative_engine_style)
+
+        # Adjust style based on humor plan if provided
+        if humor_plan is not None and humor_plan.enabled:
+            style = self._adjust_style_for_humor(style, humor_plan)
+
+        model = model_override or s.gpcg_creative_engine_model
+        temperature = s.gpcg_creative_engine_temperature
+        max_tokens = s.gpcg_creative_engine_max_tokens
+
+        beats_block = self._format_beats(narrative_beats)
+        system = BEAT_ORIENTED_PROMPT_TEMPLATE.format(
+            style_block=_build_style_block(style),
+            central_idea=central_idea or "(não especificada)",
+            beats_block=beats_block,
+        )
+        user_prompt = self._build_user_prompt(topic=topic, fact=fact, context=context)
+
+        llm = self.llm or LLMClient()
+        t0 = time.monotonic()
+        try:
+            data = llm.chat_json(
+                system,
+                user_prompt,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        except LLMError as e:
+            return self._on_failure(style=style.name, model=model, error=str(e), t0=t0)
+
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        material = self._parse_material(data, style=style.name, model=model, latency_ms=latency_ms)
+        log.info(
+            f"creative_engine (beat-oriented): model={model} style={style.name} "
+            f"latency_ms={latency_ms} beats={len(narrative_beats)} "
+            f"hooks={len(material.hooks)} angles={len(material.angles)} "
+            f"punchlines={len(material.punchlines)} observations={len(material.observations)}"
+        )
+        return material
+
+    def _format_beats(self, beats: list["NarrativeBeat"]) -> str:
+        """Format narrative beats for the beat-oriented prompt."""
+        if not beats:
+            return "(nenhum beat definido)"
+        lines = []
+        for beat in beats:
+            lines.append(f"  - {beat.label}: {beat.description} (tipo: {beat.content_type})")
+        return "\n".join(lines)
 
     def _adjust_style_for_humor(self, style: CreativeStyle, humor_plan: "HumorPlan") -> CreativeStyle:
         """Adjust a CreativeStyle based on the editorial HumorPlan.

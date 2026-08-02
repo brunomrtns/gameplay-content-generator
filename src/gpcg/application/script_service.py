@@ -25,7 +25,7 @@ from typing import Optional, TYPE_CHECKING
 from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
-from gpcg.domain.creative_plan import VideoCreativePlan
+from gpcg.domain.creative_plan import StoryConcept, VideoCreativePlan
 from gpcg.domain.models import ContentPlan, Fact, Script, ScriptStatus
 from gpcg.domain.originality import check_originality
 from gpcg.infrastructure.llm import LLMClient, LLMError
@@ -39,6 +39,12 @@ log = get_logger(__name__)
 
 DRAFT_SYSTEM = """You are a scriptwriter for a gaming YouTube Shorts channel.
 Write a narration script in Brazilian Portuguese (pt-BR) for a vertical Short.
+
+CRITICAL — LANGUAGE:
+The script MUST be written EXCLUSIVELY in Brazilian Portuguese (pt-BR).
+Even if the reference knowledge provided as context is in English or another
+language, your output must be 100% in Portuguese. Never use English words or
+phrases unless they are proper nouns or gaming terms universally used in pt-BR.
 
 Rules:
 - Start with a STRONG hook (the first sentence must grab attention)
@@ -67,6 +73,12 @@ Return JSON: {"script": "<the narration text>"}"""
 
 PLAN_DRAFT_SYSTEM = """You are a scriptwriter for a Brazilian gaming YouTube Shorts channel.
 Write a narration script in Brazilian Portuguese (pt-BR) for a vertical Short.
+
+CRITICAL — LANGUAGE:
+The script MUST be written EXCLUSIVELY in Brazilian Portuguese (pt-BR).
+Even if the reference knowledge provided as context is in English or another
+language, your output must be 100% in Portuguese. Never use English words or
+phrases unless they are proper nouns or gaming terms universally used in pt-BR.
 
 You are following an EDITORIAL PLAN. Respect the plan's central idea, narrative
 beats, tone, and humor strategy. The plan is your editorial guide.
@@ -154,6 +166,11 @@ REVISION_SYSTEM = """You are revising a narration script for a Brazilian gaming 
 A script critic reviewed the previous draft and found issues. Your job is to
 produce an improved version that addresses the critic's feedback.
 
+CRITICAL — LANGUAGE:
+The revised script MUST be written EXCLUSIVELY in Brazilian Portuguese (pt-BR).
+Even if the reference knowledge provided as context is in English or another
+language, your output must be 100% in Portuguese.
+
 ## Rules
 
 1. Address each issue the critic raised. If the critic says "REMOVE this passage",
@@ -202,7 +219,9 @@ Given a draft script, improve it for:
   or context about the existing fact. Do NOT invent new game mechanics to fill
   space. Do NOT shorten an already-short script.
 
-Keep it in pt-BR. Plain text only.
+CRITICAL — LANGUAGE: The output MUST be EXCLUSIVELY in Brazilian Portuguese (pt-BR).
+Even if reference knowledge context is in English, the script must be 100% Portuguese.
+Plain text only.
 
 Return JSON: {"script": "<optimized narration>", "changes": "<brief list of changes>"}"""
 
@@ -215,7 +234,8 @@ so that it conveys the same fact and narrative arc but uses entirely different:
 - Narrative framing (rephrase the hook, change transitions, reorder ideas)
 
 Constraints:
-- Keep it in pt-BR
+- CRITICAL: The output MUST be EXCLUSIVELY in Brazilian Portuguese (pt-BR).
+  Even if reference knowledge context is in English, the script must be 100% Portuguese.
 - Keep the same FACT (do not invent or omit information)
 - Keep clean punctuation for TTS
 - Match the target character count specified in the user prompt
@@ -236,6 +256,9 @@ class ScriptService:
         *,
         creative_material: Optional["CreativeMaterial"] = None,
         creative_plan: Optional[VideoCreativePlan] = None,
+        story_concept: Optional[StoryConcept] = None,
+        channel_context: str = "",
+        knowledge_context: str = "",
         critic_feedback: Optional[str] = None,
         previous_script: Optional[str] = None,
     ) -> Optional[Script]:
@@ -249,6 +272,11 @@ class ScriptService:
         When `creative_plan` is provided (non-None and successful), the draft
         uses the plan's central idea, narrative beats, tone, and humor strategy.
         The LLM model is also selected from the plan (gemma3 vs qwen3).
+
+        When `story_concept` is provided (V2, non-None and successful), the
+        draft prompt incorporates the angle, curiosity_gap, narrative_hook,
+        and frame from the Story Finder. The narrative_hook becomes the
+        suggested opening line; the frame informs how the fact is presented.
 
         When `critic_feedback` + `previous_script` are provided, this is a
         REVISION pass — the script is regenerated using the critic's feedback
@@ -285,11 +313,27 @@ class ScriptService:
         else:
             context_line = "Context: General curiosity\n"
 
+        # ── Channel context + knowledge (per-channel personalization) ──────
+        # The channel profile tells the AI what kind of channel this is
+        # (niche, audience, tone, narrative style). The knowledge context
+        # provides RAG-retrieved chunks from the user's uploaded documents.
+        # Both are injected into the prompt so the script is personalized
+        # to the channel rather than generic.
+        channel_block = ""
+        if channel_context:
+            channel_block = f"\nIDENTIDADE DO CANAL:\n{channel_context}\n"
+        knowledge_block = ""
+        if knowledge_context:
+            knowledge_block = f"\n{knowledge_context}\n"
+
         # ── Revision pass (critic feedback) ────────────────────────────────
         if critic_feedback and previous_script:
             revision_prompt = self._build_revision_prompt(
                 plan, fact_text, previous_script, critic_feedback, creative_plan, s
             )
+            # Inject channel context + knowledge into revision
+            if channel_block or knowledge_block:
+                revision_prompt = f"{channel_block}{knowledge_block}\n{revision_prompt}"
             try:
                 rev_data = llm.chat_json(
                     REVISION_SYSTEM, revision_prompt,
@@ -337,12 +381,14 @@ class ScriptService:
         if creative_plan is not None and creative_plan.success:
             draft_system = PLAN_DRAFT_SYSTEM
             draft_prompt = self._build_plan_draft_prompt(
-                plan, fact_text, creative_plan, s
+                plan, fact_text, creative_plan, s, story_concept=story_concept,
+                channel_block=channel_block, knowledge_block=knowledge_block,
             )
         else:
             draft_system = DRAFT_SYSTEM
             draft_prompt = (
                 f"{context_line}"
+                f"{channel_block}{knowledge_block}"
                 f"Topic: {plan.topic}\n"
                 f"Tone: {plan.tone}\n"
                 f"Energy: {plan.energy}\n"
@@ -354,6 +400,9 @@ class ScriptService:
                 f"Do NOT write a short script. Expand with context, examples, and commentary "
                 f"about the fact to fill the time."
             )
+            # V2: incorporate StoryConcept even without a creative plan
+            if story_concept is not None and story_concept.success:
+                draft_prompt += self._format_story_concept(story_concept)
 
         # Enrich with creative material when available
         if creative_material is not None and creative_material.success:
@@ -506,8 +555,21 @@ class ScriptService:
         fact_text: str,
         creative_plan: VideoCreativePlan,
         s,
+        *,
+        story_concept: Optional[StoryConcept] = None,
+        channel_block: str = "",
+        knowledge_block: str = "",
     ) -> str:
-        """Build the draft prompt oriented by the VideoCreativePlan."""
+        """Build the draft prompt oriented by the VideoCreativePlan.
+
+        When a StoryConcept is available (V2), the angle, curiosity_gap,
+        narrative_hook, and frame are added so the scriptwriter opens with
+        the narrative_hook and frames the fact as the story finder decided.
+
+        When channel_block/knowledge_block are provided, the channel's
+        identity and RAG-retrieved knowledge are injected so the script is
+        personalized to the channel rather than generic.
+        """
         # Context line
         if plan.game is not None:
             context_line = f"Game: {plan.game.canonical_name}\n"
@@ -521,6 +583,13 @@ class ScriptService:
 
         parts = [
             context_line,
+        ]
+        # Inject channel identity + knowledge before the video type
+        if channel_block:
+            parts.append(channel_block.strip())
+        if knowledge_block:
+            parts.append(knowledge_block.strip())
+        parts.extend([
             f"VIDEO TYPE: {creative_plan.video_type}",
             f"",
             f"CENTRAL IDEA: {creative_plan.central_idea}",
@@ -531,7 +600,21 @@ class ScriptService:
             f"~{plan.target_duration} seconds of TTS narration.",
             f"CRITICAL: The script MUST be at least {s.gpcg_narration_min_chars} characters long.",
             f"",
-        ]
+        ])
+
+        # V2: Story Concept — the editorial angle and frame
+        if story_concept is not None and story_concept.success:
+            parts.append("STORY CONCEPT (the editorial angle — use this to orient the script):")
+            parts.append(f"  ANGLE: {story_concept.angle}")
+            parts.append(f"  CURIOSITY_GAP: {story_concept.curiosity_gap}")
+            parts.append(f"  NARRATIVE_HOOK (suggested opening line): {story_concept.narrative_hook}")
+            parts.append(f"  FRAME: {story_concept.frame}")
+            if story_concept.is_insight:
+                parts.append(f"  This is an INSIGHT — it illuminates the whole. Build toward the 'aha' moment.")
+            else:
+                parts.append(f"  This is TRIVIA — an isolated detail. Don't force a deeper meaning.")
+            parts.append(f"  Open with the narrative_hook (or a variation). Use the frame to present the fact.")
+            parts.append("")
 
         # Narrative beats
         if creative_plan.narrative_beats:
@@ -570,6 +653,22 @@ class ScriptService:
         parts.append("Write the narration script now. Follow the editorial plan. Return JSON.")
 
         return "\n".join(parts)
+
+    def _format_story_concept(self, concept: StoryConcept) -> str:
+        """Format a StoryConcept as an extra prompt section for the draft LLM.
+
+        Used when a creative_plan is NOT available (legacy path) but a
+        story_concept is. The angle and frame steer the script even without
+        a full editorial plan.
+        """
+        return (
+            f"\nSTORY CONCEPT (use this to orient the script):\n"
+            f"  ANGLE: {concept.angle}\n"
+            f"  CURIOSITY_GAP: {concept.curiosity_gap}\n"
+            f"  NARRATIVE_HOOK (suggested opening line): {concept.narrative_hook}\n"
+            f"  FRAME: {concept.frame}\n"
+            f"Open with the narrative_hook (or a variation). Use the frame to present the fact.\n"
+        )
 
     def _build_revision_prompt(
         self,

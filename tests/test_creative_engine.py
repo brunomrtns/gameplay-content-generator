@@ -358,4 +358,141 @@ class TestScriptServiceIntegration:
         m = CreativeMaterial(success=True)
         formatted = svc._format_creative_material(m)
         assert "MATERIAL CRIATIVO" in formatted
-        assert "(nenhum)" in formatted
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# V2: Beat-oriented creative engine tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestBeatOrientedCreativeEngine:
+    """Tests for the V2 beat-oriented creative material generation."""
+
+    @pytest.fixture(autouse=True)
+    def _enable_beat_oriented(self, monkeypatch):
+        monkeypatch.setenv("GPCG_CREATIVE_ENGINE_ENABLED", "true")
+        monkeypatch.setenv("GPCG_CREATIVE_ENGINE_BEAT_ORIENTED", "true")
+        monkeypatch.setenv("GPCG_CREATIVE_ENGINE_FALLBACK", "true")
+        from gpcg.config import get_settings
+        get_settings.cache_clear()
+        yield
+        get_settings.cache_clear()
+
+    def test_beat_oriented_generates_material(self):
+        """generate_beat_oriented_material returns material with hooks/angles/punchlines/observations."""
+        from gpcg.domain.creative_plan import HumorPlan, NarrativeBeat
+        beats = [
+            NarrativeBeat(label="hook", description="grab attention", content_type="observation"),
+            NarrativeBeat(label="development", description="explore the idea", content_type="fact"),
+            NarrativeBeat(label="payoff", description="deliver the promise", content_type="observation"),
+        ]
+        humor = HumorPlan.low()
+        fake = FakeLLM(response={
+            "hooks": ["hook1", "hook2", "hook3"],
+            "angles": ["angle1", "angle2", "angle3"],
+            "punchlines": ["payoff1", "payoff2", "payoff3"],
+            "observations": ["obs1", "obs2", "obs3"],
+        })
+        engine = CreativeEngine(llm=fake)
+        material = engine.generate_beat_oriented_material(
+            topic="test topic", fact="test fact", context="Game: TestGame",
+            humor_plan=humor, narrative_beats=beats, central_idea="the central idea",
+        )
+        assert material.success
+        assert len(material.hooks) == 3
+        assert len(material.angles) == 3
+        assert len(material.punchlines) == 3
+        assert len(material.observations) == 3
+        # The prompt should include the beats and central idea
+        assert len(fake.calls) == 1
+        system = fake.calls[0]["system"]
+        assert "IDEIA CENTRAL" in system
+        assert "BEATS DA NARRATIVA" in system
+        assert "the central idea" in system
+
+    def test_beat_oriented_skipped_when_humor_disabled(self):
+        """When humor is disabled, beat-oriented generation is skipped (gate)."""
+        from gpcg.domain.creative_plan import HumorPlan, NarrativeBeat
+        beats = [NarrativeBeat(label="hook", description="d", content_type="fact")]
+        humor = HumorPlan.none()  # humor disabled
+        engine = CreativeEngine(llm=FakeLLM())
+        material = engine.generate_beat_oriented_material(
+            topic="t", fact="f", humor_plan=humor, narrative_beats=beats,
+        )
+        assert not material.success
+        assert "humor disabled" in material.error
+
+    def test_beat_oriented_falls_back_when_flag_off(self):
+        """When GPCG_CREATIVE_ENGINE_BEAT_ORIENTED=false, falls back to generic."""
+        from gpcg.config import get_settings
+        from gpcg.domain.creative_plan import HumorPlan, NarrativeBeat
+        get_settings.cache_clear()
+        import os
+        os.environ.pop("GPCG_CREATIVE_ENGINE_BEAT_ORIENTED", None)
+        get_settings.cache_clear()
+        beats = [NarrativeBeat(label="hook", description="d", content_type="fact")]
+        humor = HumorPlan.low()
+        fake = FakeLLM(response={
+            "hooks": ["h1", "h2", "h3", "h4", "h5"],
+            "angles": ["a1", "a2", "a3", "a4", "a5"],
+            "punchlines": ["p1", "p2", "p3", "p4", "p5"],
+            "observations": ["o1", "o2", "o3", "o4", "o5"],
+        })
+        engine = CreativeEngine(llm=fake)
+        material = engine.generate_beat_oriented_material(
+            topic="t", fact="f", humor_plan=humor, narrative_beats=beats,
+        )
+        # Should fall back to generic (5 items each)
+        assert material.success
+        assert len(material.hooks) == 5
+        # Restore for other tests
+        os.environ["GPCG_CREATIVE_ENGINE_BEAT_ORIENTED"] = "true"
+        get_settings.cache_clear()
+
+    def test_beat_oriented_falls_back_when_no_beats(self):
+        """When no beats are provided, falls back to generic generation."""
+        from gpcg.domain.creative_plan import HumorPlan
+        humor = HumorPlan.low()
+        fake = FakeLLM(response={
+            "hooks": ["h1", "h2", "h3", "h4", "h5"],
+            "angles": [], "punchlines": [], "observations": [],
+        })
+        engine = CreativeEngine(llm=fake)
+        material = engine.generate_beat_oriented_material(
+            topic="t", fact="f", humor_plan=humor, narrative_beats=None,
+        )
+        # Falls back to generic
+        assert material.success
+
+    def test_beat_oriented_llm_error_returns_empty(self):
+        """When the LLM fails, beat-oriented generation returns empty material (no raise)."""
+        from gpcg.domain.creative_plan import HumorPlan, NarrativeBeat
+        beats = [NarrativeBeat(label="hook", description="d", content_type="fact")]
+        humor = HumorPlan.low()
+        fake = FakeLLM(error="LLM boom")
+        engine = CreativeEngine(llm=fake)
+        material = engine.generate_beat_oriented_material(
+            topic="t", fact="f", humor_plan=humor, narrative_beats=beats,
+        )
+        assert not material.success
+        assert "LLM boom" in material.error
+
+    def test_format_beats_helper(self):
+        """_format_beats formats NarrativeBeat list for the prompt."""
+        from gpcg.domain.creative_plan import NarrativeBeat
+        engine = CreativeEngine(llm=FakeLLM())
+        beats = [
+            NarrativeBeat(label="hook", description="grab attention", content_type="observation"),
+            NarrativeBeat(label="payoff", description="deliver promise", content_type="observation"),
+        ]
+        formatted = engine._format_beats(beats)
+        assert "hook" in formatted
+        assert "grab attention" in formatted
+        assert "payoff" in formatted
+        assert "deliver promise" in formatted
+
+    def test_format_beats_empty(self):
+        """_format_beats returns placeholder when no beats."""
+        engine = CreativeEngine(llm=FakeLLM())
+        formatted = engine._format_beats([])
+        assert "nenhum beat" in formatted.lower()

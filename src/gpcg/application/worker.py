@@ -78,11 +78,22 @@ def run_worker() -> None:
 
 
 def _claim_next_job() -> Optional[int]:
-    """Atomically claim the next queued/retrying job. Returns job_id or None."""
+    """Atomically claim the next queued/retrying job. Returns job_id or None.
+
+    Only claims jobs WITHOUT required_capabilities — those are destined for
+    the RemoteWorker (Compute Plane). Jobs with required_capabilities (e.g.,
+    mapping, knowledge_index) are processed by the RemoteWorker via the
+    /api/jobs/claim endpoint, not by this legacy worker.
+    """
     with session_scope() as session:
         job = session.execute(
             select(Job)
             .where(Job.status.in_([JobStatus.queued.value, JobStatus.retrying.value]))
+            .where(
+                (Job.required_capabilities == None)  # noqa: E711
+                | (Job.required_capabilities == "[]")
+                | (Job.required_capabilities == "")
+            )
             .order_by(Job.created_at.asc())
             .limit(1)
         ).scalar_one_or_none()

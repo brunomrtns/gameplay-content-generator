@@ -39,16 +39,19 @@ from gpcg.application.creative_engine import CreativeEngine, CreativeMaterial
 from gpcg.application.editorial_planner import EditorialPlanner
 from gpcg.application.gameplay_retriever import GameplayRetriever
 from gpcg.application.gameplay_selector import GameplaySelector
+from gpcg.application.humanization import Humanizer, HumanizationResult
 from gpcg.application.metadata_generator import MetadataGenerator
 from gpcg.application.qa_service import QAService, persist_qa_result
 from gpcg.application.render_plan_builder import RenderPlanBuilder
 from gpcg.application.script_critic import ScriptCritic
 from gpcg.application.script_service import ScriptService
+from gpcg.application.story_finder import StoryFinder
 from gpcg.config import get_settings
-from gpcg.domain.creative_plan import VideoCreativePlan
+from gpcg.domain.creative_plan import StoryConcept, VideoCreativePlan
 from gpcg.domain.game_repository import find_by_name
 from gpcg.domain.models import (
     ContentPlan,
+    Fact,
     Game,
     Job,
     JobStage,
@@ -90,6 +93,8 @@ class GenerationService:
         creative_engine: Optional[CreativeEngine] = None,
         editorial_planner: Optional[EditorialPlanner] = None,
         script_critic: Optional[ScriptCritic] = None,
+        story_finder: Optional[StoryFinder] = None,
+        humanizer: Optional[Humanizer] = None,
     ) -> None:
         self.llm = llm
         self.vg_adapter = vg_adapter
@@ -103,6 +108,10 @@ class GenerationService:
         # Editorial planner + script critic (new editorial pipeline stages)
         self.editorial_planner = editorial_planner or EditorialPlanner(llm=llm)
         self.script_critic = script_critic or ScriptCritic(llm=llm)
+        # V2: Story Finder (transforms fact into story before editorial planning)
+        self.story_finder = story_finder or StoryFinder(llm=llm)
+        # V2: Humanizer (breaks AI patterns, ensures orality)
+        self.humanizer = humanizer or Humanizer(llm=llm)
         # Gameplay retriever (uses semantic index when plan is available)
         self.gameplay_retriever = GameplayRetriever()
         # YouTube upload adapter (google-integration service)
@@ -341,6 +350,9 @@ class GenerationService:
             is_curiosity = job.type == JobType.curiosity_short.value
             bg_game_id = job.artifacts.get("background_game_id") if is_curiosity else None
             general_fact_id = job.artifacts.get("general_fact_id") if is_curiosity else None
+            # Editorial decision may specify a fact_id for generate_short
+            editorial_fact_id = job.artifacts.get("fact_id") if not is_curiosity else None
+            editorial_decision = job.artifacts.get("editorial_decision", {})
 
         # ── Stage: content_planning ─────────────────────────────────────────
         self._set_stage(job_id, JobStage.content_planning)
@@ -365,7 +377,21 @@ class GenerationService:
                     )
             else:
                 game = session.get(Game, job.game_id)
-                plan = planner.plan_for_game(session, job.game_id)
+                # Pass editorial fact_id if the editorial strategy picked one,
+                # and recent topics to avoid repetition
+                recent_topics = [
+                    r[0] for r in session.execute(
+                        select(ContentPlan.topic)
+                        .where(ContentPlan.user_id == job.user_id)
+                        .order_by(ContentPlan.created_at.desc())
+                        .limit(10)
+                    ).scalars().all() if r
+                ]
+                plan = planner.plan_for_game(
+                    session, job.game_id,
+                    fact_id=editorial_fact_id,
+                    avoid_topics=recent_topics,
+                )
                 if plan is None:
                     raise GenerationError(
                         f"no content plan could be created for '{game.canonical_name}' "
@@ -376,12 +402,21 @@ class GenerationService:
             job.artifacts = {**job.artifacts, "content_plan_id": plan.id}
             session.flush()
 
+        # ── Stage: story_finding (V2 — transforms fact into story) ──────────
+        story_concept: Optional[StoryConcept] = None
+        if self.settings.gpcg_story_finder_enabled:
+            self._set_stage(job_id, JobStage.story_finding)
+            story_concept = self._run_story_finding(
+                job_id, llm=llm, is_curiosity=is_curiosity, bg_game_id=bg_game_id
+            )
+
         # ── Stage: editorial_planning (NEW — produces VideoCreativePlan) ────
         creative_plan: Optional[VideoCreativePlan] = None
         if self.settings.gpcg_editorial_planning_enabled:
             self._set_stage(job_id, JobStage.editorial_planning)
             creative_plan = self._run_editorial_planning(
-                job_id, llm=llm, is_curiosity=is_curiosity, bg_game_id=bg_game_id
+                job_id, llm=llm, is_curiosity=is_curiosity, bg_game_id=bg_game_id,
+                story_concept=story_concept,
             )
 
         # ── Stage: creative_engine (optional, Qwen3-14B) ─────────────────────
@@ -402,16 +437,73 @@ class GenerationService:
         self._set_stage(job_id, JobStage.script)
         with session_scope() as session:
             job = session.get(Job, job_id)
+
+            # ── Channel context + knowledge retrieval (per-channel personalization) ──
+            # Fetch the user's channel profile and retrieve relevant knowledge
+            # chunks from their uploaded documents. This personalizes the script
+            # to the channel's niche, audience, tone, and accumulated knowledge.
+            channel_context = ""
+            knowledge_context = ""
+            user_id = job.artifacts.get("user_id") or job.user_id
+            if user_id:
+                try:
+                    from gpcg.domain.models import ChannelProfile
+                    profile = session.query(ChannelProfile).filter(
+                        ChannelProfile.user_id == user_id
+                    ).first()
+                    if profile:
+                        channel_context = profile.to_prompt_context()
+                except Exception as e:
+                    log.warning(f"Failed to load channel profile for user {user_id}: {e}")
+
+                try:
+                    from gpcg.application.knowledge_service import retrieve_knowledge, build_knowledge_context
+                    # Build query from plan topic + fact
+                    plan = session.get(ContentPlan, job.content_plan_id)
+                    fact_text = ""
+                    if plan and plan.fact_id:
+                        fact = session.get(Fact, plan.fact_id)
+                        if fact:
+                            fact_text = fact.claim
+                    retrieval_query = f"{plan.topic if plan else ''} {fact_text}".strip()
+                    # Determine the game_id for knowledge isolation:
+                    # - generate_short: job.game_id (the game being played)
+                    # - curiosity_short: bg_game_id (the background game)
+                    # This ensures we only retrieve knowledge for the correct game
+                    # plus general channel knowledge — never from other games.
+                    retrieval_game_id = bg_game_id if is_curiosity else job.game_id
+                    if retrieval_query:
+                        chunks = retrieve_knowledge(
+                            session, user_id, retrieval_query,
+                            game_id=retrieval_game_id,
+                        )
+                        knowledge_context = build_knowledge_context(chunks)
+                        if chunks:
+                            log.info(
+                                f"Retrieved {len(chunks)} knowledge chunks for script generation "
+                                f"(game_id={retrieval_game_id})"
+                            )
+                except Exception as e:
+                    log.warning(f"Failed to retrieve knowledge for user {user_id}: {e}")
+
             svc = ScriptService(llm=llm)
             script = svc.generate_script(
                 session, job.content_plan_id,
                 creative_material=creative_material,
                 creative_plan=creative_plan,
+                story_concept=story_concept,
+                channel_context=channel_context,
+                knowledge_context=knowledge_context,
             )
             if script is None:
                 raise GenerationError("script generation failed", JobStage.script.value)
             job.artifacts = {**job.artifacts, "script_id": script.id}
             session.flush()
+
+        # ── Stage: humanization (V2 — break AI patterns, ensure orality) ────
+        if self.settings.gpcg_humanization_enabled:
+            self._set_stage(job_id, JobStage.humanization)
+            self._run_humanization(job_id, llm=llm, creative_plan=creative_plan)
 
         # ── Stage: script_review (NEW — ScriptCritic evaluates + may revise) ─
         if self.settings.gpcg_script_critic_enabled:
@@ -783,11 +875,14 @@ class GenerationService:
         llm: LLMClient,
         is_curiosity: bool,
         bg_game_id: Optional[int],
+        story_concept: Optional[StoryConcept] = None,
     ) -> Optional[VideoCreativePlan]:
         """Run the editorial planning stage for a job.
 
         Produces a VideoCreativePlan that decides video type, central idea,
         narrative beats, tone, humor plan, and model recommendation.
+        When a StoryConcept is available (V2), it's passed to the planner so
+        the angle becomes the central idea and the frame informs the plan.
         Persists the plan into job.artifacts["creative_plan"].
         """
         with session_scope() as session:
@@ -799,7 +894,8 @@ class GenerationService:
 
             job_type = JobType.curiosity_short.value if is_curiosity else JobType.generate_short.value
             creative_plan = self.editorial_planner.plan(
-                session, plan, job_type=job_type, background_game_id=bg_game_id
+                session, plan, job_type=job_type, background_game_id=bg_game_id,
+                story_concept=story_concept,
             )
 
             if creative_plan.success:
@@ -816,6 +912,103 @@ class GenerationService:
                 session.flush()
 
             return creative_plan
+
+    def _run_story_finding(
+        self,
+        job_id: int,
+        *,
+        llm: LLMClient,
+        is_curiosity: bool,
+        bg_game_id: Optional[int],
+    ) -> Optional[StoryConcept]:
+        """Run the story finding stage for a job (V2).
+
+        Transforms the selected fact into a story by finding the editorial
+        angle. If the fact has no story potential (is_story=false or
+        confidence below threshold), the pipeline tries the next fact
+        candidate. If no candidate yields a story, returns an empty
+        StoryConcept (the editorial planner will fall back to the raw fact).
+
+        Persists the concept into job.artifacts["story_concept"].
+        """
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            plan = session.get(ContentPlan, job.content_plan_id)
+            if plan is None:
+                log.warning(f"story_finding: no content plan for job #{job_id}, skipping")
+                return None
+
+            concept = self.story_finder.find_story(
+                session, plan, background_game_id=bg_game_id
+            )
+
+            if concept.success:
+                job.artifacts = {**job.artifacts, "story_concept": concept.to_dict()}
+                session.flush()
+                log.info(
+                    f"story_concept for job #{job_id}: is_story={concept.is_story} "
+                    f"is_insight={concept.is_insight} confidence={concept.confidence:.2f} "
+                    f"angle='{concept.angle[:50]}'"
+                )
+            else:
+                log.warning(f"story_finding failed for job #{job_id}: {concept.error}")
+                job.artifacts = {**job.artifacts, "story_concept_error": concept.error}
+                session.flush()
+
+            return concept
+
+    def _run_humanization(
+        self,
+        job_id: int,
+        *,
+        llm: LLMClient,
+        creative_plan: Optional[VideoCreativePlan] = None,
+    ) -> Optional[HumanizationResult]:
+        """Run the humanization stage for a job (V2).
+
+        Takes the final script and applies the humanization pass (regex
+        detection + LLM correction). Updates the Script.final in-place with
+        the humanized version. Persists the result into
+        job.artifacts["humanization"].
+
+        Non-fatal: if humanization fails, the original script is kept.
+        """
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            script_id = job.artifacts.get("script_id")
+            if not script_id:
+                log.warning(f"humanization: no script for job #{job_id}, skipping")
+                return None
+            script = session.get(Script, script_id)
+            if script is None:
+                log.warning(f"humanization: script #{script_id} not found, skipping")
+                return None
+
+            original_final = script.final
+            result = self.humanizer.humanize(original_final, creative_plan=creative_plan)
+
+            if result.success and result.humanized and result.humanized != original_final:
+                # Update the script in-place with the humanized version
+                script.final = result.humanized
+                # Also update the draft if it's the same (so revisions use the
+                # humanized version as the baseline)
+                if script.draft == original_final:
+                    script.draft = result.humanized
+                session.flush()
+                log.info(
+                    f"humanization for job #{job_id}: {len(result.changes)} changes, "
+                    f"{len(result.detected_issues)} issues detected, "
+                    f"len {len(original_final)}→{len(result.humanized)}"
+                )
+            elif result.success and not result.detected_issues:
+                log.info(f"humanization for job #{job_id}: no issues detected, no changes")
+            else:
+                log.warning(f"humanization failed for job #{job_id}: {result.error}")
+
+            job.artifacts = {**job.artifacts, "humanization": result.to_dict()}
+            session.flush()
+
+            return result
 
     def _run_script_review(
         self,
@@ -857,12 +1050,21 @@ class GenerationService:
 
         while revision_count <= max_revisions:
             # Review the current script (pass source_fact for hallucination detection)
-            review = self.script_critic.review(
-                current_script.final,
-                creative_plan or VideoCreativePlan(),
-                revision_count=revision_count,
-                source_fact=source_fact,
-            )
+            # V2: use section-based review when enabled
+            if getattr(self.settings, "gpcg_script_critic_section_based", False):
+                review = self.script_critic.review_sections(
+                    current_script.final,
+                    creative_plan or VideoCreativePlan(),
+                    revision_count=revision_count,
+                    source_fact=source_fact,
+                )
+            else:
+                review = self.script_critic.review(
+                    current_script.final,
+                    creative_plan or VideoCreativePlan(),
+                    revision_count=revision_count,
+                    source_fact=source_fact,
+                )
             reviews.append(review.to_dict())
             log.info(
                 f"script_review job #{job_id} rev={revision_count}: "
@@ -960,16 +1162,32 @@ class GenerationService:
             # Extract humor plan + model from creative plan if available
             humor_plan = creative_plan.humor if creative_plan and creative_plan.success else None
             model_override = creative_plan.model.model if creative_plan and creative_plan.success else None
+            # V2: extract narrative beats + central_idea for beat-oriented generation
+            narrative_beats = creative_plan.narrative_beats if creative_plan and creative_plan.success else None
+            central_idea = creative_plan.central_idea if creative_plan and creative_plan.success else ""
 
         # Run the engine (outside the session — it does its own LLM calls)
-        material = self.creative_engine.generate_creative_material(
-            topic=plan.topic,
-            fact=fact_text or plan.hook or plan.topic,
-            context=context,
-            style=style,
-            humor_plan=humor_plan,
-            model_override=model_override,
-        )
+        # V2: use beat-oriented generation when the flag is on and beats are available
+        if self.settings.gpcg_creative_engine_beat_oriented and narrative_beats:
+            material = self.creative_engine.generate_beat_oriented_material(
+                topic=plan.topic,
+                fact=fact_text or plan.hook or plan.topic,
+                context=context,
+                style=style,
+                humor_plan=humor_plan,
+                model_override=model_override,
+                narrative_beats=narrative_beats,
+                central_idea=central_idea,
+            )
+        else:
+            material = self.creative_engine.generate_creative_material(
+                topic=plan.topic,
+                fact=fact_text or plan.hook or plan.topic,
+                context=context,
+                style=style,
+                humor_plan=humor_plan,
+                model_override=model_override,
+            )
 
         # Persist into job artifacts
         with session_scope() as session:
@@ -987,9 +1205,11 @@ class GenerationService:
             # Progress: rough mapping
             stage_order = [
                 JobStage.content_planning,
+                JobStage.story_finding,
                 JobStage.editorial_planning,
                 JobStage.creative_engine,
                 JobStage.script,
+                JobStage.humanization,
                 JobStage.script_review,
                 JobStage.tts,
                 JobStage.gameplay_selection,

@@ -118,6 +118,24 @@ class Settings(BaseSettings):
     # One of: humor, absurd, sarcastic, storytelling, curiosity, nostalgia,
     # dark_humor, high_energy.
     gpcg_creative_engine_style: str = "humor"
+    # V2: beat-oriented creative material. When true, the engine generates
+    # material oriented by narrative beats (3 hooks for the "hook" beat,
+    # 3 angles for "development", 3 payoffs for "payoff", 3 observations
+    # for commentary). When false, uses the generic prompt (5 of each).
+    # See docs/EDITORIAL_REFACTOR_PLAN_V2.md §3.4, Fase 3.
+    gpcg_creative_engine_beat_oriented: bool = False
+
+    # ── Humanization (V2 — break AI patterns, ensure orality) ────────────────
+    # Master switch for the humanization pass (between script and script_review).
+    # Hybrid: regex detects AI patterns, LLM corrects them.
+    # See docs/EDITORIAL_REFACTOR_PLAN_V2.md §4.3, Fase 4.
+    gpcg_humanization_enabled: bool = False
+    # LLM model for the humanization pass (null = default text model).
+    gpcg_humanization_model: str = ""
+    # Temperature for humanization (lower = more conservative corrections).
+    gpcg_humanization_temperature: float = 0.4
+    # Max tokens for the humanization LLM response.
+    gpcg_humanization_max_tokens: int = 2048
 
     # ── Gameplay Understanding (semantic analysis) ──────────────────────────
     # Master switch for automatic gameplay analysis on ingestion.
@@ -163,6 +181,52 @@ class Settings(BaseSettings):
     # Max tokens for the editorial planner.
     gpcg_editorial_max_tokens: int = 2048
 
+    # ── Curiosity Scoring (V2 editorial architecture) ────────────────────────
+    # Master switch for curiosity scoring on facts. When false, fact scoring
+    # uses only quality_score + novelty_score (legacy behavior). When true,
+    # a curiosity_score is computed from 5 editorial sub-scores + 1 technical
+    # sub-score and used to rank fact candidates in content planning.
+    # See docs/EDITORIAL_REFACTOR_PLAN_V2.md §3.1, §4.2.
+    gpcg_curiosity_scoring_enabled: bool = False
+    # Model for curiosity scoring (uses default text model if empty).
+    gpcg_curiosity_scorer_model: str = ""
+    # Temperature for the curiosity scorer LLM call.
+    gpcg_curiosity_scorer_temperature: float = 0.3
+    # Max tokens for the curiosity scorer.
+    gpcg_curiosity_scorer_max_tokens: int = 1024
+    # Minimum curiosity_score for a fact to be considered a video candidate.
+    # Facts below this threshold are filtered out in content planning.
+    gpcg_curiosity_min_threshold: float = 40.0
+
+    # ── Story Finder (V2 editorial architecture) ─────────────────────────────
+    # Master switch for the story_finding stage. When false, the pipeline
+    # skips story finding and goes straight to editorial_planning (legacy).
+    # See docs/EDITORIAL_REFACTOR_PLAN_V2.md §4.1, Fase 2.
+    gpcg_story_finder_enabled: bool = False
+    # Model for the story finder (uses default text model if empty).
+    gpcg_story_finder_model: str = ""
+    # Temperature for the story finder LLM call.
+    gpcg_story_finder_temperature: float = 0.6
+    # Max tokens for the story finder.
+    gpcg_story_finder_max_tokens: int = 1024
+    # Minimum confidence for a StoryConcept to be accepted. Below this, the
+    # pipeline tries the next fact candidate.
+    gpcg_story_finder_min_confidence: float = 0.5
+    # Max fact candidates to try when is_story=false before giving up.
+    gpcg_story_finder_max_attempts: int = 3
+
+    # ── Humanization (V2 editorial architecture) ─────────────────────────────
+    # Master switch for the humanization stage. When false, the pipeline
+    # skips humanization and uses the script as-is (legacy).
+    # See docs/EDITORIAL_REFACTOR_PLAN_V2.md §4.3, Fase 4.
+    gpcg_humanization_enabled: bool = False
+    # Model for the humanization pass (uses default text model if empty).
+    gpcg_humanization_model: str = ""
+    # Temperature for the humanization LLM call.
+    gpcg_humanization_temperature: float = 0.5
+    # Max tokens for the humanization pass.
+    gpcg_humanization_max_tokens: int = 2500
+
     # ── Script Critic (editorial review) ─────────────────────────────────────
     # Master switch for the script review stage.
     gpcg_script_critic_enabled: bool = True
@@ -174,6 +238,23 @@ class Settings(BaseSettings):
     gpcg_script_critic_temperature: float = 0.3
     # Pass threshold (0-100). Below this, script is revised.
     gpcg_script_critic_pass_threshold: float = 70.0
+    # V2 critic: new dimensions (hook_strength, retention, pacing, payoff,
+    # curiosity, humanity, factual_accuracy) with hard gate on factual_accuracy.
+    # When true, uses the V2 critic prompt + dimensions. When false, uses
+    # the legacy critic (structure, naturalness, humor, coherence, gameplay,
+    # factual_accuracy). See docs/EDITORIAL_REFACTOR_PLAN_V2.md §3.6, Fase 5.
+    gpcg_script_critic_v2_enabled: bool = False
+    # V2 critic: overall pass threshold (raised from 70 to 75).
+    gpcg_script_critic_v2_pass_threshold: float = 75.0
+    # V2 critic: per-dimension floor. Any dimension below this triggers REVISE.
+    gpcg_script_critic_v2_dimension_floor: float = 50.0
+    # V2 critic: hard gate on factual_accuracy (below this = REVISE always).
+    gpcg_script_critic_v2_factual_gate: float = 70.0
+    # V2: section-based review. When true, the critic reviews each SECTION
+    # of the script (hook, development, payoff) separately, producing
+    # per-section scores and issues. Falls back to holistic review when off.
+    # See docs/EDITORIAL_REFACTOR_PLAN_V2.md §4.5, Fase 5.
+    gpcg_script_critic_section_based: bool = False
 
     # ── Worker (Compute Plane) ───────────────────────────────────────────────
     gpcg_worker_poll_interval: int = 5

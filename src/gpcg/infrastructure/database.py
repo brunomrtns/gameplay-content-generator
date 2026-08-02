@@ -126,6 +126,18 @@ def init_db() -> None:
     _ensure_column(engine, "videos", "storage_key", "VARCHAR(500)")
     _ensure_column(engine, "videos", "youtube_url", "VARCHAR(500)")
     _ensure_column(engine, "videos", "youtube_video_id", "VARCHAR(20)")
+    # V2 editorial architecture: curiosity scoring on facts
+    _ensure_column(engine, "facts", "curiosity_score", "FLOAT DEFAULT 0.0")
+    _ensure_column(engine, "facts", "curiosity_subscores", "JSON")
+    # Channel knowledge architecture: knowledge processing on documents
+    _ensure_column(engine, "documents", "knowledge_status", "VARCHAR(20) DEFAULT 'pending'")
+    _ensure_column(engine, "documents", "chunk_count", "INTEGER DEFAULT 0")
+    # KnowledgeChunk: game_id for game-specific knowledge isolation in RAG.
+    # NULL = general channel knowledge, non-NULL = game-specific.
+    _ensure_column(engine, "knowledge_chunks", "game_id", "INTEGER")
+    # Document: file_hash + upload_token for worker download (Control/Compute Plane)
+    _ensure_column(engine, "documents", "file_hash", "VARCHAR(64)")
+    _ensure_column(engine, "documents", "upload_token", "VARCHAR(64)")
     # Seed admin user if not exists (linked to BI Identity by email)
     _seed_admin_user()
 
@@ -157,11 +169,13 @@ def _seed_admin_user() -> None:
                 existing.is_admin = True
                 session.flush()
             return
-        # Create admin linked to BI Identity (no local password)
+        # Create admin linked to BI Identity (no local password).
+        # password_hash is NOT NULL in the legacy SQLite schema; use a sentinel
+        # since SSO users never authenticate locally.
         admin = User(
             email=admin_email.lower(),
             name="Admin",
-            password_hash=None,
+            password_hash="!sso-no-local-password",
             is_admin=True,
             is_active=True,
         )

@@ -37,28 +37,68 @@ my-vps "docker inspect --format='{{.State.Health.Status}}' gpcg-api 2>/dev/null 
 
 # ── Step 4: Update nginx config ───────────────────────────────────────────────
 echo "🌐 Updating nginx configuration..."
-my-vps "cat > /tmp/gpcg-nginx.conf << 'NGINX_EOF'
+my-vps 'python3 << "PYEOF"
+import re
 
-    # ── GPCG Upstream ─────────────────────────────────────────────────────
+CONF_PATH = "/opt/trivestia/nginx/nginx.conf"
+with open(CONF_PATH) as f:
+    content = f.read()
+
+# ── Ensure upstream gpcg_api exists ──────────────────────────────────────
+upstream_block = """    # ── GPCG Upstream ─────────────────────────────────────────────────────
     upstream gpcg_api {
         server gpcg-api:8787;
         keepalive 16;
     }
+"""
+if "upstream gpcg_api" not in content:
+    content = content.replace("    log_format main", upstream_block + "\n    log_format main", 1)
 
-NGINX_EOF
+# ── Replace (or add) the /gpcg/ location block ───────────────────────────
+# Always rewrite the full block so config stays consistent across deploys.
+location_block = """    # ── GPCG (Gameplay Content Generator) ────────────────────────────────
+    location /gpcg/ {
+        limit_req zone=api_limit burst=30 nodelay;
+        rewrite ^/gpcg/(.*)$ /$1 break;
+        proxy_pass         http://gpcg_api;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_buffering    off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        client_max_body_size 500m;
+    }
+"""
 
-# Check if gpcg upstream already exists in nginx.conf
-if ! grep -q 'gpcg_api' /opt/trivestia/nginx/nginx.conf; then
-    # Add upstream before the log_format line
-    sed -i '/log_format main/i\\    # ── GPCG Upstream ─────────────────────────────────────────────────────\n    upstream gpcg_api {\n        server gpcg-api:8787;\n        keepalive 16;\n    }\n' /opt/trivestia/nginx/nginx.conf
-fi
+# Try to replace existing block (from "# ── GPCG" comment to the closing "}")
+pattern = re.compile(
+    r"    # ── GPCG \(Gameplay Content Generator\).*?    \}\n",
+    re.DOTALL,
+)
+if pattern.search(content):
+    content = pattern.sub(location_block, content, count=1)
+elif "location /gpcg/" in content:
+    # Fallback: replace from "location /gpcg/" to the first closing "}"
+    pattern2 = re.compile(r"    location /gpcg/.*?    \}\n", re.DOTALL)
+    content = pattern2.sub(location_block, content, count=1)
+else:
+    # Add before the default location block
+    content = content.replace(
+        "    # ── Default location",
+        location_block + "\n    # ── Default location",
+        1,
+    )
 
-# Check if gpcg location already exists
-if ! grep -q 'location /gpcg' /opt/trivestia/nginx/nginx.conf; then
-    # Add location block before the closing brace of the HTTPS server
-    sed -i '/# ── Default location/i\\    # ── GPCG (Gameplay Content Generator) ────────────────────────────────\n    location /gpcg/ {\n        limit_req zone=api_limit burst=30 nodelay;\n        rewrite ^/gpcg/(.*)\$ /\$1 break;\n        proxy_pass         http://gpcg_api;\n        proxy_http_version 1.1;\n        proxy_set_header   Host              \$host;\n        proxy_set_header   X-Real-IP         \$remote_addr;\n        proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;\n        proxy_set_header   X-Forwarded-Proto \$scheme;\n        proxy_set_header   Connection        \"\";\n        proxy_buffering    off;\n        proxy_read_timeout 300s;\n        proxy_send_timeout 300s;\n    }\n' /opt/trivestia/nginx/nginx.conf
-fi
-"
+with open(CONF_PATH, "w") as f:
+    f.write(content)
+
+print("nginx config updated")
+PYEOF
+'
 
 # ── Step 5: Test and reload nginx ─────────────────────────────────────────────
 echo "🔄 Testing and reloading nginx..."

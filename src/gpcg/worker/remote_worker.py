@@ -68,7 +68,7 @@ class WorkerConfig:
     # Status update interval (seconds) — even if nothing changes
     status_interval: float = 30.0
     # Worker capabilities
-    capabilities: list[str] = field(default_factory=lambda: ["mapping", "generation"])
+    capabilities: list[str] = field(default_factory=lambda: ["mapping", "generation", "knowledge_index"])
     # Worker version info
     worker_version: str = "0.1.0"
     git_commit: str = ""
@@ -260,14 +260,28 @@ class RemoteWorker:
     # ── Job claiming ─────────────────────────────────────────────────────────
 
     def claim_job(self) -> Optional[dict]:
-        """Try to claim a job from the VPS. Returns job dict or None."""
+        """Try to claim a job from the VPS. Returns job dict or None.
+
+        The VPS returns {"job": {...}, "gameplay_source": {...}, "document": {...}}.
+        We embed gameplay_source and document into the job dict so that
+        _process_mapping_job and _process_knowledge_indexing_job can access
+        them via job.get("gameplay_source") and job.get("document").
+        """
         resp = self.client.post("/api/jobs/claim", json={
             "worker_id": self.config.worker_id,
             "capabilities": self.config.capabilities,
         })
         resp.raise_for_status()
         data = resp.json()
-        return data.get("job")
+        job = data.get("job")
+        if job is None:
+            return None
+        # Embed related data into the job dict for downstream handlers
+        if data.get("gameplay_source"):
+            job["gameplay_source"] = data["gameplay_source"]
+        if data.get("document"):
+            job["document"] = data["document"]
+        return job
 
     # ── Job status update ────────────────────────────────────────────────────
 
@@ -471,6 +485,8 @@ class RemoteWorker:
             self._process_mapping_job(job)
         elif job_type in ("generate_short", "curiosity_short"):
             self._process_generation_job(job)
+        elif job_type == "knowledge_index":
+            self._process_knowledge_indexing_job(job)
         else:
             log.warning(f"Unknown job type: {job_type} — marking as completed (no-op)")
             self.update_job_status(job_id, status="running", stage="done", progress=1.0)
@@ -605,6 +621,187 @@ class RemoteWorker:
         except OSError:
             pass
 
+    # ── Knowledge document download ──────────────────────────────────────────
+
+    def download_document(self, doc: dict) -> Path:
+        """Download a knowledge document from VPS to local storage.
+
+        Returns the local file path. Raises on error.
+        """
+        doc_id = doc["id"]
+        token = doc.get("upload_token")
+        if not token:
+            raise RuntimeError(f"No upload_token for document {doc_id}")
+
+        filename = doc.get("filename", f"doc_{doc_id}")
+        # Sanitize filename for local storage
+        safe_name = filename.replace("/", "_").replace("\\", "_")
+        local_dir = self.storage_root / "knowledge"
+        local_dir.mkdir(parents=True, exist_ok=True)
+        local_path = local_dir / f"doc_{doc_id}_{safe_name}"
+
+        url = f"/api/documents/{doc_id}/download"
+        resp = self.client.get(url, params={"token": token}, follow_redirects=True)
+        resp.raise_for_status()
+
+        # Stream response content to file
+        with open(local_path, "wb") as f:
+            f.write(resp.content)
+
+        file_size = local_path.stat().st_size
+        log.info(f"Downloaded document {filename} ({file_size} bytes) → {local_path}")
+        return local_path
+
+    def confirm_document_download(self, doc: dict, local_path: Path) -> bool:
+        """Verify checksum and confirm document download with VPS."""
+        doc_id = doc["id"]
+        import hashlib as _hashlib
+        sha256 = _hashlib.sha256()
+        with open(local_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                sha256.update(chunk)
+        checksum = sha256.hexdigest()
+
+        resp = self.client.post(
+            f"/api/documents/{doc_id}/confirm-download",
+            json={
+                "checksum": checksum,
+                "worker_id": self.config.worker_id,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        log.info(f"Download confirmed for document #{doc_id}: {data}")
+        return True
+
+    def submit_indexing_result(
+        self,
+        doc_id: int,
+        chunks: list[dict],
+        error: str = "",
+    ) -> dict:
+        """Send indexed knowledge chunks back to VPS."""
+        resp = self.client.post(
+            f"/api/documents/{doc_id}/indexing-result",
+            json={
+                "chunks": chunks,
+                "chunk_count": len(chunks),
+                "error": error,
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def _process_knowledge_indexing_job(self, job: dict) -> None:
+        """Process a knowledge indexing job: download → parse → chunk → embed → sync.
+
+        Downloads the document from VPS, parses it (with OCR fallback via VLM
+        if needed — Ollama is available locally), chunks the text, generates
+        embeddings (via Ollama nomic-embed-text), and sends the chunks back
+        to VPS for storage in the knowledge_chunks table.
+        """
+        job_id = job["id"]
+        doc_info = job.get("document")
+        if not doc_info:
+            self.submit_job_result(job_id, status="failed", error="No document info in job")
+            return
+
+        doc_id = doc_info["id"]
+        filename = doc_info.get("filename", f"doc_{doc_id}")
+
+        # Stage 1: Download document from VPS
+        self.update_job_status(job_id, status="running", stage="download", progress=0.05)
+        self.send_status("busy", f"Baixando documento {filename}", job_id=job_id)
+        local_path = self.download_document(doc_info)
+
+        # Stage 2: Confirm download (checksum verification)
+        self.update_job_status(job_id, status="running", stage="confirm_download", progress=0.10)
+        confirmed = self.confirm_document_download(doc_info, local_path)
+        if not confirmed:
+            self.submit_job_result(job_id, status="failed", error="Checksum mismatch")
+            return
+
+        # Stage 3: Parse + chunk + embed locally
+        self.update_job_status(job_id, status="running", stage="knowledge_indexing", progress=0.15)
+        self.send_status("busy", f"Indexando {filename}", job_id=job_id)
+
+        from gpcg.infrastructure.document_parser import parse_document, DocumentParseError
+        from gpcg.application.knowledge_service import chunk_text, generate_embedding
+
+        # Parse the document (pdfplumber → pypdf → OCR via VLM as last resort)
+        try:
+            text = parse_document(local_path, file_type=doc_info.get("file_type"))
+        except DocumentParseError as e:
+            log.error(f"Failed to parse document {filename}: {e}")
+            self.submit_indexing_result(doc_id, chunks=[], error=str(e))
+            self.submit_job_result(job_id, status="failed", error=str(e))
+            try:
+                local_path.unlink()
+            except OSError:
+                pass
+            return
+
+        if not text or not text.strip():
+            error_msg = f"Document {filename} produced no extractable text"
+            log.error(error_msg)
+            self.submit_indexing_result(doc_id, chunks=[], error=error_msg)
+            self.submit_job_result(job_id, status="failed", error=error_msg)
+            try:
+                local_path.unlink()
+            except OSError:
+                pass
+            return
+
+        log.info(f"Parsed {filename}: {len(text)} chars of text")
+
+        # Chunk the text
+        chunks_data = chunk_text(text)
+        log.info(f"Chunked {filename} into {len(chunks_data)} chunks")
+
+        # Generate embeddings for each chunk
+        from gpcg.application.knowledge_service import _get_embedding_model
+        embed_model = _get_embedding_model()
+        total = len(chunks_data)
+        chunk_dicts = []
+        for i, chunk in enumerate(chunks_data):
+            embedding = generate_embedding(chunk.content, chunk.heading_path)
+            chunk_dicts.append({
+                "content": chunk.content,
+                "embedding": embedding,
+                "chunk_index": chunk.index,
+                "section": chunk.section,
+                "char_start": chunk.char_start,
+                "char_end": chunk.char_end,
+                "embedding_model": embed_model if embedding else None,
+            })
+            # Update progress (0.15 → 0.90 range)
+            if (i + 1) % 5 == 0 or i + 1 == total:
+                progress = 0.15 + (i + 1) / total * 0.75
+                self.update_job_status(
+                    job_id, status="running", stage="knowledge_indexing", progress=progress
+                )
+
+        # Stage 4: Submit indexing result (chunks) to VPS
+        self.update_job_status(job_id, status="running", stage="knowledge_indexing", progress=0.90)
+        result = self.submit_indexing_result(doc_id, chunks=chunk_dicts)
+        log.info(f"Synced {len(chunk_dicts)} chunks to VPS for document {doc_id}: {result}")
+
+        # Done
+        self.update_job_status(job_id, status="running", stage="done", progress=1.0)
+        self.submit_job_result(job_id, status="completed", artifacts={
+            "indexing_completed": True,
+            "chunk_count": len(chunk_dicts),
+            "document_id": doc_id,
+        })
+        log.info(f"Knowledge indexing job #{job_id} completed: {len(chunk_dicts)} chunks")
+
+        # Clean up local document file
+        try:
+            local_path.unlink()
+            log.info(f"Cleaned up document: {local_path.name}")
+        except OSError:
+            pass
+
     def _process_generation_job(self, job: dict) -> None:
         """Process a generation job: fetch data → run pipeline → upload video.
 
@@ -622,6 +819,12 @@ class RemoteWorker:
 
         # Populate a local temp DB and run GenerationService
         from gpcg.worker.local_db_sync import populate_local_db, run_generation_locally
+
+        # Disable YouTube upload in the local GenerationService — the worker
+        # handles it after uploading the video to the VPS (the google-integration
+        # service runs on the VPS, not locally, and needs the VPS file path).
+        import os
+        os.environ["GPCG_YOUTUBE_UPLOAD_ENABLED"] = "false"
 
         self.update_job_status(job_id, status="running", stage="content_planning", progress=0.05)
         self.send_status("busy", "Gerando vídeo", job_id=job_id)
@@ -651,6 +854,11 @@ class RemoteWorker:
                 log.info(f"Cleaned up local video: {video_path}")
             except OSError:
                 pass
+
+        # YouTube upload is handled by the VPS (auto-publish or manual approval).
+        # The VPS's submit_job_result endpoint checks the automation config:
+        # - auto_publish=true  → VPS uploads to YouTube via google-integration
+        # - auto_publish=false → video stays as pending_approval for UI review
 
         # Sync results back to VPS
         self.update_job_status(job_id, status="running", stage="done", progress=0.98)

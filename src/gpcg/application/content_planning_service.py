@@ -6,6 +6,7 @@ Output: a ContentPlan (topic, hook, tone, energy, music_mood, visual_strategy).
 
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 from sqlalchemy import select
@@ -48,35 +49,98 @@ class ContentPlanningService:
         self.llm = llm
         self.settings = get_settings()
 
-    def plan_for_game(self, session: Session, game_id: int) -> Optional[ContentPlan]:
-        """Pick the best unused fact and create a ContentPlan."""
+    def plan_for_game(
+        self,
+        session: Session,
+        game_id: int,
+        fact_id: Optional[int] = None,
+        avoid_topics: Optional[list[str]] = None,
+    ) -> Optional[ContentPlan]:
+        """Pick the best unused fact and create a ContentPlan.
+
+        Args:
+            session: DB session
+            game_id: Game to plan for
+            fact_id: If provided, use this specific fact (from editorial decision)
+            avoid_topics: Recent topics to avoid repeating (editorial memory)
+        """
         game = session.get(Game, game_id)
         if game is None:
             raise ValueError(f"game #{game_id} not found")
 
-        # Get scored, unused facts ordered by quality*novelty
-        facts = session.execute(
-            select(Fact)
-            .where(Fact.game_id == game_id)
-            .where(Fact.quality_score > 0)
-            .order_by((Fact.quality_score * Fact.novelty_score).desc(), Fact.used_count.asc())
-        ).scalars().all()
+        # If a specific fact_id is provided (editorial decision), try it first
+        preselected_fact = None
+        if fact_id is not None:
+            preselected_fact = session.get(Fact, int(fact_id))
+            if preselected_fact is None or preselected_fact.game_id != game_id:
+                preselected_fact = None
+                fact_id = None
 
-        if not facts:
+        # V2: rank by curiosity_score when enabled, else legacy quality*novelty
+        if self.settings.gpcg_curiosity_scoring_enabled:
+            facts = session.execute(
+                select(Fact)
+                .where(Fact.game_id == game_id)
+                .where(Fact.quality_score > 0)
+                .where(Fact.curiosity_score >= self.settings.gpcg_curiosity_min_threshold)
+                .order_by(
+                    (Fact.curiosity_score * 0.5 + Fact.quality_score * 0.3 + Fact.novelty_score * 0.2).desc(),
+                    Fact.used_count.asc(),
+                )
+            ).scalars().all()
+        else:
+            facts = session.execute(
+                select(Fact)
+                .where(Fact.game_id == game_id)
+                .where(Fact.quality_score > 0)
+                .order_by((Fact.quality_score * Fact.novelty_score).desc(), Fact.used_count.asc())
+            ).scalars().all()
+
+        if not facts and preselected_fact is None:
             log.warning(f"no scored facts for game '{game.canonical_name}'")
             return None
 
+        # If we have a preselected fact, make sure it's in the list
+        if preselected_fact and preselected_fact not in facts:
+            facts = [preselected_fact] + list(facts)
+
         # Build fact list for the LLM (top 15 candidates)
-        candidates = [
-            {"id": f.id, "category": f.category, "claim": f.claim, "quality": f.quality_score, "novelty": f.novelty_score, "used": f.used_count}
-            for f in facts[:15]
-        ]
+        if self.settings.gpcg_curiosity_scoring_enabled:
+            candidates = [
+                {"id": f.id, "category": f.category, "claim": f.claim,
+                 "quality": f.quality_score, "novelty": f.novelty_score,
+                 "curiosity": f.curiosity_score, "used": f.used_count}
+                for f in facts[:15]
+            ]
+        else:
+            candidates = [
+                {"id": f.id, "category": f.category, "claim": f.claim, "quality": f.quality_score, "novelty": f.novelty_score, "used": f.used_count}
+                for f in facts[:15]
+            ]
+
+        # Build prompt with editorial memory (avoid_topics)
+        avoid_str = ""
+        if avoid_topics:
+            avoid_str = (
+                f"\n\n## Topics already covered (AVOID repeating these)\n"
+                f"{json.dumps(avoid_topics[-10:], ensure_ascii=False)}\n"
+                f"Choose a DIFFERENT angle or fact.\n"
+            )
+        preselect_str = ""
+        if preselected_fact:
+            preselect_str = (
+                f"\n\n## Editorial direction\n"
+                f"The editorial AI suggested this fact: #{preselected_fact.id} "
+                f"— {preselected_fact.claim[:100]}\n"
+                f"Use it unless you find a clearly better alternative.\n"
+            )
 
         prompt = (
             f"Game: {game.canonical_name}\n"
             f"Target duration: {self.settings.gpcg_default_target_duration}s\n"
             f"Format: {self.settings.gpcg_default_format}\n\n"
-            f"Available facts (sorted by potential):\n{candidates}\n\n"
+            f"Available facts (sorted by potential):\n{candidates}\n"
+            f"{preselect_str}{avoid_str}\n"
             "Pick the best one for a new Short and design the plan."
         )
 
@@ -147,6 +211,17 @@ class ContentPlanningService:
             facts = [session.get(Fact, fact_id)]
             if facts[0] is None or facts[0].game_id is not None:
                 raise ValueError(f"fact #{fact_id} not found or not a general fact")
+        elif self.settings.gpcg_curiosity_scoring_enabled:
+            facts = session.execute(
+                select(Fact)
+                .where(Fact.game_id.is_(None))
+                .where(Fact.quality_score > 0)
+                .where(Fact.curiosity_score >= self.settings.gpcg_curiosity_min_threshold)
+                .order_by(
+                    (Fact.curiosity_score * 0.5 + Fact.quality_score * 0.3 + Fact.novelty_score * 0.2).desc(),
+                    Fact.used_count.asc(),
+                )
+            ).scalars().all()
         else:
             facts = session.execute(
                 select(Fact)
@@ -159,20 +234,38 @@ class ContentPlanningService:
             log.warning("no scored general facts available")
             return None
 
-        candidates = [
-            {"id": f.id, "category": f.category, "claim": f.claim, "quality": f.quality_score, "novelty": f.novelty_score, "used": f.used_count}
-            for f in facts[:15]
-        ]
-
-        prompt = (
-            f"Context: General curiosity (NOT about a specific game)\n"
-            f"Background gameplay: {bg_game.canonical_name} (just visual filler, not topically related)\n"
-            f"Target duration: {self.settings.gpcg_default_target_duration}s\n"
-            f"Format: {self.settings.gpcg_default_format}\n\n"
-            f"Available facts (sorted by potential):\n{candidates}\n\n"
-            "Pick the best one for a new Short and design the plan. "
-            "The script will be about the CURIOSITY, not the game — the gameplay is just background visual."
-        )
+        if self.settings.gpcg_curiosity_scoring_enabled:
+            candidates = [
+                {"id": f.id, "category": f.category, "claim": f.claim,
+                 "quality": f.quality_score, "novelty": f.novelty_score,
+                 "curiosity": f.curiosity_score, "used": f.used_count}
+                for f in facts[:15]
+            ]
+            prompt = (
+                f"Context: General curiosity (NOT about a specific game)\n"
+                f"Background gameplay: {bg_game.canonical_name} (just visual filler, not topically related)\n"
+                f"Target duration: {self.settings.gpcg_default_target_duration}s\n"
+                f"Format: {self.settings.gpcg_default_format}\n\n"
+                f"Available facts (sorted by curiosity potential — "
+                f"curiosity_score weighs curiosity gap, surprise, retention, "
+                f"familiarity of the TOPIC, and insight quality):\n{candidates}\n\n"
+                "Pick the fact with the best STORY potential (highest curiosity). "
+                "The script will be about the CURIOSITY, not the game — the gameplay is just background visual."
+            )
+        else:
+            candidates = [
+                {"id": f.id, "category": f.category, "claim": f.claim, "quality": f.quality_score, "novelty": f.novelty_score, "used": f.used_count}
+                for f in facts[:15]
+            ]
+            prompt = (
+                f"Context: General curiosity (NOT about a specific game)\n"
+                f"Background gameplay: {bg_game.canonical_name} (just visual filler, not topically related)\n"
+                f"Target duration: {self.settings.gpcg_default_target_duration}s\n"
+                f"Format: {self.settings.gpcg_default_format}\n\n"
+                f"Available facts (sorted by potential):\n{candidates}\n\n"
+                "Pick the best one for a new Short and design the plan. "
+                "The script will be about the CURIOSITY, not the game — the gameplay is just background visual."
+            )
 
         llm = self.llm or LLMClient()
         try:

@@ -226,33 +226,42 @@ export function DashboardPage() {
           </Card>
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-            {recentVideos.slice(0, 5).map((v: any) => (
-              <Card key={v.id} className="!p-0 overflow-hidden group cursor-pointer" >
-                <div className="relative aspect-[9/16] bg-surface-elevated overflow-hidden">
-                  {v.thumbnail_path ? (
-                    <img src={api.thumbUrl(v.id)} alt={v.topic || ""} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-text-muted">
-                      <VideoIcon className="h-8 w-8" />
-                    </div>
-                  )}
-                  <div className="absolute bottom-2 right-2">
-                    {v.qa_passed ? (
-                      <Badge variant="success">QA {v.qa_score?.toFixed(0)}</Badge>
+            {recentVideos.slice(0, 5).map((v: any) => {
+              const title = v.social_title || v.topic || "—";
+              const isPublished = v.status === "published" && v.youtube_url;
+              return (
+                <Card key={v.id} className="!p-0 overflow-hidden group cursor-pointer">
+                  <div className="relative aspect-[9/16] bg-surface-elevated overflow-hidden">
+                    {v.thumbnail_path ? (
+                      <img src={api.thumbUrl(v.id)} alt={title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
                     ) : (
-                      <Badge variant="error">QA {v.qa_score?.toFixed(0)}</Badge>
+                      <div className="flex h-full items-center justify-center text-text-muted">
+                        <VideoIcon className="h-8 w-8" />
+                      </div>
+                    )}
+                    <div className="absolute bottom-2 right-2">
+                      {v.qa_passed ? (
+                        <Badge variant="success">QA {v.qa_score?.toFixed(0)}</Badge>
+                      ) : (
+                        <Badge variant="error">QA {v.qa_score?.toFixed(0)}</Badge>
+                      )}
+                    </div>
+                    {isPublished && (
+                      <div className="absolute top-2 left-2">
+                        <Badge variant="info">YouTube</Badge>
+                      </div>
                     )}
                   </div>
-                </div>
-                <div className="p-3">
-                  <p className="text-xs font-medium truncate">{v.topic || "—"}</p>
-                  <div className="mt-1 flex items-center justify-between text-[10px] text-text-muted">
-                    <span>{fmtDuration(v.duration)}</span>
-                    <span>{fmtDate(v.created_at)}</span>
+                  <div className="p-3">
+                    <p className="text-xs font-medium line-clamp-2 min-h-[2rem]" title={title}>{title}</p>
+                    <div className="mt-1 flex items-center justify-between text-[10px] text-text-muted">
+                      <span>{fmtDuration(v.duration)}</span>
+                      <span>{fmtDate(v.created_at)}</span>
+                    </div>
                   </div>
-                </div>
-              </Card>
-            ))}
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>

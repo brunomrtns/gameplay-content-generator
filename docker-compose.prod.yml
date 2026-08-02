@@ -83,3 +83,5 @@ networks:
 
 volumes:
   gpcg-data:
+    external: true
+    name: gpcg_gpcg-data

@@ -167,6 +167,72 @@ class ModelRecommendation:
 
 # ── Video Creative Plan ──────────────────────────────────────────────────────
 
+
+@dataclass
+class StoryConcept:
+    """The output of the Story Finder stage (V2 editorial architecture).
+
+    Transforms a fact into a story by finding the editorial ANGLE that makes
+    it worth telling. See docs/EDITORIAL_REFACTOR_PLAN_V2.md §4.1.
+
+    9 fields (V2: reduced from 11 by removing tension, surprise, why_care,
+    retention_strategy; added frame, is_insight):
+      - fact_claim: the original fact (echoed for downstream prompts)
+      - angle: the editorial angle ("ninguém programou aquelas quedas")
+      - curiosity_gap: the knowledge gap the video fills
+      - narrative_hook: the opening line (not a generic "hook")
+      - frame: how to frame the fact (Kahneman's framing: "5% completam"
+        vs "95% falham")
+      - is_insight: insight (illuminates the whole) vs trivia (isolated)
+      - is_story: whether this fact has narrative potential
+      - confidence: 0-1, how good the story is
+      - success/error: standard result envelope
+    """
+    fact_claim: str = ""
+    angle: str = ""
+    curiosity_gap: str = ""
+    narrative_hook: str = ""
+    frame: str = ""
+    is_insight: bool = False
+    is_story: bool = True
+    confidence: float = 0.0
+    success: bool = True
+    error: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "fact_claim": self.fact_claim,
+            "angle": self.angle,
+            "curiosity_gap": self.curiosity_gap,
+            "narrative_hook": self.narrative_hook,
+            "frame": self.frame,
+            "is_insight": self.is_insight,
+            "is_story": self.is_story,
+            "confidence": self.confidence,
+            "success": self.success,
+            "error": self.error,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> StoryConcept:
+        return cls(
+            fact_claim=d.get("fact_claim", ""),
+            angle=d.get("angle", ""),
+            curiosity_gap=d.get("curiosity_gap", ""),
+            narrative_hook=d.get("narrative_hook", ""),
+            frame=d.get("frame", ""),
+            is_insight=bool(d.get("is_insight", False)),
+            is_story=bool(d.get("is_story", True)),
+            confidence=float(d.get("confidence", 0.0)),
+            success=bool(d.get("success", True)),
+            error=str(d.get("error", "")),
+        )
+
+    @classmethod
+    def empty(cls, error: str = "") -> StoryConcept:
+        return cls(success=False, error=error)
+
+
 @dataclass
 class VideoCreativePlan:
     """The full editorial plan produced by the EditorialPlanner.

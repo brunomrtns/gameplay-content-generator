@@ -57,6 +57,11 @@ Given a chunk of text about a video game, extract interesting facts, curiosities
 easter eggs, trivia, development details, hidden mechanics, or little-known information
 that would make an engaging ~60 second short video.
 
+CRITICAL — LANGUAGE:
+The source text may be in English or any other language. However, the extracted
+facts (the "claim" field) MUST be written EXCLUSIVELY in Brazilian Portuguese
+(pt-BR). Translate and adapt the information — never copy English phrases.
+
 For each fact, provide:
 - category: one of [curiosity, easter_egg, trivia, development, hidden_mechanic, history, character, bug, removed_content, reference, other]
 - claim: a concise factual statement (1-3 sentences) in Portuguese (pt-BR)
@@ -161,6 +166,8 @@ def score_facts(session: Session, game_id: int | None, llm: LLMClient) -> int:
     """Score unscored facts for a game (or general pool if game_id is None).
 
     Uses the LLM to evaluate editorial potential. Batches up to 10 facts.
+    When curiosity scoring is enabled (GPCG_CURIOSITY_SCORING_ENABLED), also
+    computes curiosity_score + sub-scores via the CuriosityScorer.
     """
     if game_id is not None:
         facts = session.execute(
@@ -210,4 +217,13 @@ def score_facts(session: Session, game_id: int | None, llm: LLMClient) -> int:
             scored += 1
     session.flush()
     log.info(f"scored {scored}/{len(facts)} facts for '{game_name}'")
+
+    # V2: also compute curiosity scores when enabled
+    from gpcg.config import get_settings
+    if get_settings().gpcg_curiosity_scoring_enabled:
+        from gpcg.application.curiosity_scorer import CuriosityScorer
+        curiosity_scorer = CuriosityScorer(llm=llm)
+        curiosity_scored = curiosity_scorer.score_facts(session, game_id, llm=llm)
+        log.info(f"curiosity-scored {curiosity_scored} facts for '{game_name}'")
+
     return scored

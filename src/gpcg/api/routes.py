@@ -14,6 +14,7 @@ Resources:
 
 from __future__ import annotations
 
+import logging
 import shutil
 import time
 from pathlib import Path
@@ -52,6 +53,7 @@ from gpcg.infrastructure.database import get_db, session_scope
 from gpcg.infrastructure.document_parser import DocumentParseError, detect_type
 from gpcg.infrastructure.llm import get_llm
 
+log = logging.getLogger(__name__)
 router = APIRouter(tags=["gpcg"])
 
 
@@ -230,9 +232,33 @@ def upload_gameplay(
     upload_dir = settings.temp_uploads_dir / f"user_{user.id}"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    # Read and hash
-    content = file.file.read()
-    file_hash = hashlib.sha256(content).hexdigest()
+    # Stream the upload to disk in chunks (NOT file.file.read() — that loads
+    # the entire file into RAM, which OOMs on large gameplays and blocks the
+    # response until the full body is buffered). Hash incrementally as we go.
+    filename = file.filename or "upload.mp4"
+    hasher = hashlib.sha256()
+    file_size = 0
+    # Temp file path — use hash prefix once known; first write to a .part file
+    # then rename after the upload completes so partial uploads are ignored.
+    tmp_path = upload_dir / f".{filename}.uploading.part"
+    try:
+        with open(tmp_path, "wb") as out:
+            while True:
+                chunk = file.file.read(1024 * 1024)  # 1 MiB chunks
+                if not chunk:
+                    break
+                hasher.update(chunk)
+                out.write(chunk)
+                file_size += len(chunk)
+    except Exception:
+        # Clean up partial upload on any failure (client disconnect, OOM, etc.)
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+    file_hash = hasher.hexdigest()
 
     # Check for duplicates
     existing = db.query(GameplaySource).filter(
@@ -240,13 +266,13 @@ def upload_gameplay(
         GameplaySource.file_hash == file_hash,
     ).first()
     if existing:
+        tmp_path.unlink(missing_ok=True)
         raise HTTPException(409, "Este arquivo já foi enviado")
 
-    # Save file to temp storage
-    filename = file.filename or "upload.mp4"
+    # Rename .part → final name now that the upload is complete + verified
     safe_name = f"{file_hash[:8]}_{filename}"
     file_path = upload_dir / safe_name
-    file_path.write_bytes(content)
+    tmp_path.rename(file_path)
 
     # storage_key is relative to temp_uploads_dir — opaque to the application
     storage_key = f"user_{user.id}/{safe_name}"
@@ -259,7 +285,7 @@ def upload_gameplay(
             storage_key=storage_key,
             filename=filename,
             file_hash=file_hash,
-            file_size=len(content),
+            file_size=file_size,
             ingestion_status=IngestionStatus.discovered.value,
             processing_status=GameplayProcessingStatus.uploaded.value,
         )
@@ -576,11 +602,15 @@ def create_generation_job(
     subtitle_stroke_color: str = Form(""),
     subtitle_stroke_width: int = Form(0),
     subtitle_rounded_box: Optional[bool] = Form(None),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Create a generation job for a game.
 
-    Optional customization params (override config defaults):
+    Uses the user's automation config as defaults for subtitle/transition/voice
+    settings. Explicit form params override the automation config.
+
+    Optional customization params (override automation config defaults):
     - scene_duration: target duration of each gameplay scene in seconds (0 = auto)
     - video_format: "9:16", "16:9", "1:1", "4:5"
     - subtitle_font, subtitle_font_size, subtitle_color, subtitle_outline_color,
@@ -596,15 +626,54 @@ def create_generation_job(
     if g is None:
         raise HTTPException(404, "game not found")
     settings = get_settings()
+
+    # Load automation config as defaults (subtitle/transition/voice)
+    from gpcg.domain.models import Automation
+    auto = db.query(Automation).filter(Automation.user_id == user.id).first()
+    auto_cfg = auto.config or {} if auto else {}
+
+    # Helper: use explicit param if non-empty/non-zero, else fall back to automation config
+    def _pick(key: str, explicit, default=""):
+        if explicit is not None and explicit != "" and explicit != 0 and explicit != 0.0:
+            return explicit
+        return auto_cfg.get(key, default)
+
+    scene_duration = _pick("scene_duration", scene_duration, 0.0)
+    video_format = _pick("video_format", video_format, "")
+    subtitle_font = _pick("subtitle_font", subtitle_font, "")
+    subtitle_font_size = _pick("subtitle_font_size", subtitle_font_size, 0)
+    subtitle_color = _pick("subtitle_color", subtitle_color, "")
+    subtitle_outline_color = _pick("subtitle_outline_color", subtitle_outline_color, "")
+    subtitle_position = _pick("subtitle_position", subtitle_position, "")
+    subtitle_case = _pick("subtitle_case", subtitle_case, "")
+    creative_style = _pick("creative_style", creative_style, "")
+    transition_type = _pick("transition_type", transition_type, "")
+    transition_duration = _pick("transition_duration", transition_duration, 0.0)
+    subtitle_box_color = _pick("subtitle_box_color", subtitle_box_color, "")
+    subtitle_box_padding = _pick("subtitle_box_padding", subtitle_box_padding, 0)
+    subtitle_stroke_color = _pick("subtitle_stroke_color", subtitle_stroke_color, "")
+    subtitle_stroke_width = _pick("subtitle_stroke_width", subtitle_stroke_width, 0)
+
+    # For boolean/None fields, use explicit if not None, else automation config
+    if subtitle_box_enabled is None:
+        subtitle_box_enabled = auto_cfg.get("subtitle_box_enabled")
+    if subtitle_rounded_box is None:
+        subtitle_rounded_box = auto_cfg.get("subtitle_rounded_box")
+
+    # Voice: explicit param > automation config > none
+    if not voice:
+        voice = auto_cfg.get("voice", "")
     voice_path = ""
     if voice:
         vp = settings.voices_dir / voice
         if not vp.exists():
             raise HTTPException(404, f"voice '{voice}' not found — upload it first")
         voice_path = str(vp)
+
     svc = GenerationService()
     job = svc.create_job(
         g.canonical_name,
+        user_id=user.id,
         scene_duration=scene_duration,
         video_format=video_format,
         subtitle_font=subtitle_font,
@@ -649,30 +718,66 @@ def create_curiosity_job(
     subtitle_stroke_color: str = Form(""),
     subtitle_stroke_width: int = Form(0),
     subtitle_rounded_box: Optional[bool] = Form(None),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Create a curiosity_short job: general curiosity fact + gameplay background.
 
+    Uses the user's automation config as defaults for subtitle/transition/voice
+    settings. Explicit form params override the automation config.
+
     The fact comes from the general pool (game_id=NULL).
     background_game_id is the game whose gameplay runs in the background.
     If fact_id is omitted, the system auto-picks the best general fact.
-
-    Optional customization params same as /jobs/generate.
     """
     g = db.get(Game, background_game_id)
     if g is None:
         raise HTTPException(404, "background game not found")
     settings = get_settings()
+
+    # Load automation config as defaults
+    from gpcg.domain.models import Automation
+    auto = db.query(Automation).filter(Automation.user_id == user.id).first()
+    auto_cfg = auto.config or {} if auto else {}
+
+    def _pick(key: str, explicit, default=""):
+        if explicit is not None and explicit != "" and explicit != 0 and explicit != 0.0:
+            return explicit
+        return auto_cfg.get(key, default)
+
+    scene_duration = _pick("scene_duration", scene_duration, 0.0)
+    video_format = _pick("video_format", video_format, "")
+    subtitle_font = _pick("subtitle_font", subtitle_font, "")
+    subtitle_font_size = _pick("subtitle_font_size", subtitle_font_size, 0)
+    subtitle_color = _pick("subtitle_color", subtitle_color, "")
+    subtitle_outline_color = _pick("subtitle_outline_color", subtitle_outline_color, "")
+    subtitle_position = _pick("subtitle_position", subtitle_position, "")
+    subtitle_case = _pick("subtitle_case", subtitle_case, "")
+    creative_style = _pick("creative_style", creative_style, "")
+    transition_type = _pick("transition_type", transition_type, "")
+    transition_duration = _pick("transition_duration", transition_duration, 0.0)
+    subtitle_box_color = _pick("subtitle_box_color", subtitle_box_color, "")
+    subtitle_box_padding = _pick("subtitle_box_padding", subtitle_box_padding, 0)
+    subtitle_stroke_color = _pick("subtitle_stroke_color", subtitle_stroke_color, "")
+    subtitle_stroke_width = _pick("subtitle_stroke_width", subtitle_stroke_width, 0)
+    if subtitle_box_enabled is None:
+        subtitle_box_enabled = auto_cfg.get("subtitle_box_enabled")
+    if subtitle_rounded_box is None:
+        subtitle_rounded_box = auto_cfg.get("subtitle_rounded_box")
+    if not voice:
+        voice = auto_cfg.get("voice", "")
     voice_path = ""
     if voice:
         vp = settings.voices_dir / voice
         if not vp.exists():
             raise HTTPException(404, f"voice '{voice}' not found — upload it first")
         voice_path = str(vp)
+
     svc = GenerationService()
     job = svc.create_curiosity_job(
         background_game_id,
         fact_id=fact_id,
+        user_id=user.id,
         scene_duration=scene_duration,
         video_format=video_format,
         subtitle_font=subtitle_font,
@@ -717,6 +822,16 @@ def list_videos(
     result = []
     for v in videos:
         cp = db.get(ContentPlan, v.content_plan_id) if v.content_plan_id else None
+        # Fetch social_title from the job that produced this video
+        social_title = None
+        social_description = None
+        social_tags = None
+        if v.job_id:
+            job = db.get(Job, v.job_id)
+            if job and isinstance(job.artifacts, dict):
+                social_title = job.artifacts.get("social_title")
+                social_description = job.artifacts.get("social_description")
+                social_tags = job.artifacts.get("social_tags")
         result.append(
             {
                 "id": v.id,
@@ -730,6 +845,11 @@ def list_videos(
                 "status": v.status,
                 "thumbnail_path": v.thumbnail_path,
                 "topic": cp.topic if cp else None,
+                "social_title": social_title,
+                "social_description": social_description,
+                "social_tags": social_tags,
+                "youtube_url": v.youtube_url,
+                "youtube_video_id": v.youtube_video_id,
                 "created_at": v.created_at.isoformat() if v.created_at else None,
             }
         )
@@ -750,12 +870,128 @@ def serve_video(video_id: int, db: Session = Depends(get_db)):
 @router.get("/videos/{video_id}/thumbnail")
 def serve_thumbnail(video_id: int, db: Session = Depends(get_db)):
     v = db.get(Video, video_id)
-    if v is None or not v.thumbnail_path:
-        raise HTTPException(404, "thumbnail not found")
-    p = Path(v.thumbnail_path)
-    if not p.exists():
-        raise HTTPException(404, "thumbnail file missing")
-    return FileResponse(str(p), media_type="image/jpeg")
+    if v is None:
+        raise HTTPException(404, "video not found")
+
+    # Try existing thumbnail path
+    if v.thumbnail_path:
+        p = Path(v.thumbnail_path)
+        if p.exists():
+            return FileResponse(str(p), media_type="image/jpeg")
+
+    # Fallback: generate thumbnail on-demand from the video file
+    video_path = None
+    if v.storage_key:
+        settings = get_settings()
+        candidate = settings.videos_dir / v.storage_key
+        if candidate.exists():
+            video_path = candidate
+    if not video_path and v.file_path:
+        candidate = Path(v.file_path)
+        if candidate.exists():
+            video_path = candidate
+
+    if video_path:
+        try:
+            from gpcg.infrastructure.media import generate_thumbnail, probe
+            settings = get_settings()
+            thumb_path = settings.videos_dir / f"{video_path.stem}_thumb.jpg"
+            info = probe(video_path)
+            at = min(1.0, max(0.1, (info.duration or 2.0) / 2))
+            generate_thumbnail(video_path, thumb_path, at=at)
+            # Persist the path so future requests don't regenerate
+            v.thumbnail_path = str(thumb_path)
+            db.commit()
+            return FileResponse(str(thumb_path), media_type="image/jpeg")
+        except Exception as e:
+            log.warning(f"on-demand thumbnail generation failed for video #{video_id}: {e}")
+
+    raise HTTPException(404, "thumbnail not available")
+
+
+@router.post("/videos/{video_id}/publish")
+def publish_video(
+    video_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Publish a video to YouTube via the google-integration service.
+
+    The video must have a storage_key (uploaded by the worker) and the user
+    must have a connected YouTube channel. On success, updates the Video
+    with the YouTube URL and video ID.
+    """
+    from gpcg.domain.models import VideoStatus, Automation, Job
+    from gpcg.infrastructure.google_integration_adapter import GoogleIntegrationAdapter
+    from gpcg.config import get_settings
+
+    v = db.get(Video, video_id)
+    if v is None:
+        raise HTTPException(404, "video not found")
+    if v.user_id != user.id:
+        raise HTTPException(403, "not your video")
+    if not v.storage_key:
+        raise HTTPException(400, "video file not uploaded yet (no storage_key)")
+    if v.status == VideoStatus.published.value:
+        raise HTTPException(400, "video already published")
+
+    settings = get_settings()
+
+    # Resolve storage_key to absolute path on VPS
+    video_path = settings.temp_uploads_dir / v.storage_key
+    if not video_path.exists():
+        # Try videos_dir
+        video_path = settings.videos_dir / v.storage_key
+    if not video_path.exists():
+        raise HTTPException(400, f"video file not found on server: {v.storage_key}")
+
+    # Get title/description/tags from job artifacts or content plan
+    job = db.get(Job, v.job_id) if v.job_id else None
+    artifacts = job.artifacts if job else {}
+    title = artifacts.get("social_title", "")
+    description = artifacts.get("social_description", "")
+    tags = artifacts.get("social_tags", [])
+
+    if not title:
+        cp = db.get(ContentPlan, v.content_plan_id) if v.content_plan_id else None
+        title = cp.topic if cp else f"Video #{v.id}"
+
+    # Get upload settings from automation config
+    auto = db.query(Automation).filter(Automation.user_id == user.id).first()
+    auto_config = auto.config if auto else {}
+    privacy = auto_config.get("youtube_privacy", settings.gpcg_youtube_privacy)
+    category_id = int(auto_config.get("youtube_category_id", settings.gpcg_youtube_category_id))
+
+    # Mark as publishing
+    v.status = VideoStatus.pending_approval.value
+    db.commit()
+
+    adapter = GoogleIntegrationAdapter(settings=settings)
+    result = adapter.upload_to_youtube(
+        video_path,
+        title=title,
+        description=description,
+        tags=tags,
+        user_id=settings.gpcg_youtube_user_id,
+        privacy=privacy,
+        category_id=category_id,
+    )
+
+    if result.success:
+        v.youtube_url = result.youtube_url
+        v.youtube_video_id = result.youtube_video_id
+        v.status = VideoStatus.published.value
+        db.commit()
+        return {
+            "success": True,
+            "youtube_url": result.youtube_url,
+            "youtube_video_id": result.youtube_video_id,
+            "status": v.status,
+        }
+    else:
+        v.status = VideoStatus.publish_failed.value
+        db.commit()
+        raise HTTPException(500, f"YouTube upload failed: {result.error}")
 
 
 # ── Voices (TTS reference audio) ──────────────────────────────────────────────

@@ -36,6 +36,7 @@ from gpcg.domain.creative_plan import (
     ModelRecommendation,
     NarrativeBeat,
     ScriptReview,
+    StoryConcept,
     ToneWeights,
     VideoCreativePlan,
 )
@@ -161,6 +162,7 @@ class EditorialPlanner:
         *,
         job_type: str = "generate_short",
         background_game_id: Optional[int] = None,
+        story_concept: Optional[StoryConcept] = None,
     ) -> VideoCreativePlan:
         """Analyze the content plan and produce a VideoCreativePlan.
 
@@ -169,6 +171,9 @@ class EditorialPlanner:
             content_plan: the content plan (topic, hook, tone, fact)
             job_type: "generate_short" (GAME_RELATED) or "curiosity_short" (GENERAL_TOPIC)
             background_game_id: for curiosity shorts, the game providing background gameplay
+            story_concept: V2 — the StoryConcept from the story_finding stage.
+                When provided (and successful), the angle becomes the central
+                idea and the frame informs the narrative plan.
 
         Returns:
             VideoCreativePlan with all editorial decisions
@@ -190,8 +195,10 @@ class EditorialPlanner:
             session, content_plan, video_type, background_game_id
         )
 
-        # Build the user prompt
-        user_prompt = self._build_user_prompt(content_plan, video_type, context)
+        # Build the user prompt (incorporates StoryConcept when available)
+        user_prompt = self._build_user_prompt(
+            content_plan, video_type, context, story_concept=story_concept
+        )
 
         # Call the LLM
         try:
@@ -210,6 +217,13 @@ class EditorialPlanner:
         plan = self._parse_plan(data, video_type, content_plan)
         plan.latency_ms = int((time.time() - t0) * 1000)
         plan.gameplay_compatibility = context.get("compatibility", {})
+
+        # V2: when a StoryConcept is available, use its angle as the central
+        # idea if the LLM didn't produce a strong one. The angle is the
+        # editorial perspective — it should drive the plan.
+        if story_concept is not None and story_concept.success and story_concept.angle:
+            if not plan.central_idea or len(plan.central_idea) < 20:
+                plan.central_idea = story_concept.angle
 
         log.info(
             f"editorial plan: type={plan.video_type} model={plan.model.model} "
@@ -277,8 +291,20 @@ class EditorialPlanner:
 
         return context
 
-    def _build_user_prompt(self, plan: ContentPlan, video_type: str, context: dict) -> str:
-        """Build the user prompt for the planner LLM call."""
+    def _build_user_prompt(
+        self,
+        plan: ContentPlan,
+        video_type: str,
+        context: dict,
+        *,
+        story_concept: Optional[StoryConcept] = None,
+    ) -> str:
+        """Build the user prompt for the planner LLM call.
+
+        When a StoryConcept is available (V2), the angle, curiosity_gap,
+        narrative_hook, and frame are incorporated so the planner designs
+        the narrative around the story angle rather than the raw fact.
+        """
         parts = [
             f"VIDEO TYPE: {video_type}",
             f"",
@@ -290,6 +316,18 @@ class EditorialPlanner:
 
         if context.get("game_name"):
             parts.append(f"GAME: {context['game_name']}")
+
+        # V2: incorporate StoryConcept when available
+        if story_concept is not None and story_concept.success:
+            parts.append(f"\nSTORY CONCEPT (from story finder — use this as your editorial guide):")
+            parts.append(f"  ANGLE: {story_concept.angle}")
+            parts.append(f"  CURIOSITY_GAP: {story_concept.curiosity_gap}")
+            parts.append(f"  NARRATIVE_HOOK: {story_concept.narrative_hook}")
+            parts.append(f"  FRAME: {story_concept.frame}")
+            parts.append(f"  IS_INSIGHT: {story_concept.is_insight}")
+            parts.append(f"  The angle is the editorial perspective. Build the central_idea "
+                         f"and narrative_beats around it. The frame is how to present the fact — "
+                         f"use it in the hook. The narrative_hook is the suggested opening line.")
 
         # Add fact claim if available (CRITICAL for gameplay_query generation)
         if plan.fact_id:

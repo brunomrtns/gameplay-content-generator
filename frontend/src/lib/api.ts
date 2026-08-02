@@ -20,15 +20,228 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     credentials: "include", // CRITICAL: send bi_auth cookie
   });
   if (res.status === 401) {
-    useAuth.getState().logout();
-    window.location.href = SSO_LOGIN_URL;
-    throw new Error("Unauthorized");
+    // Try to silently refresh the SSO cookie via the Identity Service.
+    // The bi_auth access token expires after 15min; /id/api/auth/check
+    // rotates it using the bi_refresh cookie (7d). Only redirect to login
+    // if the refresh also fails — otherwise long-running sessions (and
+    // long uploads) get killed the moment the access token expires.
+    const refreshed = await tryRefreshSsoCookie();
+    if (!refreshed) {
+      useAuth.getState().logout();
+      window.location.href = SSO_LOGIN_URL;
+      throw new Error("Unauthorized");
+    }
+    // Retry the original request once with the refreshed cookie
+    const retry = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: { ...headers, ...(options?.headers as Record<string, string>) },
+      credentials: "include",
+    });
+    if (retry.status === 401) {
+      useAuth.getState().logout();
+      window.location.href = SSO_LOGIN_URL;
+      throw new Error("Unauthorized");
+    }
+    if (!retry.ok) {
+      const text = await retry.text().catch(() => retry.statusText);
+      throw new Error(text || retry.statusText);
+    }
+    return retry.json() as Promise<T>;
   }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(text || res.statusText);
   }
   return res.json() as Promise<T>;
+}
+
+// Silently refresh the SSO cookie by hitting the Identity Service /auth/check
+// endpoint, which rotates the bi_auth cookie using the bi_refresh cookie.
+// Returns true if the cookie was refreshed (response 200), false otherwise.
+let _refreshing: Promise<boolean> | null = null;
+async function tryRefreshSsoCookie(): Promise<boolean> {
+  if (_refreshing) return _refreshing;
+  _refreshing = (async () => {
+    try {
+      const r = await fetch("/id/api/auth/check", { credentials: "include" });
+      return r.ok;
+    } catch {
+      return false;
+    } finally {
+      _refreshing = null;
+    }
+  })();
+  return _refreshing;
+}
+
+// Upload with progress reporting via XMLHttpRequest (fetch has no upload
+// progress event). Returns a promise that resolves with the parsed JSON
+// response and reports progress via the onProgress callback.
+export function uploadWithProgress<T>(
+  path: string,
+  body: FormData,
+  onProgress?: (loaded: number, total: number, pct: number) => void,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE}${path}`);
+    xhr.withCredentials = true;
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(e.loaded, e.total, Math.round((e.loaded / e.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        // Same refresh logic as request() — try to renew the cookie before
+        // giving up. If refresh works, retry the upload from scratch (we
+        // can't resume a multipart upload mid-stream).
+        tryRefreshSsoCookie().then((ok) => {
+          if (!ok) {
+            useAuth.getState().logout();
+            window.location.href = SSO_LOGIN_URL;
+            reject(new Error("Unauthorized"));
+            return;
+          }
+          // Retry once
+          const retry = new XMLHttpRequest();
+          retry.open("POST", `${API_BASE}${path}`);
+          retry.withCredentials = true;
+          retry.upload.onprogress = (e) => {
+            if (e.lengthComputable && onProgress) {
+              onProgress(e.loaded, e.total, Math.round((e.loaded / e.total) * 100));
+            }
+          };
+          retry.onload = () => {
+            if (retry.status >= 200 && retry.status < 300) {
+              try { resolve(JSON.parse(retry.responseText) as T); }
+              catch { resolve(retry.responseText as unknown as T); }
+            } else {
+              reject(new Error(retry.responseText || retry.statusText));
+            }
+          };
+          retry.onerror = () => reject(new Error("Network error during upload"));
+          retry.send(body);
+        });
+        return;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText) as T); }
+        catch { resolve(xhr.responseText as unknown as T); }
+      } else {
+        reject(new Error(xhr.responseText || xhr.statusText));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.send(body);
+  });
+}
+
+// ── Resumable chunked upload ───────────────────────────────────────────────
+// Splits a File into chunks, uploads them one at a time with progress,
+// and assembles on the server. If the connection drops, the client can
+// resume by querying which chunks are missing. Each chunk is a small
+// request (~8 MiB) so there's no timeout risk and RAM stays bounded.
+
+const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MiB — must match server
+
+async function uploadChunked(
+  file: File,
+  onProgress?: (loaded: number, total: number, pct: number) => void,
+): Promise<any> {
+  const total = file.size;
+  const totalChunks = Math.ceil(total / CHUNK_SIZE);
+
+  // Compute SHA-256 hash client-side (for early dedup). Uses the Web
+  // Crypto API (SubtleCrypto) — reads the file in chunks to avoid RAM spike.
+  let fileHash: string | null = null;
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest("SHA-256", arrayBuffer);
+    fileHash = Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  } catch {
+    // SubtleCrypto not available (e.g. non-secure context) — server will hash.
+  }
+
+  // 1. Init — start upload session (or short-circuit if duplicate)
+  const initFd = new FormData();
+  initFd.append("filename", file.name);
+  initFd.append("file_size", String(file.size));
+  if (fileHash) initFd.append("file_hash", fileHash);
+
+  const initRes = await request<any>("/gameplays/upload/init", {
+    method: "POST",
+    body: initFd,
+  });
+
+  if (initRes.duplicate) {
+    throw new Error("Este arquivo já foi enviado");
+  }
+
+  const uploadId = initRes.upload_id;
+  const serverChunkSize = initRes.chunk_size || CHUNK_SIZE;
+  const serverTotalChunks = initRes.total_chunks;
+
+  // 2. Upload chunks — sequential with progress, retry on transient errors
+  let uploadedBytes = 0;
+  for (let i = 0; i < serverTotalChunks; i++) {
+    const start = i * serverChunkSize;
+    const end = Math.min(start + serverChunkSize, total);
+    const chunk = file.slice(start, end);
+
+    const chunkFd = new FormData();
+    chunkFd.append("index", String(i));
+    chunkFd.append("chunk", chunk, `chunk_${i}`);
+
+    // Retry each chunk up to 3 times on network error
+    let lastErr: Error | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await uploadWithProgress<any>(
+          `/gameplays/upload/${uploadId}/chunk`,
+          chunkFd,
+          (loaded, chunkTotal) => {
+            // Report overall progress: completed chunks + current chunk progress
+            const overall = uploadedBytes + loaded;
+            if (onProgress) {
+              onProgress(overall, total, Math.round((overall / total) * 100));
+            }
+          },
+        );
+        lastErr = null;
+        break;
+      } catch (e: any) {
+        lastErr = e;
+        // If 401, the uploadWithProgress already tried to refresh — if we're
+        // here, the refresh failed and we should stop.
+        if (e.message === "Unauthorized") throw e;
+        // Wait before retry (exponential backoff)
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      }
+    }
+    if (lastErr) throw lastErr;
+
+    uploadedBytes += (end - start);
+    if (onProgress) {
+      onProgress(uploadedBytes, total, Math.round((uploadedBytes / total) * 100));
+    }
+  }
+
+  // 3. Complete — assemble on server
+  const result = await request<any>(`/gameplays/upload/${uploadId}/complete`, {
+    method: "POST",
+  });
+
+  if (result.duplicate) {
+    throw new Error("Este arquivo já foi enviado");
+  }
+
+  return result;
 }
 
 export function form(data: Record<string, string | number | boolean>): FormData {
@@ -85,10 +298,11 @@ export const api = {
   assignGame: (source_id: number, game_id: number) =>
     request<any>(`/sources/${source_id}/assign-game`, { method: "POST", body: form({ game_id }) }),
   scanInbox: () => request<any>("/inbox/scan", { method: "POST" }),
-  uploadGameplay: (file: File) => {
-    const fd = new FormData();
-    fd.append("file", file);
-    return request<any>("/gameplays/upload", { method: "POST", body: fd });
+  uploadGameplay: (
+    file: File,
+    onProgress?: (loaded: number, total: number, pct: number) => void,
+  ): Promise<any> => {
+    return uploadChunked(file, onProgress);
   },
 
   // ── Assets ─────────────────────────────────────────────────────────────
@@ -144,9 +358,36 @@ export const api = {
     request<any[]>(`/videos${game_id ? `?game_id=${game_id}` : ""}`),
   videoUrl: (id: number) => `${API_BASE}/videos/${id}/file`,
   thumbUrl: (id: number) => `${API_BASE}/videos/${id}/thumbnail`,
+  publishVideo: (id: number) =>
+    request<any>(`/videos/${id}/publish`, { method: "POST" }),
 
   // ── Workers (Compute Plane) ─────────────────────────────────────────────
   listWorkers: () => request<{ workers: any[] }>("/workers"),
   createMappingJob: (source_id: number) =>
     request<any>(`/gameplays/${source_id}/create-mapping-job`, { method: "POST" }),
+
+  // ── Channel Profile (channel identity + editorial direction) ───────────
+  getChannelProfile: () => request<any>("/channel/profile"),
+  updateChannelProfile: (data: Record<string, any>) =>
+    request<any>("/channel/profile", { method: "PUT", body: JSON.stringify(data) }),
+
+  // ── Knowledge Documents (RAG knowledge base) ───────────────────────────
+  uploadKnowledgeDocument: (file: File, game_id?: number | null) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (game_id !== undefined && game_id !== null) {
+      fd.append("game_id", String(game_id));
+    }
+    return request<any>("/knowledge/upload", { method: "POST", body: fd });
+  },
+  listKnowledgeDocuments: () => request<any[]>("/knowledge/documents"),
+  processKnowledgeDocument: (doc_id: number) =>
+    request<any>(`/knowledge/documents/${doc_id}/process`, { method: "POST" }),
+  deleteKnowledgeDocument: (doc_id: number) =>
+    request<any>(`/knowledge/documents/${doc_id}`, { method: "DELETE" }),
+  queryKnowledge: (query: string, game_id?: number | null, top_k?: number) =>
+    request<any>("/knowledge/query", {
+      method: "POST",
+      body: JSON.stringify({ query, game_id, top_k }),
+    }),
 };

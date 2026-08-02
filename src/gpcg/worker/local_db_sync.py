@@ -31,6 +31,54 @@ from gpcg.domain.models import Base
 log = logging.getLogger(__name__)
 
 
+def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Path) -> Optional[str]:
+    """Resolve a VPS gameplay file path to a local file path.
+
+    The VPS stores gameplay at /app/data/gameplays/{filename} (container path).
+    Locally, gameplay files may be in:
+    - {storage_root}/data/gameplays/{filename}
+    - {storage_root}/data/inbox/{filename}
+    - /media/bruno/ToshibaHD/Captures/{filename}
+    - Any subdirectory under /media/bruno/ToshibaHD
+
+    Returns the first matching path, or None if not found.
+    """
+    if not filename:
+        return None
+
+    # If the VPS path already exists locally, use it
+    if vps_path and Path(vps_path).exists():
+        return vps_path
+
+    # Search common locations
+    search_dirs = [
+        storage_root / "data" / "gameplays",
+        storage_root / "data" / "inbox",
+        Path("/media/bruno/ToshibaHD/Captures"),
+        Path("/media/bruno/ToshibaHD/gpcg/data/gameplays"),
+        Path("/media/bruno/ToshibaHD/gpcg/data/inbox"),
+    ]
+
+    for d in search_dirs:
+        candidate = d / filename
+        if candidate.exists():
+            return str(candidate)
+
+    # Last resort: find by filename under /media/bruno/ToshibaHD
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["find", "/media/bruno/ToshibaHD", "-name", filename, "-type", "f"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().split("\n")[0]
+    except Exception:
+        pass
+
+    return None
+
+
 def _create_temp_db(db_path: Path) -> sessionmaker:
     """Create a temporary SQLite DB with all GPCG tables."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -42,7 +90,7 @@ def _create_temp_db(db_path: Path) -> sessionmaker:
     return sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
-def populate_local_db(job_data: dict, db_path: Path) -> sessionmaker:
+def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) -> sessionmaker:
     """Create a local temp DB and populate it with data from the VPS API.
 
     Args:
@@ -53,7 +101,7 @@ def populate_local_db(job_data: dict, db_path: Path) -> sessionmaker:
         A sessionmaker bound to the populated temp DB.
     """
     from gpcg.domain.models import (
-        User, Game, GameplaySource, GameplayEvent, Fact,
+        User, Game, GameplaySource, GameplayEvent, GameplayAsset, Fact,
         ContentPlan, Script, Job, Automation,
     )
 
@@ -107,11 +155,49 @@ def populate_local_db(job_data: dict, db_path: Path) -> sessionmaker:
 
         # Gameplay sources + events
         for src_data in job_data.get("gameplay_sources", []):
+            # Resolve local file path: VPS sends container path (/app/data/...),
+            # we need to find the file on the local HD
+            vps_path = src_data.get("file_path", "")
+            filename = src_data.get("filename", "")
+            local_path = _resolve_local_gameplay_path(vps_path, filename, storage_root or Path("/media/bruno/ToshibaHD/gpcg"))
+            if local_path:
+                log.info(f"Resolved gameplay path: {vps_path} → {local_path}")
+            else:
+                log.warning(f"Could not resolve local path for {filename} (VPS: {vps_path})")
+            # Normalize metadata_json to match model expectations:
+            # model reads analysis status from metadata_json["analysis"]["status"]
+            # but VPS may store it as metadata_json["analysis_status"]
+            raw_meta = src_data.get("metadata_json", {})
+            if isinstance(raw_meta, str):
+                import json as _json
+                try:
+                    raw_meta = _json.loads(raw_meta)
+                except (ValueError, TypeError):
+                    raw_meta = {}
+            if not isinstance(raw_meta, dict):
+                raw_meta = {}
+
+            # Ensure analysis info is in the expected nested format
+            if "analysis_status" in raw_meta and "analysis" not in raw_meta:
+                raw_meta["analysis"] = {
+                    "status": raw_meta.pop("analysis_status"),
+                    "version": raw_meta.get("analysis_version", "v1"),
+                    "event_count": raw_meta.get("events_count", 0),
+                }
+            elif "analysis" not in raw_meta:
+                # Default to ready if we have events
+                events_list = src_data.get("events", [])
+                raw_meta["analysis"] = {
+                    "status": "ready" if events_list else "pending",
+                    "version": "v1",
+                    "event_count": len(events_list),
+                }
+
             session.add(GameplaySource(
                 id=src_data["id"],
                 user_id=user_id,
                 game_id=src_data.get("game_id"),
-                file_path=src_data.get("file_path", ""),
+                file_path=local_path or src_data.get("file_path", ""),
                 filename=src_data["filename"],
                 file_hash=src_data.get("file_hash", ""),
                 file_size=src_data.get("file_size", 0),
@@ -121,8 +207,9 @@ def populate_local_db(job_data: dict, db_path: Path) -> sessionmaker:
                 fps=src_data.get("fps", 0.0),
                 codec=src_data.get("codec"),
                 has_audio=src_data.get("has_audio", False),
+                ingestion_status="ready",
                 processing_status=src_data.get("processing_status", "ready"),
-                metadata_json=src_data.get("metadata_json", {}),
+                metadata_json=raw_meta,
             ))
             session.flush()
 
@@ -144,6 +231,18 @@ def populate_local_db(job_data: dict, db_path: Path) -> sessionmaker:
                     interesting_score=evt_data.get("interesting_score", 0.0),
                     analysis_version=evt_data.get("analysis_version", "v1"),
                     metadata_json=evt_data.get("metadata_json", {}),
+                ))
+            # Assets for this source (clips used by GameplaySelector)
+            for asset_data in src_data.get("assets", []):
+                session.add(GameplayAsset(
+                    id=asset_data["id"],
+                    source_id=src_data["id"],
+                    label=asset_data.get("label", ""),
+                    start_sec=asset_data["start_sec"],
+                    end_sec=asset_data["end_sec"],
+                    duration=asset_data["duration"],
+                    used_count=asset_data.get("used_count", 0),
+                    metadata_json=asset_data.get("metadata_json", {}),
                 ))
         session.flush()
 
@@ -184,7 +283,16 @@ def populate_local_db(job_data: dict, db_path: Path) -> sessionmaker:
                 ))
         session.flush()
 
-        # Job
+        # Job — reset status to "queued" so GenerationService.run_job() will run
+        # Parse artifacts: VPS sends JSON string, local DB needs dict
+        raw_artifacts = job.get("artifacts", {})
+        if isinstance(raw_artifacts, str):
+            import json as _json
+            try:
+                raw_artifacts = _json.loads(raw_artifacts)
+            except (ValueError, TypeError):
+                raw_artifacts = {}
+
         session.add(Job(
             id=job["id"],
             user_id=user_id,
@@ -193,12 +301,12 @@ def populate_local_db(job_data: dict, db_path: Path) -> sessionmaker:
             game_id=job.get("game_id"),
             content_plan_id=job.get("content_plan_id"),
             gameplay_source_id=job.get("gameplay_source_id"),
-            status="running",
-            stage=job.get("stage", "content_planning"),
+            status="queued",
+            stage="queued",
             progress=0.0,
             attempts=job.get("attempts", 0),
             max_attempts=job.get("max_attempts", 3),
-            artifacts=job.get("artifacts", {}),
+            artifacts=raw_artifacts,
             priority=job.get("priority", "normal"),
             required_capabilities=job.get("required_capabilities", []),
         ))
@@ -263,7 +371,7 @@ def run_generation_locally(
         db_path.unlink()
 
     try:
-        SessionLocal = populate_local_db(job_data, db_path)
+        SessionLocal = populate_local_db(job_data, db_path, storage_root=storage_root)
     except Exception as e:
         log.error(f"Failed to populate local DB: {e}", exc_info=True)
         return {"status": "failed", "error": f"DB sync failed: {e}"}
@@ -301,9 +409,13 @@ def run_generation_locally(
         log.info(f"Running GenerationService for job #{job_id} on local DB")
         gen.run_job(job_id)
 
-        # Extract results from the local DB
-        session = SessionLocal()
-        try:
+        # Extract results from the local DB.
+        # IMPORTANT: use session_scope() from database.py (engine B with WAL mode),
+        # NOT the SessionLocal from _create_temp_db (engine A without WAL).
+        # Engine B is the one GenerationService used to commit artifacts — engine A
+        # may not see those commits (WAL snapshot isolation).
+        from gpcg.infrastructure.database import session_scope as _session_scope
+        with _session_scope() as session:
             from gpcg.domain.models import Job as JobModel, ContentPlan, Script, Video
 
             job_row = session.query(JobModel).filter(JobModel.id == job_id).first()
@@ -312,8 +424,9 @@ def run_generation_locally(
 
             result: dict = {
                 "status": job_row.status,
-                "artifacts": job_row.artifacts or {},
+                "artifacts": dict(job_row.artifacts or {}),
             }
+            log.info(f"Local DB extract: job #{job_id} status={job_row.status} artifacts_keys={list((job_row.artifacts or {}).keys())}")
 
             if job_row.status == "failed":
                 result["error"] = job_row.error or "Generation failed"
@@ -375,15 +488,12 @@ def run_generation_locally(
 
             return result
 
-        finally:
-            session.close()
-
     except Exception as e:
         log.error(f"Generation failed for job #{job_id}: {e}", exc_info=True)
         return {"status": "failed", "error": str(e)}
     finally:
         # Restore original env vars
-        for var in ("GPCG_DB_PATH", "GPCG_DATA_DIR"):
+        for var in ("GPCG_DB_PATH", "GPCG_DATA_DIR", "GPCG_YOUTUBE_UPLOAD_ENABLED"):
             if var in os.environ:
                 del os.environ[var]
         get_settings.cache_clear()

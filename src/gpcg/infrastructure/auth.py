@@ -90,11 +90,16 @@ def _find_or_create_local_user(bi_user: dict, db: Session) -> User:
             db.flush()
         return user
 
-    # Create new local user
+    # Create new local user.
+    # NOTE: password_hash is NOT NULL in the SQLite schema (legacy from the
+    # old local-auth era). SSO users have no local password — BI Identity
+    # manages credentials — so we store a sentinel value. The column is never
+    # read for SSO users. (SQLite cannot ALTER an existing column's NOT NULL
+    # constraint, so we can't make it nullable via _ensure_column.)
     user = User(
         email=email,
         name=name,
-        password_hash=None,
+        password_hash="!sso-no-local-password",
         bi_identity_id=bi_id,
         is_admin=False,
         is_active=True,

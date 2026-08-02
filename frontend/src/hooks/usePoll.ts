@@ -1,16 +1,20 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function usePoll<T>(fn: () => Promise<T>, intervalMs: number, deps: any[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+
+  const runRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     const run = async () => {
       try {
-        const d = await fn();
+        const d = await fnRef.current();
         if (active) {
           setData(d);
           setError(null);
@@ -24,6 +28,7 @@ export function usePoll<T>(fn: () => Promise<T>, intervalMs: number, deps: any[]
         }
       }
     };
+    runRef.current = run;
     run();
     return () => {
       active = false;
@@ -32,5 +37,9 @@ export function usePoll<T>(fn: () => Promise<T>, intervalMs: number, deps: any[]
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
-  return { data, loading, error, setData };
+  const refetch = useCallback(async () => {
+    await runRef.current();
+  }, []);
+
+  return { data, loading, error, setData, refetch };
 }
