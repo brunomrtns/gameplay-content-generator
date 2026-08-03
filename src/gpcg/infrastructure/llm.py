@@ -171,6 +171,54 @@ class LLMClient:
                     pass
             raise LLMError(f"could not parse JSON from vision response: {raw[:300]}")
 
+    def generate(
+        self,
+        prompt: str,
+        *,
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+    ) -> str:
+        """Simple text generation (no system prompt). Returns the assistant text.
+
+        Convenience wrapper around chat() with an empty system prompt.
+        """
+        return self.chat(
+            system="You are a helpful assistant.",
+            prompt=prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+    def embed(
+        self,
+        text: str,
+        *,
+        model: str = "nomic-embed-text",
+    ) -> list[float]:
+        """Generate an embedding vector for a text via Ollama.
+
+        Uses the Ollama /api/embeddings endpoint.
+        Returns a list of floats (dimension depends on the model).
+        """
+        url = f"{self.host}/api/embeddings"
+        payload = {
+            "model": model,
+            "prompt": text,
+        }
+        try:
+            resp = httpx.post(url, json=payload, timeout=self.timeout)
+            resp.raise_for_status()
+        except httpx.HTTPError as e:
+            raise LLMError(f"Ollama embeddings request failed: {e}") from e
+
+        data = resp.json()
+        embedding = data.get("embedding", [])
+        if not embedding:
+            raise LLMError(f"empty embedding from Ollama: {data}")
+        return embedding
+
 
 _client: Optional[LLMClient] = None
 

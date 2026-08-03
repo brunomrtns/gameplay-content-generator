@@ -14,6 +14,10 @@ The retriever respects:
   - GameplayEvent.visual_confidence (skip low-confidence events)
   - The plan's gameplay_query (semantic search over descriptions + transcripts)
 
+V2: Supports cross-game retrieval via game_ids: list[int]. When
+GPCG_CROSS_GAME_GAMEPLAY_ENABLED is on, _expand_game_ids expands the
+game_id to include games in the same franchise/developer.
+
 Key principle: clips are NOT extracted physically here. Only temporal
 references (start_sec, end_sec) are returned. The render stage extracts
 the actual video segments on-demand.
@@ -22,18 +26,61 @@ the actual video segments on-demand.
 from __future__ import annotations
 
 import random
-from typing import Optional
+from typing import Optional, Union
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gpcg.application.gameplay_index_service import GameplayIndexService
 from gpcg.application.gameplay_selector import GameplaySelector, SelectedClip
+from gpcg.config import get_settings
 from gpcg.domain.creative_plan import VideoCreativePlan
-from gpcg.domain.models import GameplayEvent, GameplaySource
+from gpcg.domain.models import ContentScope, Game, GameplayEvent, GameplaySource
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)
+
+
+def _expand_game_ids(
+    session: Session,
+    game_id: int,
+    scope: str = ContentScope.game.value,
+) -> list[int]:
+    """Expand a game_id to include games in the same franchise/developer.
+
+    V2: Cross-game expansion per ARCHITECTURE_V2.md §8.2.
+
+    Args:
+        session: DB session
+        game_id: the primary game ID
+        scope: "game" (no expansion), "franchise", or "developer"
+
+    Returns:
+        List of game IDs to search for gameplay. Always includes game_id.
+    """
+    game = session.get(Game, game_id)
+    if not game or scope == ContentScope.game.value:
+        return [game_id]
+
+    ids = [game_id]
+    if scope == ContentScope.franchise.value and game.franchise:
+        related = session.execute(
+            select(Game.id).where(
+                Game.franchise == game.franchise,
+                Game.id != game_id,
+            )
+        ).scalars().all()
+        ids.extend(related)
+    elif scope == ContentScope.developer.value and game.developer:
+        related = session.execute(
+            select(Game.id).where(
+                Game.developer == game.developer,
+                Game.id != game_id,
+            )
+        ).scalars().all()
+        ids.extend(related)
+
+    return ids
 
 
 class GameplayRetriever:
@@ -43,6 +90,8 @@ class GameplayRetriever:
     - No VideoCreativePlan is provided
     - The plan's strategy is "background_filler"
     - No analyzed gameplay events exist for the game
+
+    V2: Supports cross-game retrieval via game_ids list.
     """
 
     def __init__(self, index_service: Optional[GameplayIndexService] = None) -> None:
@@ -52,52 +101,87 @@ class GameplayRetriever:
     def retrieve(
         self,
         session: Session,
-        game_id: int,
+        game_id: Union[int, list[int]],
         target_duration: float,
         *,
         creative_plan: Optional[VideoCreativePlan] = None,
         scene_duration: float = 0.0,
         video_type: str = "GAME_RELATED",
         rng: Optional[random.Random] = None,
+        scope: str = ContentScope.game.value,
     ) -> list[SelectedClip]:
         """Retrieve gameplay clips for a video.
 
         Args:
             session: DB session
-            game_id: game to retrieve gameplay from
+            game_id: game to retrieve gameplay from. V2: accepts list[int]
+                     for cross-game retrieval. If int, wraps to [game_id].
             target_duration: total duration to fill (narration duration)
             creative_plan: the editorial plan (may be None for fallback)
             scene_duration: scene grouping duration (0 = legacy mode)
             video_type: GAME_RELATED or GENERAL_TOPIC (for compatibility check)
             rng: random generator (for deterministic tests)
+            scope: V2 cross-game scope — "game", "franchise", or "developer".
+                    Only used when GPCG_CROSS_GAME_GAMEPLAY_ENABLED is on.
 
         Returns:
             List of SelectedClip with temporal references to gameplay segments
         """
         rng = rng or random.Random()
 
+        # V2: Normalize game_id to list and expand if cross-game is enabled
+        if isinstance(game_id, list):
+            game_ids = game_id
+        else:
+            game_ids = [game_id]
+            # V2: expand game_ids if cross-game is enabled
+            settings = get_settings()
+            if settings.gpcg_cross_game_gameplay_enabled and scope != ContentScope.game.value:
+                expanded = _expand_game_ids(session, game_id, scope)
+                if len(expanded) > 1:
+                    log.info(f"cross-game expansion: game #{game_id} scope={scope} → {expanded}")
+                    game_ids = expanded
+
+        # Use the first game_id for compatibility checks (primary game)
+        primary_game_id = game_ids[0] if game_ids else game_id
+
         # Decide whether to use semantic retrieval or fallback
-        use_semantic = self._should_use_semantic(session, game_id, creative_plan, video_type)
+        use_semantic = self._should_use_semantic(session, game_ids, creative_plan, video_type)
 
         if use_semantic and creative_plan is not None:
             clips = self._retrieve_semantic(
-                session, game_id, target_duration, creative_plan, scene_duration, rng
+                session, game_ids, target_duration, creative_plan, scene_duration, rng
             )
             if clips:
                 return clips
             # If semantic retrieval found nothing, fall back
-            log.info(f"semantic retrieval found no clips for game #{game_id}, falling back to random")
+            log.info(f"semantic retrieval found no clips for games {game_ids}, falling back to random")
 
         # Fallback: random selection via GameplaySelector
+        # V2: try each game_id in order until we get enough clips
+        if len(game_ids) > 1:
+            # Cross-game fallback: try expanded games, then contract to primary
+            for gid in game_ids:
+                clips = self.fallback_selector.select(
+                    session, gid, target_duration,
+                    scene_duration=scene_duration, rng=rng,
+                )
+                if clips:
+                    return clips
+            # All games failed — try primary as last resort
+            return self.fallback_selector.select(
+                session, primary_game_id, target_duration,
+                scene_duration=scene_duration, rng=rng,
+            )
         return self.fallback_selector.select(
-            session, game_id, target_duration,
+            session, primary_game_id, target_duration,
             scene_duration=scene_duration, rng=rng,
         )
 
     def _should_use_semantic(
         self,
         session: Session,
-        game_id: int,
+        game_ids: list[int],
         plan: Optional[VideoCreativePlan],
         video_type: str,
     ) -> bool:
@@ -109,10 +193,10 @@ class GameplayRetriever:
         if plan.gameplay_strategy == "background_filler":
             return False
 
-        # Check if any source for this game has a ready semantic index
+        # V2: check sources across all game_ids (cross-game)
         sources = session.execute(
             select(GameplaySource).where(
-                GameplaySource.game_id == game_id,
+                GameplaySource.game_id.in_(game_ids),
                 GameplaySource.ingestion_status == "ready",
             )
         ).scalars().all()
@@ -132,13 +216,15 @@ class GameplayRetriever:
     def _retrieve_semantic(
         self,
         session: Session,
-        game_id: int,
+        game_ids: list[int],
         target_duration: float,
         plan: VideoCreativePlan,
         scene_duration: float,
         rng: random.Random,
     ) -> list[SelectedClip]:
         """Retrieve clips using the semantic index.
+
+        V2: searches across multiple game_ids (cross-game).
 
         Strategy:
         1. Find sources with ready analysis + compatible
@@ -147,10 +233,10 @@ class GameplayRetriever:
         4. Build SelectedClips from event time ranges
         5. If total < target_duration, fill remaining with random selection
         """
-        # Find compatible sources with ready analysis
+        # Find compatible sources with ready analysis (V2: across all game_ids)
         sources = session.execute(
             select(GameplaySource).where(
-                GameplaySource.game_id == game_id,
+                GameplaySource.game_id.in_(game_ids),
                 GameplaySource.ingestion_status == "ready",
             )
         ).scalars().all()
@@ -195,7 +281,7 @@ class GameplayRetriever:
         # Last resort: if still no events (e.g. interesting_score not set),
         # grab random events regardless of score
         if not all_events:
-            log.info(f"no interesting events (score>=0.3) for game #{game_id}, "
+            log.info(f"no interesting events (score>=0.3) for games {game_ids}, "
                      f"using random events from {len(compatible_sources)} sources")
             for src in compatible_sources:
                 events = session.execute(
@@ -289,8 +375,10 @@ class GameplayRetriever:
         if total < target_duration - 0.5:
             remaining = target_duration - total
             log.info(f"supplementing with {remaining:.1f}s of random selection")
+            # V2: try primary game first, then other game_ids
+            primary_game_id = game_ids[0] if game_ids else 0
             supplement = self.fallback_selector.select(
-                session, game_id, remaining,
+                session, primary_game_id, remaining,
                 scene_duration=scene_duration, rng=rng,
             )
             # Adjust scene indices for supplements
