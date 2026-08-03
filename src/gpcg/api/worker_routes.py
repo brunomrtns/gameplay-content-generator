@@ -1350,21 +1350,29 @@ def get_job_data(
 
     # Knowledge items for the game (V2 content intelligence)
     # REFACTORY_V2: filter by visibility (own + shared + public)
-    # V2: Also sync general KIs (game_id=None) for curiosity_short
+    # V2: Sync game-specific KIs first, then general KIs for curiosity_short
     try:
         from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
         from gpcg.domain.visibility import visible_to_user as _ki_vis
         ki_vis = _ki_vis(KnowledgeItem.user_id, KnowledgeItem.is_public, job.user_id)
-        ki_query = db.query(KnowledgeItem).filter(
-            KnowledgeItem.status == KnowledgeItemStatus.fresh.value,
-            ki_vis,
-        )
+
+        # Game-specific KIs (always include all for the job's game)
+        game_kis = []
         if job.game_id:
-            # Game-specific KIs + general KIs (for fallback to curiosity_short)
-            ki_query = ki_query.filter(
-                (KnowledgeItem.game_id == job.game_id) | (KnowledgeItem.game_id.is_(None))
-            )
-        ki_list = ki_query.order_by(KnowledgeItem.editorial_score.desc()).limit(50).all()
+            game_kis = db.query(KnowledgeItem).filter(
+                KnowledgeItem.status == KnowledgeItemStatus.fresh.value,
+                KnowledgeItem.game_id == job.game_id,
+                ki_vis,
+            ).order_by(KnowledgeItem.editorial_score.desc()).limit(20).all()
+
+        # General KIs (game_id=None) for curiosity_short fallback
+        general_kis = db.query(KnowledgeItem).filter(
+            KnowledgeItem.status == KnowledgeItemStatus.fresh.value,
+            KnowledgeItem.game_id.is_(None),
+            ki_vis,
+        ).order_by(KnowledgeItem.editorial_score.desc()).limit(30).all()
+
+        ki_list = game_kis + general_kis
         data["knowledge_items"] = [{
             "id": ki.id, "user_id": ki.user_id, "game_id": ki.game_id,
             "is_public": ki.is_public,
