@@ -198,7 +198,56 @@ def get_or_create(
             add_alias(session, game.id, alias, source=alias_source)
 
     log.info(f"Created new Game '{canonical_name}' (slug={slug}, id={game.id})")
+
+    # V2: auto-trigger enrichment if flag is on
+    _maybe_trigger_enrichment(session, game)
+
     return game
+
+
+def _maybe_trigger_enrichment(session: Session, game: Game) -> None:
+    """V2: create a game_enrich job if GPCG_GAME_ENRICHMENT_ENABLED is on.
+
+    Only triggers for newly created games (enriched_at IS NULL).
+    Dedup: skips if a game_enrich job already exists for this game.
+    """
+    try:
+        from gpcg.config import get_settings
+        settings = get_settings()
+        if not settings.gpcg_game_enrichment_enabled:
+            return
+        if game.enriched_at is not None:
+            return  # already enriched
+
+        import uuid
+        from sqlalchemy import select as sa_select
+        from gpcg.domain.models import Job, JobType, JobStatus, JobPriority
+
+        # Dedup: check for existing queued/running enrichment job
+        existing = session.execute(
+            sa_select(Job).where(
+                Job.type == JobType.game_enrich.value,
+                Job.game_id == game.id,
+                Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
+            )
+        ).scalar_one_or_none()
+        if existing:
+            return  # already queued
+
+        job = Job(
+            job_uuid=str(uuid.uuid4()),
+            type=JobType.game_enrich.value,
+            game_id=game.id,
+            status=JobStatus.queued.value,
+            stage="enrichment",
+            priority=JobPriority.normal.value,
+            required_capabilities=["enrichment"],
+        )
+        session.add(job)
+        session.flush()
+        log.info(f"Auto-triggered game_enrich job #{job.id} for '{game.canonical_name}'")
+    except Exception as e:
+        log.warning(f"Failed to auto-trigger enrichment for '{game.canonical_name}': {e}")
 
 
 def list_all(session: Session, *, include_enrichment: bool = False, limit: Optional[int] = None) -> list[Game]:

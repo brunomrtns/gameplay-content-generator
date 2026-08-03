@@ -265,6 +265,39 @@ class Settings(BaseSettings):
     # Seconds without heartbeat before a worker is considered offline.
     gpcg_worker_heartbeat_timeout: int = 30
 
+    # ── V2: Game Enrichment ──────────────────────────────────────────────────
+    # Master switch for automatic game enrichment on creation.
+    # When true, a game_enrich job is created when a new Game is added.
+    # Manual enrichment (POST /api/games/{id}/enrich) works regardless of this flag.
+    # See ARCHITECTURE_V2.md §6.5, Fase 2.
+    gpcg_game_enrichment_enabled: bool = False
+    # User-Agent for Wikidata/Wikipedia HTTP requests (politeness).
+    gpcg_enrichment_user_agent: str = "GPCG/2.0 (gameplay-content-generator)"
+    # LLM model for lore_summary generation (uses default text model if empty).
+    gpcg_enrichment_llm_model: str = ""
+    # Max chars of Wikipedia text to send to the LLM for lore generation.
+    gpcg_enrichment_max_wiki_chars: int = 4000
+
+    # ── V2: Content Intelligence ─────────────────────────────────────────────
+    # Master switch for content intelligence (RSS collection + KnowledgeItems).
+    # When true, content_collect jobs are scheduled by /api/automation/check.
+    # See ARCHITECTURE_V2.md §7, Fase 3.
+    gpcg_content_intelligence_enabled: bool = False
+    # RSS feed URL for news collection (Google News search by game name).
+    gpcg_rss_feed_url: str = "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+    # Collection interval in hours (how often to collect RSS for each game).
+    gpcg_content_collection_interval_hours: int = 6
+    # Minimum editorial_score for a KnowledgeItem to be considered for content.
+    gpcg_content_min_editorial_score: int = 50
+    # Retention period for news KnowledgeItems in days (items older than this are deleted).
+    gpcg_news_retention_days: int = 30
+
+    # ── V2: Gameplay Intelligence (cross-game) ───────────────────────────────
+    # Master switch for cross-game gameplay expansion.
+    # When true, GameplayRetriever expands game_ids by franchise/developer.
+    # See ARCHITECTURE_V2.md §8, Fase 4.
+    gpcg_cross_game_gameplay_enabled: bool = False
+
     # ── YouTube Upload (google-integration service) ──────────────────────────
     # Master switch for automatic YouTube upload after QA passes.
     # When true, the pipeline adds a `youtube_upload` stage that calls the

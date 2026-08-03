@@ -80,12 +80,29 @@ def run_worker() -> None:
 def _claim_next_job() -> Optional[int]:
     """Atomically claim the next queued/retrying job. Returns job_id or None.
 
-    Only claims jobs WITHOUT required_capabilities — those are destined for
-    the RemoteWorker (Compute Plane). Jobs with required_capabilities (e.g.,
-    mapping, knowledge_index) are processed by the RemoteWorker via the
-    /api/jobs/claim endpoint, not by this legacy worker.
+    Claims two categories of jobs:
+    1. Jobs WITHOUT required_capabilities — legacy generation jobs (GPU).
+    2. Jobs with VPS-side capabilities (enrichment, content_intelligence) —
+       these run on the VPS (Control Plane), not on the GPU worker.
+
+    Jobs with GPU capabilities (mapping, generation, knowledge_index) are
+    processed by the RemoteWorker via the /api/jobs/claim endpoint.
     """
     with session_scope() as session:
+        # V2: claim enrichment/content_intelligence jobs (run on VPS, no GPU)
+        vps_job = session.execute(
+            select(Job)
+            .where(Job.status.in_([JobStatus.queued.value, JobStatus.retrying.value]))
+            .where(Job.type.in_([JobType.game_enrich.value, JobType.content_collect.value]))
+            .order_by(Job.created_at.asc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if vps_job is not None:
+            vps_job.status = JobStatus.running.value
+            session.flush()
+            return vps_job.id
+
+        # Legacy: claim jobs without required_capabilities (generation jobs)
         job = session.execute(
             select(Job)
             .where(Job.status.in_([JobStatus.queued.value, JobStatus.retrying.value]))
@@ -113,8 +130,18 @@ def _process_job(gen: GenerationService, job_id: int) -> None:
     with session_scope() as session:
         job = session.get(Job, job_id)
         job.attempts += 1
+        job_type = job.type
         session.flush()
 
+    # V2: dispatch VPS-side job types (no GPU needed)
+    if job_type == JobType.game_enrich.value:
+        _process_game_enrich_job(job_id)
+        return
+    if job_type == JobType.content_collect.value:
+        _process_content_collect_job(job_id)
+        return
+
+    # Legacy: generation jobs (GPU)
     success = gen.run_job(job_id)
     if success:
         return
@@ -219,3 +246,80 @@ def _check_running_automations() -> None:
                 )
     except Exception as e:
         log.debug(f"automation check skipped: {e}")
+
+
+# ── V2: VPS-side job processors (no GPU needed) ──────────────────────────────
+
+
+def _process_game_enrich_job(job_id: int) -> None:
+    """Process a game_enrich job — fetch Wikidata/Wikipedia + generate lore.
+
+    V2: runs on the VPS (Control Plane), not on the GPU worker.
+    See ARCHITECTURE_V2.md §6.5, §13.1.
+    """
+    from gpcg.application.game_enrichment import enrich_game
+    from gpcg.infrastructure.llm import get_llm
+
+    log.info(f"processing game_enrich job #{job_id}")
+    llm = None
+    try:
+        llm = get_llm()
+    except Exception as e:
+        log.warning(f"LLM init failed for enrichment (lore will be skipped): {e}")
+
+    with session_scope() as session:
+        job = session.get(Job, job_id)
+        if not job:
+            log.error(f"game_enrich job #{job_id} not found")
+            return
+        game_id = job.game_id
+        if not game_id:
+            _fail_job(session, job, "game_enrich job has no game_id")
+            return
+
+        try:
+            success = enrich_game(session, game_id, force=True, llm=llm)
+            if success:
+                job.status = JobStatus.completed.value
+                job.completed_at = _utcnow()
+                job.stage = JobStage.done.value
+                log.info(f"game_enrich job #{job_id} completed for game #{game_id}")
+            else:
+                job.status = JobStatus.failed.value
+                job.completed_at = _utcnow()
+                from gpcg.domain.models import Game
+                game = session.get(Game, game_id)
+                job.error = game.enrichment_error if game else "enrichment failed"
+                log.error(f"game_enrich job #{job_id} failed: {job.error}")
+        except Exception as e:
+            log.exception(f"game_enrich job #{job_id} error: {e}")
+            _fail_job(session, job, str(e))
+
+
+def _process_content_collect_job(job_id: int) -> None:
+    """Process a content_collect job — collect RSS + score KnowledgeItems.
+
+    V2: runs on the VPS (Control Plane). See ARCHITECTURE_V2.md §7, §13.1.
+    Placeholder — full implementation in Phase 3.
+    """
+    log.info(f"content_collect job #{job_id}: Phase 3 not yet implemented, marking as completed")
+    with session_scope() as session:
+        job = session.get(Job, job_id)
+        if not job:
+            return
+        job.status = JobStatus.completed.value
+        job.completed_at = _utcnow()
+        job.stage = JobStage.done.value
+
+
+def _fail_job(session, job, error: str) -> None:
+    """Mark a job as failed with an error message."""
+    job.status = JobStatus.failed.value
+    job.completed_at = _utcnow()
+    job.error = error
+    session.flush()
+
+
+def _utcnow():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
