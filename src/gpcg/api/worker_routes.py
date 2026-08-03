@@ -39,6 +39,7 @@ from gpcg.config import get_settings
 from gpcg.domain.models import (
     Document,
     GameplayAsset,
+    GameplayClipUsage,
     GameplayEvent,
     GameplayProcessingStatus,
     GameplaySource,
@@ -1403,6 +1404,13 @@ def get_job_data(
             "used_count": a.used_count,
             "metadata_json": a.metadata_json,
         } for a in assets]
+        # V2: Clip usage records (so worker can avoid reusing segments)
+        clip_usages = db.query(GameplayClipUsage).filter(GameplayClipUsage.source_id == src.id).all()
+        src_data["clip_usages"] = [{
+            "id": cu.id, "video_id": cu.video_id, "source_id": cu.source_id,
+            "start_sec": cu.start_sec, "end_sec": cu.end_sec,
+            "duration": cu.duration,
+        } for cu in clip_usages]
         data["gameplay_sources"].append(src_data)
 
     # Automation config (for video customization settings)
@@ -1423,6 +1431,7 @@ class SyncResultRequest(BaseModel):
     script: Optional[dict] = None
     video: Optional[dict] = None
     artifacts: dict = Field(default_factory=dict)
+    clip_usages: Optional[list] = None  # V2: clip usage records for cross-job avoidance
 
 
 @router.post("/jobs/{job_id}/sync")
@@ -1545,6 +1554,32 @@ def sync_job_result(
                 youtube_video_id=req.video.get("youtube_video_id"),
             )
             db.add(video)
+        db.flush()
+
+    # V2: Sync clip usage records (so future jobs avoid same gameplay segments)
+    if req.clip_usages:
+        video = db.query(VideoModel).filter(VideoModel.job_id == job.id).first()
+        if video:
+            for cu_data in req.clip_usages:
+                source_id = cu_data.get("source_id")
+                start_sec = cu_data.get("start_sec", 0.0)
+                end_sec = cu_data.get("end_sec", 0.0)
+                if source_id and end_sec > start_sec:
+                    # Check if already exists (avoid duplicates on re-sync)
+                    existing = db.query(GameplayClipUsage).filter(
+                        GameplayClipUsage.video_id == video.id,
+                        GameplayClipUsage.source_id == source_id,
+                        GameplayClipUsage.start_sec == start_sec,
+                    ).first()
+                    if not existing:
+                        db.add(GameplayClipUsage(
+                            video_id=video.id,
+                            source_id=source_id,
+                            start_sec=start_sec,
+                            end_sec=end_sec,
+                            duration=end_sec - start_sec,
+                        ))
+            log.info(f"Synced {len(req.clip_usages)} clip usage records for job #{job_id}")
 
     db.commit()
     return {"ok": True}

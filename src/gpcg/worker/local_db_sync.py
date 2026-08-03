@@ -104,6 +104,7 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
     from gpcg.domain.models import (
         User, Game, GameplaySource, GameplayEvent, GameplayAsset, Fact,
         ContentPlan, Script, Job, Automation, KnowledgeItem,
+        GameplayClipUsage,
     )
 
     SessionLocal = _create_temp_db(db_path)
@@ -244,6 +245,16 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
                     duration=asset_data["duration"],
                     used_count=asset_data.get("used_count", 0),
                     metadata_json=asset_data.get("metadata_json", {}),
+                ))
+            # V2: Clip usage records (so GameplaySelector avoids used segments)
+            for cu_data in src_data.get("clip_usages", []):
+                session.add(GameplayClipUsage(
+                    id=cu_data["id"],
+                    video_id=cu_data.get("video_id"),
+                    source_id=src_data["id"],
+                    start_sec=cu_data["start_sec"],
+                    end_sec=cu_data["end_sec"],
+                    duration=cu_data.get("duration", cu_data["end_sec"] - cu_data["start_sec"]),
                 ))
         session.flush()
 
@@ -503,6 +514,17 @@ def run_generation_locally(
                     "status": video.status,
                 }
                 result["video_path"] = video.file_path
+
+            # V2: Extract clip usage records (to sync to VPS for cross-job avoidance)
+            from gpcg.domain.models import GameplayClipUsage as ClipUsage
+            clip_usages = session.query(ClipUsage).all()
+            if clip_usages:
+                result["clip_usages"] = [{
+                    "source_id": cu.source_id,
+                    "start_sec": cu.start_sec,
+                    "end_sec": cu.end_sec,
+                    "duration": cu.duration,
+                } for cu in clip_usages]
 
             return result
 

@@ -1375,6 +1375,9 @@ class RemoteWorker:
             sync_payload["video"] = result["video"]
         if result.get("artifacts"):
             sync_payload["artifacts"] = result["artifacts"]
+        # V2: sync clip usage records so future jobs avoid same gameplay segments
+        if result.get("clip_usages"):
+            sync_payload["clip_usages"] = result["clip_usages"]
 
         if sync_payload:
             self.client.post(f"/api/jobs/{job_id}/sync", json=sync_payload)
