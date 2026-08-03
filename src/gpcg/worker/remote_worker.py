@@ -195,19 +195,33 @@ class RemoteWorker:
     # ── Registration ─────────────────────────────────────────────────────────
 
     def register(self) -> None:
-        """Register with the VPS. Creates or updates the Worker record."""
-        resp = self.client.post("/api/workers/register", json={
-            "worker_id": self.config.worker_id,
-            "hostname": platform.node(),
-            "capabilities": self.config.capabilities,
-            "worker_version": self.config.worker_version,
-            "git_commit": self.config.git_commit,
-            "build_number": self.config.build_number,
-            "gpu_name": self.gpu_name,
-        })
-        resp.raise_for_status()
-        data = resp.json()
-        log.info(f"Registered with VPS: {data}")
+        """Register with the VPS. Creates or updates the Worker record.
+
+        Retries on transient errors (502, connection refused) so the worker
+        can start even if the VPS API is temporarily unavailable.
+        """
+        max_retries = 10
+        for attempt in range(max_retries):
+            try:
+                resp = self.client.post("/api/workers/register", json={
+                    "worker_id": self.config.worker_id,
+                    "hostname": platform.node(),
+                    "capabilities": self.config.capabilities,
+                    "worker_version": self.config.worker_version,
+                    "git_commit": self.config.git_commit,
+                    "build_number": self.config.build_number,
+                    "gpu_name": self.gpu_name,
+                })
+                if resp.status_code < 500:
+                    resp.raise_for_status()
+                    data = resp.json()
+                    log.info(f"Registered with VPS: {data}")
+                    return
+                log.warning(f"register: server error {resp.status_code}, retry {attempt+1}/{max_retries}")
+            except Exception as e:
+                log.warning(f"register: connection error: {e}, retry {attempt+1}/{max_retries}")
+            time.sleep(5)
+        log.error("register: failed after all retries, continuing anyway")
 
     # ── Heartbeat (background thread) ────────────────────────────────────────
 
@@ -266,12 +280,27 @@ class RemoteWorker:
         We embed gameplay_source and document into the job dict so that
         _process_mapping_job and _process_knowledge_indexing_job can access
         them via job.get("gameplay_source") and job.get("document").
+
+        Returns None on transient errors (502, 503, connection refused) so
+        the main loop can retry on the next poll cycle instead of crashing.
         """
-        resp = self.client.post("/api/jobs/claim", json={
-            "worker_id": self.config.worker_id,
-            "capabilities": self.config.capabilities,
-        })
-        resp.raise_for_status()
+        try:
+            resp = self.client.post("/api/jobs/claim", json={
+                "worker_id": self.config.worker_id,
+                "capabilities": self.config.capabilities,
+            })
+        except Exception as e:
+            log.warning(f"claim_job: connection error: {e}")
+            return None
+
+        if resp.status_code >= 500:
+            log.warning(f"claim_job: server error {resp.status_code}, will retry")
+            return None
+
+        if resp.status_code != 200:
+            log.warning(f"claim_job: unexpected status {resp.status_code}")
+            return None
+
         data = resp.json()
         job = data.get("job")
         if job is None:
