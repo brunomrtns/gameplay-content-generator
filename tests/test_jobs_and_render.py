@@ -104,6 +104,7 @@ class TestRenderPlanBuilder:
                 duration=3.0,
                 width=640,
                 height=480,
+                ingestion_status="ready",
             )
             s.add(src)
             s.flush()

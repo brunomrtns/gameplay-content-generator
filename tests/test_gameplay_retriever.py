@@ -173,8 +173,11 @@ class TestGameplayRetriever:
             )
 
         assert len(clips) > 0
-        # The most interesting events (COMBAT 0.9, CHASE 0.85) should come first
-        assert clips[0].start_sec in (10.0, 30.0)  # COMBAT or CHASE
+        # V2: top events are shuffled for variety, so any of the top-scored
+        # events (COMBAT 0.9, CHASE 0.85, or EXPLORATION 0.3) may come first.
+        # But at least one of the two most interesting should be included.
+        clip_starts = [c.start_sec for c in clips]
+        assert 10.0 in clip_starts or 30.0 in clip_starts  # COMBAT or CHASE included
 
     def test_fallback_when_no_plan(self, game_with_events):
         """When no plan is provided, fall back to random selection."""

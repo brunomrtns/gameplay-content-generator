@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     gpcg_narration_min_chars: int = 800
     gpcg_narration_max_chars: int = 1000
     gpcg_max_repair_retries: int = 2
+    # V2: Minimum acceptable video duration in seconds. Videos shorter than
+    # this are flagged as QA failed (indicating a weak script/story).
+    gpcg_min_video_duration: int = 45
 
     # ── Scene + video customization ──────────────────────────────────────────
     # Target duration of each gameplay scene in seconds. If scene_duration >=
@@ -291,6 +294,13 @@ class Settings(BaseSettings):
     gpcg_content_min_editorial_score: int = 50
     # Retention period for news KnowledgeItems in days (items older than this are deleted).
     gpcg_news_retention_days: int = 30
+
+    # ── V2: Public Gameplay Fallback ────────────────────────────────────────
+    # When true (per-user via automation config `accept_public_gameplays`),
+    # the gameplay selector falls back to public gameplays from other users
+    # when the user's own gameplays for a game are exhausted (all clips used).
+    # Public gameplays are GameplaySources with is_public=True.
+    gpcg_public_gameplay_fallback_enabled: bool = True
 
     # ── V2: Gameplay Intelligence (cross-game) ───────────────────────────────
     # Master switch for cross-game gameplay expansion.

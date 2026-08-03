@@ -163,7 +163,7 @@ class TestGameplaySelectorSceneBased:
         # Should be 1 scene with 1 clip of 15s (target_duration)
         assert len(clips) == 1
         assert clips[0].scene_index == 0
-        assert clips[0].duration == 15.0
+        assert clips[0].duration == pytest.approx(15.0, abs=0.01)
         # Clip should be a sub-segment (not full asset)
         assert clips[0].start_sec >= 0
         assert clips[0].end_sec <= clips[0].asset.end_sec

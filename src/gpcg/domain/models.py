@@ -493,11 +493,17 @@ class GameplaySource(Base):
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    # V2: Public gameplay — when True, this gameplay is available to ALL users
+    # as a fallback (only used when the user's own gameplays for the game are
+    # exhausted). Default: False (private).
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     game: Mapped[Optional["Game"]] = relationship(back_populates="sources")
     assets: Mapped[list["GameplayAsset"]] = relationship(back_populates="source", cascade="all, delete-orphan")
     events: Mapped[list["GameplayEvent"]] = relationship(back_populates="source", cascade="all, delete-orphan")
+    clip_usages: Mapped[list["GameplayClipUsage"]] = relationship(back_populates="source", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<GameplaySource {self.filename}>"
@@ -560,6 +566,29 @@ class GameplayAsset(Base):
 
     def __repr__(self) -> str:
         return f"<GameplayAsset #{self.id} [{self.start_sec:.1f}-{self.end_sec:.1f}]>"
+
+
+class GameplayClipUsage(Base):
+    """Tracks which specific time ranges of a gameplay source have been used
+    in a video. This prevents reusing the same gameplay segment across videos.
+
+    When a video is deleted with the "release clips" option, the corresponding
+    usage records are removed, making those segments available again.
+    """
+    __tablename__ = "gameplay_clip_usage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    video_id: Mapped[int] = mapped_column(ForeignKey("videos.id"), index=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("gameplay_sources.id"), index=True)
+    start_sec: Mapped[float] = mapped_column(Float, default=0.0)
+    end_sec: Mapped[float] = mapped_column(Float, default=0.0)
+    duration: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    source: Mapped["GameplaySource"] = relationship(back_populates="clip_usages")
+
+    def __repr__(self) -> str:
+        return f"<GameplayClipUsage video={self.video_id} source={self.source_id} [{self.start_sec:.1f}-{self.end_sec:.1f}]>"
 
 
 class GameplayEvent(Base):

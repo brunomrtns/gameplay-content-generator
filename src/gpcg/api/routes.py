@@ -373,6 +373,34 @@ def upload_gameplay(
         }
 
 
+@router.patch("/gameplays/{source_id}/visibility")
+def toggle_gameplay_visibility(
+    source_id: int,
+    is_public: bool = Query(..., description="Set to true to make public, false for private"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle a gameplay source's visibility (public/private).
+
+    Public gameplays can be used by other users as fallback when their own
+    gameplays for the same game are exhausted.
+    """
+    source = db.get(GameplaySource, source_id)
+    if source is None:
+        raise HTTPException(404, "gameplay source not found")
+    if source.user_id != user.id:
+        raise HTTPException(403, "not your gameplay")
+
+    source.is_public = is_public
+    db.commit()
+    log.info(f"gameplay #{source_id} visibility set to {'public' if is_public else 'private'} by user #{user.id}")
+    return {
+        "success": True,
+        "source_id": source_id,
+        "is_public": is_public,
+    }
+
+
 # ── Assets (clips) ────────────────────────────────────────────────────────────
 
 
@@ -1056,6 +1084,78 @@ def publish_video(
         v.status = VideoStatus.publish_failed.value
         db.commit()
         raise HTTPException(500, f"YouTube upload failed: {result.error}")
+
+
+@router.delete("/videos/{video_id}")
+def delete_video(
+    video_id: int,
+    release_clips: bool = Query(False, description="Release gameplay clips used in this video"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a video and optionally release its gameplay clips.
+
+    Args:
+        video_id: ID of the video to delete.
+        release_clips: If True, the gameplay segments used in this video
+            are released back to the available pool (can be used in future videos).
+            If False, the clips remain marked as used.
+
+    The video file and thumbnail are also deleted from disk.
+    """
+    from gpcg.application.clip_usage_service import release_clip_usage
+
+    v = db.get(Video, video_id)
+    if v is None:
+        raise HTTPException(404, "video not found")
+    if v.user_id != user.id:
+        raise HTTPException(403, "not your video")
+
+    # Delete video file from disk
+    if v.file_path:
+        try:
+            p = Path(v.file_path)
+            if p.exists():
+                p.unlink()
+        except Exception as e:
+            log.warning(f"failed to delete video file {v.file_path}: {e}")
+
+    # Delete thumbnail from disk
+    if v.thumbnail_path:
+        try:
+            p = Path(v.thumbnail_path)
+            if p.exists():
+                p.unlink()
+        except Exception as e:
+            log.warning(f"failed to delete thumbnail {v.thumbnail_path}: {e}")
+
+    # Also try storage_key-based path
+    if v.storage_key:
+        try:
+            settings = get_settings()
+            for d in [settings.videos_dir, settings.temp_uploads_dir]:
+                p = d / v.storage_key
+                if p.exists():
+                    p.unlink()
+                    break
+        except Exception as e:
+            log.warning(f"failed to delete video by storage_key {v.storage_key}: {e}")
+
+    # Release clip usage if requested
+    clips_released = 0
+    if release_clips:
+        clips_released = release_clip_usage(db, video_id)
+
+    # Delete the video record
+    db.delete(v)
+    db.commit()
+
+    log.info(f"deleted video #{video_id} (release_clips={release_clips}, clips_released={clips_released})")
+    return {
+        "success": True,
+        "video_id": video_id,
+        "clips_released": clips_released,
+    }
 
 
 # ── Voices (TTS reference audio) ──────────────────────────────────────────────

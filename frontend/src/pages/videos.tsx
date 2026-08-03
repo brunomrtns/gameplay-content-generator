@@ -16,6 +16,7 @@ import {
   ExternalLink,
   Loader2,
   AlertCircle,
+  Trash2,
 } from "lucide-react";
 
 const VIDEO_STATUS_CONFIG: Record<
@@ -37,6 +38,9 @@ export function VideosPage() {
   const [playing, setPlaying] = useState<any | null>(null);
   const [publishing, setPublishing] = useState<number | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [confirmRelease, setConfirmRelease] = useState<number | null>(null);
 
   const filtered = videos?.filter((v: any) => {
     if (!search) return true;
@@ -58,6 +62,23 @@ export function VideosPage() {
         setPublishError(e.message || "Falha ao publicar no YouTube");
       } finally {
         setPublishing(null);
+      }
+    },
+    [refetch]
+  );
+
+  const handleDelete = useCallback(
+    async (id: number, releaseClips: boolean) => {
+      setDeleting(id);
+      setConfirmDelete(null);
+      setConfirmRelease(null);
+      try {
+        await api.deleteVideo(id, releaseClips);
+        await refetch();
+      } catch (e: any) {
+        setPublishError(e.message || "Falha ao deletar vídeo");
+      } finally {
+        setDeleting(null);
       }
     },
     [refetch]
@@ -213,6 +234,19 @@ export function VideosPage() {
                           Publicar
                         </button>
                       )}
+                      {/* Delete button */}
+                      <button
+                        onClick={() => setConfirmDelete(v.id)}
+                        disabled={deleting === v.id}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-text-muted transition-all hover:border-red-600/40 hover:text-red-400 disabled:opacity-50"
+                        title="Deletar vídeo"
+                      >
+                        {deleting === v.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -287,6 +321,88 @@ export function VideosPage() {
                   </a>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation modal — step 1 */}
+      {confirmDelete !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in"
+          onClick={() => setConfirmDelete(null)}
+        >
+          <div
+            className="relative w-full max-w-md rounded-2xl border border-border bg-surface p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-500/10 text-red-400">
+                <Trash2 className="h-5 w-5" />
+              </div>
+              <h3 className="text-lg font-semibold">Deletar vídeo?</h3>
+            </div>
+            <p className="text-sm text-text-secondary">
+              Esta ação não pode ser desfeita. O arquivo de vídeo e a thumbnail
+              serão removidos permanentemente.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text-primary transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => setConfirmRelease(confirmDelete)}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors"
+              >
+                Sim, deletar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation modal — step 2: release clips? */}
+      {confirmRelease !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in"
+          onClick={() => setConfirmRelease(null)}
+        >
+          <div
+            className="relative w-full max-w-md rounded-2xl border border-border bg-surface p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-accent">
+                <Film className="h-5 w-5" />
+              </div>
+              <h3 className="text-lg font-semibold">Liberar trechos de gameplay?</h3>
+            </div>
+            <p className="text-sm text-text-secondary">
+              Os trechos de gameplay usados neste vídeo podem ser liberados para
+              uso em vídeos futuros. Deseja liberá-los?
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setConfirmRelease(null)}
+                className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text-primary transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleDelete(confirmRelease, false)}
+                className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text-primary transition-colors"
+              >
+                Não, manter usados
+              </button>
+              <button
+                onClick={() => handleDelete(confirmRelease, true)}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 transition-colors"
+              >
+                Sim, liberar trechos
+              </button>
             </div>
           </div>
         </div>

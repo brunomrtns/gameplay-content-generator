@@ -34,6 +34,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from gpcg.application.clip_usage_service import record_clip_usage, release_clip_usage
 from gpcg.application.content_planning_service import ContentPlanningService
 from gpcg.application.creative_engine import CreativeEngine, CreativeMaterial
 from gpcg.application.editorial_planner import EditorialPlanner
@@ -50,6 +51,7 @@ from gpcg.config import get_settings
 from gpcg.domain.creative_plan import StoryConcept, VideoCreativePlan
 from gpcg.domain.game_repository import find_by_name
 from gpcg.domain.models import (
+    Automation,
     ContentPlan,
     Fact,
     Game,
@@ -552,11 +554,24 @@ class GenerationService:
             # Use GameplayRetriever when a creative plan is available
             # (semantic index lookup); falls back to random selection
             video_type = "GENERAL_TOPIC" if is_curiosity else "GAME_RELATED"
+            # V2: pass user_id and accept_public for user-scoped selection
+            # with public gameplay fallback
+            user_id = job.user_id
+            accept_public = False
+            if user_id is not None:
+                # Check automation config for accept_public_gameplays
+                auto = session.execute(
+                    select(Automation).where(Automation.user_id == user_id)
+                ).scalars().first()
+                if auto and isinstance(auto.config, dict):
+                    accept_public = auto.config.get("accept_public_gameplays", False)
             clips = self.gameplay_retriever.retrieve(
                 session, select_game_id, target_duration=narration_dur,
                 creative_plan=creative_plan,
                 scene_duration=scene_duration,
                 video_type=video_type,
+                user_id=user_id,
+                accept_public=accept_public,
             )
             if not clips:
                 bg_name = session.get(Game, select_game_id).canonical_name if select_game_id else "N/A"
@@ -565,11 +580,13 @@ class GenerationService:
                     JobStage.gameplay_selection.value,
                 )
             # Stash clip info (asset ids + ranges + scene_index) for the plan builder
+            # V2: also include source_id for clip usage tracking
             job.artifacts = {
                 **job.artifacts,
                 "selected_clips": [
                     {
                         "asset_id": c.asset.id,
+                        "source_id": c.asset.source_id,
                         "source_path": c.source_path,
                         "start": c.start_sec,
                         "end": c.end_sec,
@@ -701,6 +718,7 @@ class GenerationService:
             ki_id = plan_meta.get("knowledge_item_id")
             # Persist Video record
             video = Video(
+                user_id=job.user_id,
                 job_id=job.id,
                 content_plan_id=plan.id,
                 game_id=job.game_id,
@@ -711,6 +729,14 @@ class GenerationService:
             session.add(video)
             session.flush()
             persist_qa_result(session, video, qa_result, video_path)
+            # V2: Record clip usage to prevent reusing the same gameplay segments
+            selected_clips = job.artifacts.get("selected_clips", [])
+            for clip_info in selected_clips:
+                source_id = clip_info.get("source_id")
+                start = clip_info.get("start", 0.0)
+                end = clip_info.get("end", 0.0)
+                if source_id and end > start:
+                    record_clip_usage(session, video.id, source_id, start, end)
             # Update artifacts using the SAME session (avoid nested session_scope → SQLite lock)
             job.artifacts = {**job.artifacts, "video_id": video.id, "qa_passed": qa_result.passed}
             session.flush()

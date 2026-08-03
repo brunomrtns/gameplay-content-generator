@@ -88,9 +88,14 @@ class QAService:
         # Duration check (Shorts: 15-60s typically)
         dur = info.duration
         technical["target_duration"] = target_duration
+        min_duration = self.settings.gpcg_min_video_duration
         if dur < 10:
             issues.append(QAIssue("technical", "high", f"duration too short: {dur:.1f}s", "render"))
             score -= 40
+        elif dur < min_duration:
+            issues.append(QAIssue("technical", "high",
+                f"duration {dur:.1f}s below minimum {min_duration}s — script too short", "script"))
+            score -= 30
         elif abs(dur - target_duration) > target_duration * 0.3:
             issues.append(QAIssue("technical", "medium", f"duration {dur:.1f}s far from target {target_duration}s", "render"))
             score -= 15

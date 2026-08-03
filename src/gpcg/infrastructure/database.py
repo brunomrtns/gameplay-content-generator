@@ -153,6 +153,9 @@ def init_db() -> None:
     _ensure_column(engine, "games", "enrichment_error", "TEXT")
     # V2: Video.knowledge_item_id for traceability (D13)
     _ensure_column(engine, "videos", "knowledge_item_id", "INTEGER")
+    # V2: GameplaySource.is_public — public gameplays available as fallback
+    _ensure_column(engine, "gameplay_sources", "is_public", "BOOLEAN DEFAULT 0")
+    # V2: gameplay_clip_usage table is created by create_all() above
     # V2: data migrations (slug generation, aliases JSON → game_aliases, user_id deprecation)
     _migrate_v2_game_registry(engine)
     # Seed admin user if not exists (linked to BI Identity by email)

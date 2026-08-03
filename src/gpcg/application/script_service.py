@@ -148,8 +148,11 @@ beats, tone, and humor strategy. The plan is your editorial guide.
      explicitly stated in the FACT TO TELL.
    - Adding plausible-sounding but invented gameplay details is the WORST
      error you can make — it misleads viewers and damages credibility.
-   - When in doubt, say LESS. A shorter script that's accurate is infinitely
-     better than a longer script with invented content.
+   - When in doubt about a specific detail, OMIT it — but do NOT shorten the
+     overall script. Instead, expand with commentary, context, and opinions
+     about the fact that you DO know. A 60-second script needs substance:
+     explore why the fact matters, what makes it interesting, how it fits
+     into the game's history or the franchise. A 15-second script is a failure.
 
 7. ANTI-PLAGIARISM: The fact comes from third-party sources. Write entirely in
    your own words. Never reuse phrasing from the source.

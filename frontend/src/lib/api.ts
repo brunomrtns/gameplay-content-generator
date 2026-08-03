@@ -373,6 +373,10 @@ export const api = {
   thumbUrl: (id: number) => `${API_BASE}/videos/${id}/thumbnail`,
   publishVideo: (id: number) =>
     request<any>(`/videos/${id}/publish`, { method: "POST" }),
+  deleteVideo: (id: number, releaseClips: boolean = false) =>
+    request<any>(`/videos/${id}?release_clips=${releaseClips}`, { method: "DELETE" }),
+  toggleGameplayVisibility: (sourceId: number, isPublic: boolean) =>
+    request<any>(`/gameplays/${sourceId}/visibility?is_public=${isPublic}`, { method: "PATCH" }),
 
   // ── Workers (Compute Plane) ─────────────────────────────────────────────
   listWorkers: () => request<{ workers: any[] }>("/workers"),

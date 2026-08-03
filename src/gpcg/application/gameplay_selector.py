@@ -24,10 +24,14 @@ import random
 from dataclasses import dataclass, field
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from gpcg.domain.models import GameplayAsset, GameplaySource
+from gpcg.application.clip_usage_service import (
+    get_used_ranges,
+    find_available_segment,
+)
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)
@@ -64,7 +68,14 @@ class Scene:
 
 
 class GameplaySelector:
-    """Selects gameplay assets to cover the target duration."""
+    """Selects gameplay assets to cover the target duration.
+
+    V2: Supports user-scoped gameplay selection with public fallback.
+    - First tries the user's own gameplays (user_id match).
+    - If the user's gameplays are exhausted (all segments used), falls back
+      to public gameplays from other users (is_public=True).
+    - Uses GameplayClipUsage to avoid reusing the same time ranges.
+    """
 
     def select(
         self,
@@ -74,6 +85,8 @@ class GameplaySelector:
         *,
         scene_duration: float = 0.0,
         rng: Optional[random.Random] = None,
+        user_id: Optional[int] = None,
+        accept_public: bool = False,
     ) -> list[SelectedClip]:
         """Select clips totaling ~target_duration seconds.
 
@@ -84,42 +97,116 @@ class GameplaySelector:
             scene_duration: Target duration of each scene. 0 = legacy mode
                 (use asset durations). >0 = scene-based mode with chaining.
             rng: Random generator (for deterministic tests).
+            user_id: If provided, filter gameplays by this user first.
+            accept_public: If True and user_id is set, fall back to public
+                gameplays when the user's own are exhausted.
 
         Returns:
             List of SelectedClip, each with scene_index indicating which scene
             it belongs to. Clips in the same scene should be concatenated.
         """
         rng = rng or random.Random()
-        assets = session.execute(
+
+        # V2: Try user's own gameplays first
+        if user_id is not None:
+            clips = self._select_with_filters(
+                session, game_id, target_duration,
+                scene_duration=scene_duration, rng=rng,
+                user_id=user_id, public_only=False,
+            )
+            if clips:
+                return clips
+
+            # Fallback: public gameplays from other users
+            if accept_public:
+                log.info(
+                    f"no available own gameplay for game #{game_id} user #{user_id}, "
+                    f"falling back to public gameplays"
+                )
+                clips = self._select_with_filters(
+                    session, game_id, target_duration,
+                    scene_duration=scene_duration, rng=rng,
+                    user_id=user_id, public_only=True,
+                )
+                return clips
+
+            log.warning(f"no available own gameplay for game #{game_id} user #{user_id}")
+            return []
+
+        # Legacy: no user_id filter (backward compat)
+        return self._select_with_filters(
+            session, game_id, target_duration,
+            scene_duration=scene_duration, rng=rng,
+            user_id=None, public_only=False,
+        )
+
+    def _select_with_filters(
+        self,
+        session: Session,
+        game_id: int,
+        target_duration: float,
+        *,
+        scene_duration: float,
+        rng: random.Random,
+        user_id: Optional[int],
+        public_only: bool,
+    ) -> list[SelectedClip]:
+        """Internal: select clips with user/public filters applied."""
+        # Build query for assets
+        query = (
             select(GameplayAsset)
             .join(GameplaySource, GameplayAsset.source_id == GameplaySource.id)
             .where(GameplaySource.game_id == game_id)
-            .order_by(GameplayAsset.used_count.asc())
-        ).scalars().all()
+            .where(GameplaySource.ingestion_status == "ready")
+        )
+
+        if public_only:
+            # Public gameplays from OTHER users
+            query = query.where(
+                GameplaySource.is_public == True,
+                GameplaySource.user_id != user_id,
+            )
+        elif user_id is not None:
+            # User's own gameplays only
+            query = query.where(GameplaySource.user_id == user_id)
+
+        query = query.order_by(GameplayAsset.used_count.asc())
+        assets = session.execute(query).scalars().all()
 
         if not assets:
-            log.warning(f"no gameplay assets for game #{game_id}")
+            if public_only:
+                log.info(f"no public gameplay assets for game #{game_id}")
+            else:
+                log.warning(f"no gameplay assets for game #{game_id} user={user_id}")
             return []
 
-        # Preload source paths
+        # Preload source paths and used ranges
         source_cache: dict[int, GameplaySource] = {}
+        used_ranges_cache: dict[int, list] = {}
         for a in assets:
             if a.source_id not in source_cache:
-                source_cache[a.source_id] = session.get(GameplaySource, a.source_id)
+                src = session.get(GameplaySource, a.source_id)
+                source_cache[a.source_id] = src
+                used_ranges_cache[a.source_id] = get_used_ranges(session, a.source_id)
 
         if scene_duration > 0:
             clips = self._select_scene_based(
-                assets, source_cache, target_duration, scene_duration, rng
+                assets, source_cache, target_duration, scene_duration, rng,
+                used_ranges_cache=used_ranges_cache,
             )
         else:
-            clips = self._select_legacy(assets, source_cache, target_duration, rng)
+            clips = self._select_legacy(
+                assets, source_cache, target_duration, rng,
+                used_ranges_cache=used_ranges_cache,
+            )
 
         total = sum(c.duration for c in clips)
         n_scenes = max(c.scene_index for c in clips) + 1 if clips else 0
+        scope = "public" if public_only else f"user={user_id}" if user_id else "global"
         log.info(
             f"selected {len(clips)} clip(s) in {n_scenes} scene(s) "
             f"totaling {total:.1f}s for target {target_duration:.1f}s "
-            f"(scene_duration={scene_duration}s)"
+            f"(scene_duration={scene_duration}s, scope={scope})"
         )
         return clips
 
@@ -129,13 +216,21 @@ class GameplaySelector:
         source_cache: dict[int, GameplaySource],
         target_duration: float,
         rng: random.Random,
+        used_ranges_cache: Optional[dict[int, list]] = None,
     ) -> list[SelectedClip]:
-        """Legacy mode: each clip = one asset, accumulate until target."""
+        """Legacy mode: each clip = one asset, accumulate until target.
+
+        V2: Uses find_available_segment to avoid already-used time ranges.
+        Used ranges are in absolute source coordinates; we convert to
+        asset-local coordinates for the availability check.
+        """
+        from gpcg.application.clip_usage_service import UsedRange
+        used_ranges_cache = used_ranges_cache or {}
         weights = [1.0 / (a.used_count + 1) for a in assets]
         selected: list[SelectedClip] = []
         total = 0.0
         last_source_id: Optional[int] = None
-        max_iter = len(assets) * 3
+        max_iter = len(assets) * 5
 
         while total < target_duration and max_iter > 0:
             max_iter -= 1
@@ -148,17 +243,55 @@ class GameplaySelector:
             idx = rng.choices(candidates, weights=cand_weights, k=1)[0]
             asset = assets[idx]
             source = source_cache[asset.source_id]
+
+            # V2: Convert absolute used ranges to asset-local coordinates
+            abs_used = used_ranges_cache.get(asset.source_id, [])
+            local_used = []
+            for ur in abs_used:
+                # Convert to asset-local: subtract asset.start_sec
+                local_start = ur.start_sec - asset.start_sec
+                local_end = ur.end_sec - asset.start_sec
+                # Clip to [0, asset.duration]
+                if local_end <= 0 or local_start >= asset.duration:
+                    continue  # No overlap with this asset
+                local_used.append(UsedRange(
+                    start_sec=max(0.0, local_start),
+                    end_sec=min(asset.duration, local_end),
+                ))
+
+            needed = min(asset.duration, target_duration - total)
+
+            # V2: If no used ranges, use full asset (legacy behavior).
+            # Only use find_available_segment when there are used ranges to avoid.
+            if not local_used:
+                start_offset = 0.0
+                end_offset = asset.duration  # full asset, may overshoot target
+            else:
+                seg = find_available_segment(
+                    asset.duration, needed, local_used, rng=rng,
+                )
+                if seg is None:
+                    continue
+                start_offset, end_offset = seg
+
             clip = SelectedClip(
                 asset=asset,
                 source_path=source.file_path,
-                start_sec=asset.start_sec,
-                end_sec=asset.end_sec,
-                duration=asset.duration,
-                scene_index=len(selected),  # each clip is its own scene in legacy
+                start_sec=asset.start_sec + start_offset,
+                end_sec=asset.start_sec + end_offset,
+                duration=end_offset - start_offset,
+                scene_index=len(selected),
             )
             selected.append(clip)
             total += clip.duration
             last_source_id = asset.source_id
+            # Track in absolute coordinates
+            used_ranges_cache.setdefault(asset.source_id, []).append(
+                UsedRange(
+                    start_sec=asset.start_sec + start_offset,
+                    end_sec=asset.start_sec + end_offset,
+                )
+            )
 
         return selected
 
@@ -169,15 +302,22 @@ class GameplaySelector:
         target_duration: float,
         scene_duration: float,
         rng: random.Random,
+        used_ranges_cache: Optional[dict[int, list]] = None,
     ) -> list[SelectedClip]:
         """Scene-based mode: group clips into scenes of scene_duration each.
 
         For each scene:
         1. Pick a random gameplay video
-        2. Pick a random start point within [0, video_duration]
-        3. If start + scene_target <= video_duration: take contiguous segment
-        4. If overflow: take [start, end] from this video, chain another for remainder
+        2. Find an available segment using find_available_segment
+        3. If it fits: take contiguous segment
+        4. If overflow: take available portion, chain another for remainder
+
+        V2: Uses find_available_segment to avoid already-used time ranges.
+        Used ranges are in absolute source coordinates; we convert to
+        asset-local coordinates for the availability check.
         """
+        from gpcg.application.clip_usage_service import UsedRange
+        used_ranges_cache = used_ranges_cache or {}
         weights = [1.0 / (a.used_count + 1) for a in assets]
         all_clips: list[SelectedClip] = []
         remaining_total = target_duration
@@ -185,7 +325,6 @@ class GameplaySelector:
         last_source_id: Optional[int] = None
 
         while remaining_total > 0.01:
-            # This scene's target duration
             scene_target = min(scene_duration, remaining_total)
             scene_clips: list[SelectedClip] = []
             scene_remaining = scene_target
@@ -203,41 +342,47 @@ class GameplaySelector:
                 source = source_cache[asset.source_id]
                 last_source_id = asset.source_id
 
-                # How much can we take from this asset?
-                available = asset.duration
+                # V2: Convert absolute used ranges to asset-local coordinates
+                abs_used = used_ranges_cache.get(asset.source_id, [])
+                local_used = []
+                for ur in abs_used:
+                    local_start = ur.start_sec - asset.start_sec
+                    local_end = ur.end_sec - asset.start_sec
+                    if local_end <= 0 or local_start >= asset.duration:
+                        continue
+                    local_used.append(UsedRange(
+                        start_sec=max(0.0, local_start),
+                        end_sec=min(asset.duration, local_end),
+                    ))
 
-                if available >= scene_remaining:
-                    # Fits in one segment — pick a random start point
-                    max_start = available - scene_remaining
-                    start_offset = rng.uniform(0, max_start) if max_start > 0.01 else 0.0
-                    clip = SelectedClip(
-                        asset=asset,
-                        source_path=source.file_path,
+                available = asset.duration
+                needed = min(available, scene_remaining)
+                seg = find_available_segment(
+                    available, needed, local_used, rng=rng,
+                )
+                if seg is None:
+                    continue
+
+                start_offset, end_offset = seg
+                take = end_offset - start_offset
+
+                clip = SelectedClip(
+                    asset=asset,
+                    source_path=source.file_path,
+                    start_sec=asset.start_sec + start_offset,
+                    end_sec=asset.start_sec + end_offset,
+                    duration=take,
+                    scene_index=scene_idx,
+                )
+                scene_clips.append(clip)
+                scene_remaining -= take
+                # Track in absolute coordinates
+                used_ranges_cache.setdefault(asset.source_id, []).append(
+                    UsedRange(
                         start_sec=asset.start_sec + start_offset,
-                        end_sec=asset.start_sec + start_offset + scene_remaining,
-                        duration=scene_remaining,
-                        scene_index=scene_idx,
+                        end_sec=asset.start_sec + end_offset,
                     )
-                    scene_clips.append(clip)
-                    scene_remaining = 0
-                else:
-                    # Doesn't fit — take the whole asset and chain another
-                    # Pick a random start point, take until end of asset
-                    start_offset = rng.uniform(0, max(0.01, available * 0.3))
-                    take = min(available - start_offset, scene_remaining)
-                    if take < 0.5:
-                        take = min(available, scene_remaining)
-                        start_offset = 0.0
-                    clip = SelectedClip(
-                        asset=asset,
-                        source_path=source.file_path,
-                        start_sec=asset.start_sec + start_offset,
-                        end_sec=asset.start_sec + start_offset + take,
-                        duration=take,
-                        scene_index=scene_idx,
-                    )
-                    scene_clips.append(clip)
-                    scene_remaining -= take
+                )
 
             all_clips.extend(scene_clips)
             remaining_total -= scene_target

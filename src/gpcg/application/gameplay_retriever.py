@@ -109,6 +109,8 @@ class GameplayRetriever:
         video_type: str = "GAME_RELATED",
         rng: Optional[random.Random] = None,
         scope: str = ContentScope.game.value,
+        user_id: Optional[int] = None,
+        accept_public: bool = False,
     ) -> list[SelectedClip]:
         """Retrieve gameplay clips for a video.
 
@@ -123,6 +125,10 @@ class GameplayRetriever:
             rng: random generator (for deterministic tests)
             scope: V2 cross-game scope — "game", "franchise", or "developer".
                     Only used when GPCG_CROSS_GAME_GAMEPLAY_ENABLED is on.
+            user_id: V2 — if provided, filter gameplays by this user first,
+                     with public fallback when accept_public=True.
+            accept_public: V2 — if True and user_id is set, fall back to public
+                           gameplays when user's own are exhausted.
 
         Returns:
             List of SelectedClip with temporal references to gameplay segments
@@ -146,11 +152,12 @@ class GameplayRetriever:
         primary_game_id = game_ids[0] if game_ids else game_id
 
         # Decide whether to use semantic retrieval or fallback
-        use_semantic = self._should_use_semantic(session, game_ids, creative_plan, video_type)
+        use_semantic = self._should_use_semantic(session, game_ids, creative_plan, video_type, user_id)
 
         if use_semantic and creative_plan is not None:
             clips = self._retrieve_semantic(
-                session, game_ids, target_duration, creative_plan, scene_duration, rng
+                session, game_ids, target_duration, creative_plan, scene_duration, rng,
+                user_id=user_id, accept_public=accept_public,
             )
             if clips:
                 return clips
@@ -158,13 +165,14 @@ class GameplayRetriever:
             log.info(f"semantic retrieval found no clips for games {game_ids}, falling back to random")
 
         # Fallback: random selection via GameplaySelector
-        # V2: try each game_id in order until we get enough clips
+        # V2: pass user_id and accept_public to the selector
         if len(game_ids) > 1:
             # Cross-game fallback: try expanded games, then contract to primary
             for gid in game_ids:
                 clips = self.fallback_selector.select(
                     session, gid, target_duration,
                     scene_duration=scene_duration, rng=rng,
+                    user_id=user_id, accept_public=accept_public,
                 )
                 if clips:
                     return clips
@@ -172,10 +180,12 @@ class GameplayRetriever:
             return self.fallback_selector.select(
                 session, primary_game_id, target_duration,
                 scene_duration=scene_duration, rng=rng,
+                user_id=user_id, accept_public=accept_public,
             )
         return self.fallback_selector.select(
             session, primary_game_id, target_duration,
             scene_duration=scene_duration, rng=rng,
+            user_id=user_id, accept_public=accept_public,
         )
 
     def _should_use_semantic(
@@ -184,6 +194,7 @@ class GameplayRetriever:
         game_ids: list[int],
         plan: Optional[VideoCreativePlan],
         video_type: str,
+        user_id: Optional[int] = None,
     ) -> bool:
         """Check if semantic retrieval should be used."""
         if plan is None or not plan.success:
@@ -194,12 +205,15 @@ class GameplayRetriever:
             return False
 
         # V2: check sources across all game_ids (cross-game)
-        sources = session.execute(
-            select(GameplaySource).where(
-                GameplaySource.game_id.in_(game_ids),
-                GameplaySource.ingestion_status == "ready",
-            )
-        ).scalars().all()
+        query = select(GameplaySource).where(
+            GameplaySource.game_id.in_(game_ids),
+            GameplaySource.ingestion_status == "ready",
+        )
+        # V2: filter by user_id if provided
+        if user_id is not None:
+            query = query.where(GameplaySource.user_id == user_id)
+
+        sources = session.execute(query).scalars().all()
 
         for src in sources:
             if src.is_analysis_ready:
@@ -221,10 +235,13 @@ class GameplayRetriever:
         plan: VideoCreativePlan,
         scene_duration: float,
         rng: random.Random,
+        user_id: Optional[int] = None,
+        accept_public: bool = False,
     ) -> list[SelectedClip]:
         """Retrieve clips using the semantic index.
 
         V2: searches across multiple game_ids (cross-game).
+        V2: filters by user_id with public fallback.
 
         Strategy:
         1. Find sources with ready analysis + compatible
@@ -234,12 +251,15 @@ class GameplayRetriever:
         5. If total < target_duration, fill remaining with random selection
         """
         # Find compatible sources with ready analysis (V2: across all game_ids)
-        sources = session.execute(
-            select(GameplaySource).where(
-                GameplaySource.game_id.in_(game_ids),
-                GameplaySource.ingestion_status == "ready",
-            )
-        ).scalars().all()
+        query = select(GameplaySource).where(
+            GameplaySource.game_id.in_(game_ids),
+            GameplaySource.ingestion_status == "ready",
+        )
+        # V2: filter by user_id if provided
+        if user_id is not None:
+            query = query.where(GameplaySource.user_id == user_id)
+
+        sources = session.execute(query).scalars().all()
 
         compatible_sources = []
         for src in sources:
@@ -301,13 +321,25 @@ class GameplayRetriever:
         # score tiers and shuffle within each tier.
         rng.shuffle(all_events)
         all_events.sort(key=lambda x: x[1].interesting_score, reverse=True)
-        # Re-shuffle the top events to add variety while still preferring
-        # higher-scoring ones. Take top 2x what we likely need and shuffle.
-        estimated_needed = max(5, int(target_duration / 5) * 2)
-        top_events = all_events[:estimated_needed]
-        rest_events = all_events[estimated_needed:]
-        rng.shuffle(top_events)
-        all_events = top_events + rest_events
+        # Re-shuffle within score tiers to add variety while still preferring
+        # higher-scoring ones. Events within 0.1 of each other are same tier.
+        tiered: list = []
+        current_tier: list = []
+        current_score = None
+        for ev in all_events:
+            score = ev[1].interesting_score
+            if current_score is None or abs(score - current_score) < 0.1:
+                current_tier.append(ev)
+                current_score = score
+            else:
+                rng.shuffle(current_tier)
+                tiered.extend(current_tier)
+                current_tier = [ev]
+                current_score = score
+        if current_tier:
+            rng.shuffle(current_tier)
+            tiered.extend(current_tier)
+        all_events = tiered
 
         # Track used event time ranges to avoid picking overlapping segments
         used_ranges: list[tuple[float, float, int]] = []  # (start, end, source_id)

@@ -37,6 +37,7 @@ def _make_source(session, game_id, duration=120.0):
         duration=duration,
         width=1920,
         height=1080,
+        ingestion_status="ready",
     )
     session.add(src)
     session.flush()

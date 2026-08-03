@@ -57,6 +57,7 @@ def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Pat
         Path("/media/bruno/ToshibaHD/Captures"),
         Path("/media/bruno/ToshibaHD/gpcg/data/gameplays"),
         Path("/media/bruno/ToshibaHD/gpcg/data/inbox"),
+        Path("/media/bruno/ToshibaHD"),  # root of external drive
     ]
 
     for d in search_dirs:
