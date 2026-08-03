@@ -1436,20 +1436,22 @@ def sync_job_result(
 
     # Sync ContentPlan
     # NOTE: The content_plan id from the remote worker is the LOCAL DB id,
-    # not the VPS DB id. So we always create a new ContentPlan in the VPS DB
-    # (unless we find one already linked to this job).
+    # not the VPS DB id. The local DB id may collide with an existing VPS DB id.
+    # So we NEVER look up by local id. Instead, we check if this job already
+    # has a content_plan_id in the VPS DB, and if so, update that. Otherwise,
+    # always create a new ContentPlan.
     print(f"[SYNC] job #{job_id}: content_plan={req.content_plan is not None}, script={req.script is not None}, video={req.video is not None}", flush=True)
     if req.content_plan:
-        plan_id = req.content_plan.get("id")
         plan = None
-        if plan_id:
-            plan = db.query(ContentPlan).filter(ContentPlan.id == plan_id).first()
+        # Check if the job already has a content_plan_id in the VPS DB
+        if job.content_plan_id:
+            plan = db.query(ContentPlan).filter(ContentPlan.id == job.content_plan_id).first()
             if plan:
                 for k, v in req.content_plan.items():
                     if k != "id" and hasattr(plan, k):
                         setattr(plan, k, v)
         if not plan:
-            print(f"[SYNC] job #{job_id}: creating new ContentPlan in VPS DB (local id={plan_id}, topic={req.content_plan.get('topic','')})", flush=True)
+            print(f"[SYNC] job #{job_id}: creating new ContentPlan in VPS DB (local id={req.content_plan.get('id')}, topic={req.content_plan.get('topic','')})", flush=True)
             # Create new ContentPlan in VPS DB (local DB id is irrelevant)
             plan = ContentPlan(
                 user_id=job.user_id,
@@ -1472,11 +1474,11 @@ def sync_job_result(
 
     # Sync Script
     # NOTE: Same as ContentPlan — the script id is from the LOCAL DB.
+    # Never look up by local id; check if the job's content_plan already has a script.
     if req.script:
-        script_id = req.script.get("id")
         script = None
-        if script_id:
-            script = db.query(Script).filter(Script.id == script_id).first()
+        if job.content_plan_id:
+            script = db.query(Script).filter(Script.content_plan_id == job.content_plan_id).first()
             if script:
                 for k, v in req.script.items():
                     if k != "id" and hasattr(script, k):
@@ -1497,15 +1499,13 @@ def sync_job_result(
 
     # Sync Video
     # NOTE: Same as ContentPlan — the video id is from the LOCAL DB.
+    # Never look up by local id; check if the job already has a video.
     if req.video:
-        video_id = req.video.get("id")
-        video = None
-        if video_id:
-            video = db.query(VideoModel).filter(VideoModel.id == video_id).first()
-            if video:
-                for k, v in req.video.items():
-                    if k != "id" and hasattr(video, k):
-                        setattr(video, k, v)
+        video = db.query(VideoModel).filter(VideoModel.job_id == job.id).first()
+        if video:
+            for k, v in req.video.items():
+                if k != "id" and hasattr(video, k):
+                    setattr(video, k, v)
         if not video:
             video = VideoModel(
                 user_id=job.user_id,
