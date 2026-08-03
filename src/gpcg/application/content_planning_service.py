@@ -2,6 +2,11 @@
 
 Input: a game's fact database (scored).
 Output: a ContentPlan (topic, hook, tone, energy, music_mood, visual_strategy).
+
+V2: When GPCG_CONTENT_INTELLIGENCE_ENABLED is on, also considers
+KnowledgeItems (external content from RSS/Wikipedia) alongside Facts.
+The LLM receives a unified list of "ideas" without knowing the source.
+See ARCHITECTURE_V2.md §7.4, §9.1.
 """
 
 from __future__ import annotations
@@ -13,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
-from gpcg.domain.models import ContentPlan, Fact, Game
+from gpcg.domain.models import ContentPlan, ContentScope, Fact, Game, KnowledgeItem, KnowledgeItemStatus
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 
@@ -21,7 +26,7 @@ log = get_logger(__name__)
 
 
 SYSTEM_PROMPT = """You are a YouTube Shorts content strategist for a gaming channel.
-Your job: pick ONE fact from the provided list and design a content plan for a ~60 second
+Your job: pick ONE idea from the provided list and design a content plan for a ~60 second
 vertical Short that maximizes viewer retention and curiosity.
 
 Consider:
@@ -29,11 +34,12 @@ Consider:
 - Curiosity / surprise factor
 - Tellability in ~60 seconds (~800-1000 chars of narration in pt-BR)
 - Visual potential (will use gameplay footage as background)
-- Originality (prefer less-used facts)
+- Originality (prefer less-used ideas)
 
 Return JSON:
 {
   "fact_id": <int or null>,
+  "knowledge_item_id": <int or null>,
   "topic": "<short topic title in pt-BR>",
   "hook": "<first line of the script, the hook, in pt-BR — must be punchy>",
   "tone": "<one of: curious, dramatic, mysterious, energetic, nostalgic, tense, humorous>",
@@ -55,14 +61,18 @@ class ContentPlanningService:
         game_id: int,
         fact_id: Optional[int] = None,
         avoid_topics: Optional[list[str]] = None,
+        *,
+        scope: str = ContentScope.game.value,
     ) -> Optional[ContentPlan]:
-        """Pick the best unused fact and create a ContentPlan.
+        """Pick the best unused fact/item and create a ContentPlan.
 
         Args:
             session: DB session
             game_id: Game to plan for
             fact_id: If provided, use this specific fact (from editorial decision)
             avoid_topics: Recent topics to avoid repeating (editorial memory)
+            scope: V2 content scope — "game", "franchise", or "developer".
+                    Only used when GPCG_CONTENT_INTELLIGENCE_ENABLED is on.
         """
         game = session.get(Game, game_id)
         if game is None:
@@ -96,27 +106,21 @@ class ContentPlanningService:
                 .order_by((Fact.quality_score * Fact.novelty_score).desc(), Fact.used_count.asc())
             ).scalars().all()
 
-        if not facts and preselected_fact is None:
-            log.warning(f"no scored facts for game '{game.canonical_name}'")
+        # V2: collect KnowledgeItems if content intelligence is enabled
+        knowledge_items: list[KnowledgeItem] = []
+        if self.settings.gpcg_content_intelligence_enabled:
+            knowledge_items = self._get_knowledge_items(session, game_id, scope)
+
+        if not facts and preselected_fact is None and not knowledge_items:
+            log.warning(f"no scored facts or knowledge items for game '{game.canonical_name}'")
             return None
 
         # If we have a preselected fact, make sure it's in the list
         if preselected_fact and preselected_fact not in facts:
             facts = [preselected_fact] + list(facts)
 
-        # Build fact list for the LLM (top 15 candidates)
-        if self.settings.gpcg_curiosity_scoring_enabled:
-            candidates = [
-                {"id": f.id, "category": f.category, "claim": f.claim,
-                 "quality": f.quality_score, "novelty": f.novelty_score,
-                 "curiosity": f.curiosity_score, "used": f.used_count}
-                for f in facts[:15]
-            ]
-        else:
-            candidates = [
-                {"id": f.id, "category": f.category, "claim": f.claim, "quality": f.quality_score, "novelty": f.novelty_score, "used": f.used_count}
-                for f in facts[:15]
-            ]
+        # V2: Build unified candidate list (Facts + KnowledgeItems)
+        candidates = self._build_unified_candidates(facts, knowledge_items)
 
         # Build prompt with editorial memory (avoid_topics)
         avoid_str = ""
@@ -139,7 +143,7 @@ class ContentPlanningService:
             f"Game: {game.canonical_name}\n"
             f"Target duration: {self.settings.gpcg_default_target_duration}s\n"
             f"Format: {self.settings.gpcg_default_format}\n\n"
-            f"Available facts (sorted by potential):\n{candidates}\n"
+            f"Available ideas (sorted by potential):\n{candidates}\n"
             f"{preselect_str}{avoid_str}\n"
             "Pick the best one for a new Short and design the plan."
         )
@@ -151,7 +155,10 @@ class ContentPlanningService:
             log.error(f"content planning failed: {e}")
             return None
 
+        # V2: LLM may return fact_id and/or knowledge_item_id
         fact_id = data.get("fact_id")
+        knowledge_item_id = data.get("knowledge_item_id")
+
         # Validate fact_id belongs to this game
         fact = None
         if fact_id is not None:
@@ -159,8 +166,17 @@ class ContentPlanningService:
             if fact is None or fact.game_id != game_id:
                 fact_id = None
                 fact = None
-        # Fallback: pick the top fact
-        if fact is None and facts:
+
+        # V2: Validate knowledge_item_id
+        ki = None
+        if knowledge_item_id is not None:
+            ki = session.get(KnowledgeItem, int(knowledge_item_id))
+            if ki is None or ki.status != KnowledgeItemStatus.fresh.value:
+                knowledge_item_id = None
+                ki = None
+
+        # Fallback: pick the top fact if neither was selected
+        if fact is None and ki is None and facts:
             fact = facts[0]
             fact_id = fact.id
 
@@ -175,7 +191,11 @@ class ContentPlanningService:
             energy=max(0.0, min(1.0, float(data.get("energy", 0.7)))),
             music_mood=(data.get("music_mood") or "neutral").strip().lower(),
             visual_strategy=(data.get("visual_strategy") or "gameplay_compilation").strip().lower(),
-            metadata_json={"reasoning": data.get("reasoning", "")},
+            metadata_json={
+                "reasoning": data.get("reasoning", ""),
+                # V2: track which knowledge item was used (if any)
+                "knowledge_item_id": knowledge_item_id,
+            },
         )
         session.add(plan)
         session.flush()
@@ -184,9 +204,14 @@ class ContentPlanningService:
         if fact is not None:
             fact.used_count += 1
 
+        # V2: Mark knowledge item as used
+        if ki is not None:
+            ki.status = KnowledgeItemStatus.used.value
+
         log.info(
             f"content plan #{plan.id} for '{game.canonical_name}': "
             f"topic='{plan.topic[:50]}' tone={plan.tone} mood={plan.music_mood}"
+            + (f" [ki=#{ki.id}]" if ki else "")
         )
         return plan
 
@@ -310,3 +335,92 @@ class ContentPlanningService:
             f"topic='{plan.topic[:50]}' tone={plan.tone} mood={plan.music_mood}"
         )
         return plan
+
+    # ── V2: KnowledgeItem integration helpers ──────────────────────────────
+
+    def _get_knowledge_items(
+        self,
+        session: Session,
+        game_id: int,
+        scope: str,
+    ) -> list[KnowledgeItem]:
+        """V2: Get fresh KnowledgeItems for a game, filtered by scope.
+
+        scope="game": items with game_id == this game
+        scope="franchise": items from games with the same franchise
+        scope="developer": items from games with the same developer
+        """
+        game = session.get(Game, game_id)
+        if not game:
+            return []
+
+        stmt = (
+            select(KnowledgeItem)
+            .where(KnowledgeItem.status == KnowledgeItemStatus.fresh.value)
+            .where(KnowledgeItem.editorial_score >= self.settings.gpcg_content_min_editorial_score)
+            .order_by(KnowledgeItem.editorial_score.desc())
+            .limit(10)
+        )
+
+        if scope == ContentScope.game.value or not game:
+            stmt = stmt.where(KnowledgeItem.game_id == game_id)
+        elif scope == ContentScope.franchise.value and game.franchise:
+            stmt = stmt.where(KnowledgeItem.franchise == game.franchise)
+        elif scope == ContentScope.developer.value and game.developer:
+            stmt = stmt.where(KnowledgeItem.developer == game.developer)
+        else:
+            stmt = stmt.where(KnowledgeItem.game_id == game_id)
+
+        return list(session.execute(stmt).scalars().all())
+
+    def _build_unified_candidates(
+        self,
+        facts: list[Fact],
+        knowledge_items: list[KnowledgeItem],
+    ) -> list[dict]:
+        """V2: Build a unified candidate list from Facts + KnowledgeItems.
+
+        The LLM receives a list of "ideas" without knowing the source type.
+        Each idea has: id, source ("fact" or "knowledge_item"), title/claim,
+        type, score, and used count.
+        """
+        candidates = []
+
+        # Add facts (top 10)
+        for f in facts[:10]:
+            if self.settings.gpcg_curiosity_scoring_enabled:
+                candidates.append({
+                    "id": f.id,
+                    "source": "fact",
+                    "category": f.category,
+                    "claim": f.claim,
+                    "quality": f.quality_score,
+                    "novelty": f.novelty_score,
+                    "curiosity": f.curiosity_score,
+                    "used": f.used_count,
+                })
+            else:
+                candidates.append({
+                    "id": f.id,
+                    "source": "fact",
+                    "category": f.category,
+                    "claim": f.claim,
+                    "quality": f.quality_score,
+                    "novelty": f.novelty_score,
+                    "used": f.used_count,
+                })
+
+        # V2: Add knowledge items (top 10)
+        for ki in knowledge_items[:10]:
+            candidates.append({
+                "id": ki.id,
+                "source": "knowledge_item",
+                "item_type": ki.item_type,
+                "title": ki.title,
+                "content": ki.content[:200],  # truncate for prompt
+                "editorial_score": ki.editorial_score,
+                "source_type": ki.source_type,
+                "published_at": ki.published_at.isoformat() if ki.published_at else None,
+            })
+
+        return candidates

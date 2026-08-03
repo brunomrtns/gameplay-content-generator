@@ -696,6 +696,9 @@ class GenerationService:
             plan = session.get(ContentPlan, job.content_plan_id)
             script = session.get(Script, script_id)
             qa_result = self.qa.evaluate(video_path, script, plan, plan.target_duration)
+            # V2: extract knowledge_item_id from plan metadata (if content intelligence used)
+            plan_meta = plan.metadata_json or {}
+            ki_id = plan_meta.get("knowledge_item_id")
             # Persist Video record
             video = Video(
                 job_id=job.id,
@@ -703,6 +706,7 @@ class GenerationService:
                 game_id=job.game_id,
                 file_path=str(video_path),
                 status=VideoStatus.pending.value,
+                knowledge_item_id=ki_id,  # V2: link video to KnowledgeItem
             )
             session.add(video)
             session.flush()
@@ -1047,6 +1051,15 @@ class GenerationService:
                 fact = session.get(Fact, plan.fact_id)
                 if fact:
                     source_fact = fact.claim
+            # V2: if plan was based on a KnowledgeItem, use its content as source
+            if not source_fact and plan:
+                plan_meta = plan.metadata_json or {}
+                ki_id = plan_meta.get("knowledge_item_id")
+                if ki_id:
+                    from gpcg.domain.models import KnowledgeItem
+                    ki = session.get(KnowledgeItem, ki_id)
+                    if ki:
+                        source_fact = ki.content[:500]  # truncate for prompt
 
         while revision_count <= max_revisions:
             # Review the current script (pass source_fact for hallucination detection)

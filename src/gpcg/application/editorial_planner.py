@@ -240,19 +240,37 @@ class EditorialPlanner:
         video_type: str,
         background_game_id: Optional[int],
     ) -> dict:
-        """Gather gameplay context for the planner prompt."""
+        """Gather gameplay context for the planner prompt.
+
+        V2: includes enriched Game fields (description, lore_summary,
+        genres, themes) when available, providing richer editorial context.
+        """
         context: dict = {
             "gameplay_events": [],
             "compatibility": {},
             "game_name": "",
+            # V2: enriched game context
+            "game_description": "",
+            "lore_summary": "",
+            "genres": [],
+            "themes": [],
+            "franchise": "",
+            "developer": "",
         }
 
-        # Get the game name
+        # Get the game name + V2 enriched fields
         game_id = plan.game_id or background_game_id
         if game_id:
             game = session.get(Game, game_id)
             if game:
                 context["game_name"] = game.canonical_name
+                # V2: add enriched fields (available after game_enrichment)
+                context["game_description"] = game.description or ""
+                context["lore_summary"] = game.lore_summary or ""
+                context["genres"] = game.genres or []
+                context["themes"] = game.themes or []
+                context["franchise"] = game.franchise or ""
+                context["developer"] = game.developer or ""
 
         # Query gameplay events from the semantic index
         select_game_id = background_game_id if video_type == VIDEO_TYPE_GENERAL_TOPIC else plan.game_id
@@ -316,6 +334,18 @@ class EditorialPlanner:
 
         if context.get("game_name"):
             parts.append(f"GAME: {context['game_name']}")
+
+        # V2: add enriched game context (description, lore, genres)
+        if context.get("game_description"):
+            parts.append(f"GAME DESCRIPTION: {context['game_description'][:200]}")
+        if context.get("lore_summary"):
+            parts.append(f"LORE SUMMARY: {context['lore_summary'][:300]}")
+        if context.get("genres"):
+            parts.append(f"GENRES: {', '.join(context['genres'])}")
+        if context.get("franchise"):
+            parts.append(f"FRANCHISE: {context['franchise']}")
+        if context.get("developer"):
+            parts.append(f"DEVELOPER: {context['developer']}")
 
         # V2: incorporate StoryConcept when available
         if story_concept is not None and story_concept.success:
