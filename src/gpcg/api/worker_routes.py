@@ -1939,6 +1939,7 @@ def sync_knowledge_items(
             continue
         ki = KnowledgeItem(
             game_id=item.game_id,
+            is_public=True,  # RSS-collected items are shared across users
             title=item.title,
             content=item.content,
             item_type=item.item_type,
