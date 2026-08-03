@@ -7,11 +7,16 @@ Implements the enrich_game function per ARCHITECTURE_V2.md §6.5:
 
 All writes are atomic (single transaction at the end). Fetch failures
 set enrichment_error; LLM failure is non-fatal (lore_summary stays NULL).
+
+V2: `fetch_enrichment_data()` is a headless version (no DB session) that
+returns an `EnrichmentResult` dataclass. Used by the remote worker to
+fetch data locally and sync to VPS via API.
 """
 
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -31,6 +36,103 @@ CACHE_TTL_DAYS = 30
 FETCH_RETRIES = 3
 FETCH_BACKOFF = [1, 2, 4]  # seconds
 LLM_RETRIES = 2
+
+
+@dataclass
+class EnrichmentResult:
+    """Result of headless enrichment fetch (no DB needed)."""
+    success: bool = False
+    error: Optional[str] = None
+    description: Optional[str] = None
+    developer: Optional[str] = None
+    publisher: Optional[str] = None
+    franchise: Optional[str] = None
+    genres: list = field(default_factory=list)
+    themes: list = field(default_factory=list)
+    lore_summary: Optional[str] = None
+    release_date: Optional[datetime] = None
+    external_ids: dict = field(default_factory=dict)
+    aliases: list = field(default_factory=list)
+    wikidata_qid: Optional[str] = None
+    wikipedia_url: Optional[str] = None
+
+
+def fetch_enrichment_data(
+    game_name: str,
+    *,
+    llm: Optional[LLMClient] = None,
+    wikidata: Optional[WikidataClient] = None,
+    wikipedia: Optional[WikipediaClient] = None,
+) -> EnrichmentResult:
+    """Fetch enrichment data from Wikidata + Wikipedia + LLM (headless, no DB).
+
+    This is the headless version of enrich_game — it fetches all external
+    data and returns an EnrichmentResult without touching the database.
+    The caller (remote worker) syncs the result to VPS via API.
+
+    Args:
+        game_name: Canonical game name to enrich
+        llm: Optional LLMClient for lore generation
+        wikidata: Optional WikidataClient (created if not provided)
+        wikipedia: Optional WikipediaClient (created if not provided)
+
+    Returns:
+        EnrichmentResult with all fetched data, or error.
+    """
+    log.info(f"fetch_enrichment_data: starting for '{game_name}'")
+
+    wd_client = wikidata or WikidataClient()
+    wiki_client = wikipedia or WikipediaClient()
+
+    # Step 1: Wikidata
+    wd_info = _fetch_with_retry(lambda: wd_client.resolve_game(game_name), "Wikidata")
+    if not wd_info:
+        log.warning(f"fetch_enrichment_data: could not resolve '{game_name}' on Wikidata")
+        return EnrichmentResult(success=False, error="could not resolve game on Wikidata")
+
+    # Step 2: Wikipedia (using QID from Wikidata if available)
+    wiki_article = _fetch_with_retry(
+        lambda: wiki_client.get_article_for_game(game_name, qid=wd_info.qid),
+        "Wikipedia",
+    )
+    if not wiki_article:
+        log.warning(f"fetch_enrichment_data: could not fetch Wikipedia article for '{game_name}'")
+        return EnrichmentResult(success=False, error="could not fetch Wikipedia article")
+
+    # Step 3: LLM lore_summary (non-fatal if fails)
+    lore_summary = None
+    if wiki_article.extract:
+        lore_summary = _generate_lore_with_retry(wiki_article.extract, game_name, llm)
+
+    # Build result
+    external_ids = {}
+    if wd_info.steam_app_id:
+        external_ids["steam"] = wd_info.steam_app_id
+    if wd_info.qid:
+        external_ids["wikidata"] = wd_info.qid
+    if wiki_article.url:
+        external_ids["wikipedia_url"] = wiki_article.url
+
+    result = EnrichmentResult(
+        success=True,
+        description=wiki_article.description,
+        developer=wd_info.developer,
+        publisher=wd_info.publisher,
+        franchise=wd_info.franchise,
+        genres=wd_info.genres or [],
+        lore_summary=lore_summary,
+        release_date=wd_info.release_date,
+        external_ids=external_ids,
+        aliases=wd_info.aliases or [],
+        wikidata_qid=wd_info.qid,
+        wikipedia_url=wiki_article.url,
+    )
+    log.info(
+        f"fetch_enrichment_data: success for '{game_name}' — "
+        f"developer={result.developer}, franchise={result.franchise}, "
+        f"genres={result.genres}, lore={'yes' if lore_summary else 'no'}"
+    )
+    return result
 
 
 def enrich_game(

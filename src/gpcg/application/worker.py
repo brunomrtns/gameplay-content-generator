@@ -87,21 +87,12 @@ def _claim_next_job() -> Optional[int]:
 
     Jobs with GPU capabilities (mapping, generation, knowledge_index) are
     processed by the RemoteWorker via the /api/jobs/claim endpoint.
+
+    V2: game_enrich and content_collect jobs are now also processed by the
+    RemoteWorker (local PC), not the VPS worker, because they need Ollama
+    (LLM) and Wikidata/Wikipedia access (VPS IPs get blocked/rate-limited).
     """
     with session_scope() as session:
-        # V2: claim enrichment/content_intelligence jobs (run on VPS, no GPU)
-        vps_job = session.execute(
-            select(Job)
-            .where(Job.status.in_([JobStatus.queued.value, JobStatus.retrying.value]))
-            .where(Job.type.in_([JobType.game_enrich.value, JobType.content_collect.value]))
-            .order_by(Job.created_at.asc())
-            .limit(1)
-        ).scalar_one_or_none()
-        if vps_job is not None:
-            vps_job.status = JobStatus.running.value
-            session.flush()
-            return vps_job.id
-
         # Legacy: claim jobs without required_capabilities (generation jobs)
         job = session.execute(
             select(Job)
@@ -133,12 +124,15 @@ def _process_job(gen: GenerationService, job_id: int) -> None:
         job_type = job.type
         session.flush()
 
-    # V2: dispatch VPS-side job types (no GPU needed)
-    if job_type == JobType.game_enrich.value:
-        _process_game_enrich_job(job_id)
-        return
-    if job_type == JobType.content_collect.value:
-        _process_content_collect_job(job_id)
+    # V2: game_enrich and content_collect are now processed by the RemoteWorker
+    # (local PC), not the VPS worker. If they reach here, skip them — the
+    # remote worker will claim them via /api/jobs/claim.
+    if job_type in (JobType.game_enrich.value, JobType.content_collect.value):
+        log.info(f"VPS worker skipping {job_type} job #{job_id} — handled by remote worker")
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            job.status = JobStatus.queued.value  # re-queue for remote worker
+            session.commit()
         return
 
     # Legacy: generation jobs (GPU)

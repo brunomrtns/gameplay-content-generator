@@ -1646,3 +1646,195 @@ def submit_indexing_result(
 
     log.info(f"Document {doc_id} indexed: {len(req.chunks)} chunks stored on VPS")
     return {"ok": True, "chunk_count": len(req.chunks)}
+
+
+# ── V2: Enrichment + Content Collection sync endpoints ──────────────────────
+# These endpoints receive results from the remote worker (PC local) after
+# processing game_enrich and content_collect jobs locally (where Ollama
+# and Wikidata/Wikipedia are accessible without VPS IP blocks).
+
+
+class EnrichmentResultRequest(BaseModel):
+    """Worker sends enriched Game data back to VPS."""
+    description: Optional[str] = None
+    developer: Optional[str] = None
+    publisher: Optional[str] = None
+    franchise: Optional[str] = None
+    genres: list = []
+    themes: list = []
+    lore_summary: Optional[str] = None
+    release_date: Optional[str] = None
+    external_ids: dict = {}
+    aliases: list[str] = []
+    enrichment_error: Optional[str] = None
+
+
+@router.post("/jobs/{job_id}/sync-enrichment")
+def sync_enrichment_result(
+    job_id: int,
+    req: EnrichmentResultRequest,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Worker sends enriched Game data back to VPS.
+
+    The worker has fetched Wikidata/Wikipedia data and generated lore
+    with the local LLM. Now it sends the structured fields to VPS for
+    storage in the games table.
+    """
+    from gpcg.domain.models import Game
+    from gpcg.domain.game_registry import add_alias
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not job.game_id:
+        raise HTTPException(status_code=400, detail="Job has no game_id")
+
+    game = db.get(Game, job.game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    if req.enrichment_error:
+        game.enrichment_error = req.enrichment_error
+        db.commit()
+        log.warning(f"Enrichment failed for game '{game.canonical_name}': {req.enrichment_error}")
+        return {"ok": False, "error": req.enrichment_error}
+
+    # Apply enriched fields
+    if req.description is not None:
+        game.description = req.description
+    if req.developer is not None:
+        game.developer = req.developer
+    if req.publisher is not None:
+        game.publisher = req.publisher
+    if req.franchise is not None:
+        game.franchise = req.franchise
+    if req.genres:
+        game.genres = req.genres
+    if req.themes:
+        game.themes = req.themes
+    if req.lore_summary is not None:
+        game.lore_summary = req.lore_summary
+    if req.release_date:
+        try:
+            from datetime import datetime
+            game.release_date = datetime.fromisoformat(req.release_date)
+        except (ValueError, TypeError):
+            pass
+    if req.external_ids:
+        game.external_ids = req.external_ids
+
+    game.enriched_at = datetime.now(timezone.utc)
+    game.enrichment_error = None
+
+    # Add new aliases discovered during enrichment
+    for alias in req.aliases:
+        try:
+            add_alias(db, game.id, alias, alias_type="alternative", source="enrichment")
+        except Exception:
+            pass  # duplicate alias — skip
+
+    db.commit()
+    log.info(f"Game '{game.canonical_name}' enriched: developer={game.developer}, franchise={game.franchise}")
+    return {"ok": True, "game_id": game.id, "enriched_at": game.enriched_at.isoformat()}
+
+
+class KnowledgeItemSyncItem(BaseModel):
+    """A single KnowledgeItem to sync from worker to VPS."""
+    title: str
+    content: str
+    item_type: str
+    source_type: str
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+    published_at: Optional[str] = None
+    editorial_score: float = 0.0
+    franchise: Optional[str] = None
+    developer: Optional[str] = None
+    game_id: Optional[int] = None
+    content_hash: str = ""
+    tags: list = []
+
+
+class ContentCollectionResultRequest(BaseModel):
+    """Worker sends collected KnowledgeItems back to VPS."""
+    items: list[KnowledgeItemSyncItem] = []
+    cleaned_count: int = 0
+    error: Optional[str] = None
+
+
+@router.post("/jobs/{job_id}/sync-knowledge-items")
+def sync_knowledge_items(
+    job_id: int,
+    req: ContentCollectionResultRequest,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Worker sends collected KnowledgeItems back to VPS.
+
+    The worker has collected RSS feeds, scored items with the local LLM,
+    and now sends the structured items to VPS for storage.
+    """
+    from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
+    from sqlalchemy import select
+    import hashlib as _hashlib
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if req.error:
+        log.warning(f"Content collection job {job_id} failed: {req.error}")
+        return {"ok": False, "error": req.error}
+
+    # Dedup by content_hash — skip items that already exist
+    existing_hashes = set()
+    if req.items:
+        hashes = [item.content_hash for item in req.items if item.content_hash]
+        if hashes:
+            existing = db.execute(
+                select(KnowledgeItem.content_hash).where(
+                    KnowledgeItem.content_hash.in_(hashes)
+                )
+            ).scalars().all()
+            existing_hashes = set(existing)
+
+    inserted = 0
+    skipped = 0
+    for item in req.items:
+        if item.content_hash and item.content_hash in existing_hashes:
+            skipped += 1
+            continue
+        ki = KnowledgeItem(
+            game_id=item.game_id,
+            title=item.title,
+            content=item.content,
+            item_type=item.item_type,
+            source_type=item.source_type,
+            source_url=item.source_url,
+            source_name=item.source_name,
+            editorial_score=item.editorial_score,
+            status=KnowledgeItemStatus.fresh.value,
+            franchise=item.franchise,
+            developer=item.developer,
+            content_hash=item.content_hash or _hashlib.sha256(
+                f"{item.title}:{item.content}".encode()
+            ).hexdigest()[:16],
+            tags=item.tags,
+        )
+        if item.published_at:
+            try:
+                from datetime import datetime
+                ki.published_at = datetime.fromisoformat(item.published_at)
+            except (ValueError, TypeError):
+                pass
+        db.add(ki)
+        inserted += 1
+
+    db.commit()
+    log.info(
+        f"Content collection synced: {inserted} new items, {skipped} duplicates skipped, "
+        f"{req.cleaned_count} old news cleaned (job #{job_id})"
+    )
+    return {"ok": True, "inserted": inserted, "skipped": skipped, "cleaned": req.cleaned_count}

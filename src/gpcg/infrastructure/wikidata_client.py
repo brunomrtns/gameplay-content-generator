@@ -157,21 +157,24 @@ class WikidataClient:
         info = WikidataGameInfo(qid=qid)
         info.raw = entity
 
-        # Labels (canonical name)
-        labels = entity.get("labels", {})
-        en_label = labels.get("en", {}).get("value")
-        pt_label = labels.get("pt", {}).get("value")
-        info.label = en_label or pt_label
+        # Labels (canonical name) — use _extract_label for language fallback
+        info.label = self._extract_label(entity)
 
         # Description
         descriptions = entity.get("descriptions", {})
-        info.description = descriptions.get("en", {}).get("value") or descriptions.get("pt", {}).get("value")
+        info.description = (
+            descriptions.get("en", {}).get("value")
+            or descriptions.get("pt", {}).get("value")
+            or descriptions.get("es", {}).get("value")
+            or descriptions.get("fr", {}).get("value")
+        )
 
-        # Aliases (alternative names)
+        # Aliases (alternative names) — collect from multiple languages
         aliases = entity.get("aliases", {})
-        en_aliases = [a["value"] for a in aliases.get("en", [])]
-        pt_aliases = [a["value"] for a in aliases.get("pt", [])]
-        info.aliases = list(set(en_aliases + pt_aliases))
+        all_aliases = []
+        for lang in ("en", "pt", "es", "fr"):
+            all_aliases.extend(a["value"] for a in aliases.get(lang, []))
+        info.aliases = list(set(all_aliases))
 
         # Claims (structured properties)
         claims = entity.get("claims", {})
@@ -221,8 +224,7 @@ class WikidataClient:
         # Fetch the label for this entity
         entity = self.get_entity(qid)
         if entity:
-            labels = entity.get("labels", {})
-            return labels.get("en", {}).get("value") or labels.get("pt", {}).get("value")
+            return self._extract_label(entity)
         return qid  # fallback to QID if label fetch fails
 
     def _get_entity_labels_from_claim_list(self, claims: dict, prop: str) -> list[str]:
@@ -236,13 +238,38 @@ class WikidataClient:
             if qid:
                 entity = self.get_entity(qid)
                 if entity:
-                    labels = entity.get("labels", {})
-                    label = labels.get("en", {}).get("value") or labels.get("pt", {}).get("value")
+                    label = self._extract_label(entity)
                     if label:
                         results.append(label)
                 else:
                     results.append(qid)
         return results
+
+    def _extract_label(self, entity: dict) -> Optional[str]:
+        """Extract the best available label from a Wikidata entity.
+
+        Priority: en label > pt label > enwiki sitelink title > ptwiki sitelink
+        > es/fr/de labels > any first available label.
+
+        Some entities don't have English labels (Wikidata data quality issue),
+        so we fall back to the English Wikipedia article title from sitelinks,
+        then to any available language label.
+        """
+        labels = entity.get("labels", {})
+        # Priority languages for labels
+        for lang in ("en", "pt", "es", "fr", "de"):
+            if lang in labels and labels[lang].get("value"):
+                return labels[lang]["value"]
+        # Fallback: use English Wikipedia sitelink title (usually the canonical name)
+        sitelinks = entity.get("sitelinks", {})
+        for wiki in ("enwiki", "ptwiki", "eswiki", "frwiki", "dewiki"):
+            if wiki in sitelinks and sitelinks[wiki].get("title"):
+                return sitelinks[wiki]["title"]
+        # Last resort: any available label
+        for lang, label_data in labels.items():
+            if label_data.get("value"):
+                return label_data["value"]
+        return None
 
     def _parse_wikidata_time(self, time_str: str) -> Optional[datetime]:
         """Parse a Wikidata time string like '+1996-03-22T00:00:00Z'."""

@@ -3,6 +3,15 @@
 Collects external content (news, curiosity) from RSS feeds and stores
 as KnowledgeItems with editorial scoring.
 
+V2: `collect_rss_items()` is a headless version (no DB session) that
+returns a list of dicts. Used by the remote worker to collect locally
+and sync to VPS via API.
+
+RSS sources:
+- Google News RSS (per-game, via gpcg_rss_feed_url config)
+- RSSHub public instance (gaming news aggregators: IGN, Kotaku, Polygon, etc.)
+- Reddit r/games, r/gaming (via RSSHub)
+
 See ARCHITECTURE_V2.md §7.5 (Coleta).
 """
 
@@ -10,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import quote
@@ -22,6 +32,160 @@ from gpcg.domain.models import Game, KnowledgeItem, KnowledgeItemSource, Knowled
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)
+
+# RSSHub public instance — provides RSS feeds for sites that don't have native RSS
+# Gaming routes: https://docs.rsshub.app/routes/game
+RSSHUB_BASE = "https://rsshub.app"
+
+# General gaming news feeds (not game-specific) — collected on every run
+GENERAL_GAMING_FEEDS = [
+    # Native RSS feeds
+    {"url": "https://feeds.feedburner.com/ign/games-all", "source_name": "IGN", "item_type": "news"},
+    {"url": "https://www.gamespot.com/feeds/mashup/", "source_name": "GameSpot", "item_type": "news"},
+    {"url": "https://www.polygon.com/rss/index.xml", "source_name": "Polygon", "item_type": "news"},
+    {"url": "https://www.eurogamer.net/feed", "source_name": "Eurogamer", "item_type": "news"},
+    {"url": "https://www.rockpapershotgun.com/feed", "source_name": "Rock Paper Shotgun", "item_type": "news"},
+    # RSSHub routes (gaming news aggregators)
+    {"url": f"{RSSHUB_BASE}/kotaku/story/news", "source_name": "Kotaku", "item_type": "news"},
+    {"url": f"{RSSHUB_BASE}/reddit/subreddit/games", "source_name": "r/games", "item_type": "news"},
+    {"url": f"{RSSHUB_BASE}/reddit/subreddit/gaming", "source_name": "r/gaming", "item_type": "news"},
+    # Curiosity/feature feeds
+    {"url": f"{RSSHUB_BASE}/reddit/subreddit/truegaming", "source_name": "r/truegaming", "item_type": "curiosity"},
+    {"url": f"{RSSHUB_BASE}/reddit/subreddit/patientgamers", "source_name": "r/patientgamers", "item_type": "curiosity"},
+]
+
+
+@dataclass
+class RSSItem:
+    """A collected RSS item (headless — no DB dependency)."""
+    title: str
+    content: str
+    item_type: str = "news"
+    source_type: str = "rss"
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+    published_at: Optional[datetime] = None
+    editorial_score: float = 0.0
+    franchise: Optional[str] = None
+    developer: Optional[str] = None
+    game_id: Optional[int] = None
+    content_hash: str = ""
+    tags: list = field(default_factory=list)
+
+
+def collect_rss_items(
+    game_names: list[str] | None = None,
+    *,
+    max_per_game: int = 15,
+    max_general: int = 30,
+) -> list[RSSItem]:
+    """Collect RSS items headlessly (no DB session).
+
+    Collects from:
+    1. Google News RSS for each game name (game-specific news)
+    2. General gaming news feeds (IGN, Kotaku, Polygon, Reddit, etc.)
+
+    Args:
+        game_names: List of game canonical names to collect for.
+                    If None, only collects general gaming news.
+        max_per_game: Max items per game feed
+        max_general: Max items per general feed
+
+    Returns:
+        List of RSSItem dicts (deduped by content_hash).
+    """
+    try:
+        import feedparser
+    except ImportError:
+        log.error("feedparser not installed — run: pip install feedparser")
+        return []
+
+    settings = get_settings()
+    all_items: list[RSSItem] = []
+    seen_hashes: set[str] = set()
+
+    # 1. Game-specific feeds (Google News RSS)
+    if game_names:
+        for game_name in game_names:
+            query = quote(f"{game_name} game")
+            feed_url = settings.gpcg_rss_feed_url.format(query=query)
+            log.info(f"collect_rss_items: fetching Google News RSS for '{game_name}'")
+
+            try:
+                feed = feedparser.parse(feed_url)
+            except Exception as e:
+                log.warning(f"collect_rss_items: failed to fetch Google News for '{game_name}': {e}")
+                continue
+
+            for entry in feed.entries[:max_per_game]:
+                item = _entry_to_rss_item(entry, game_name=game_name, item_type="news")
+                if item and item.content_hash not in seen_hashes:
+                    seen_hashes.add(item.content_hash)
+                    all_items.append(item)
+
+    # 2. General gaming news feeds
+    for feed_info in GENERAL_GAMING_FEEDS:
+        url = feed_info["url"]
+        source_name = feed_info.get("source_name")
+        item_type = feed_info.get("item_type", "news")
+        log.info(f"collect_rss_items: fetching {source_name} from {url}")
+
+        try:
+            feed = feedparser.parse(url)
+        except Exception as e:
+            log.warning(f"collect_rss_items: failed to fetch {source_name}: {e}")
+            continue
+
+        for entry in feed.entries[:max_general]:
+            item = _entry_to_rss_item(
+                entry,
+                source_name_override=source_name,
+                item_type=item_type,
+            )
+            if item and item.content_hash not in seen_hashes:
+                seen_hashes.add(item.content_hash)
+                all_items.append(item)
+
+    log.info(f"collect_rss_items: collected {len(all_items)} unique items")
+    return all_items
+
+
+def _entry_to_rss_item(
+    entry,
+    *,
+    game_name: Optional[str] = None,
+    source_name_override: Optional[str] = None,
+    item_type: str = "news",
+) -> Optional[RSSItem]:
+    """Convert an RSS feed entry to an RSSItem (headless)."""
+    title = _clean_text(entry.get("title", ""))
+    if not title:
+        return None
+
+    content = _clean_text(entry.get("summary", "") or entry.get("description", ""))
+    if not content:
+        content = title
+    if len(content) > 2000:
+        content = content[:2000] + "..."
+
+    published_at = _parse_date(entry.get("published_parsed") or entry.get("updated_parsed"))
+    link = entry.get("link", "")
+    source_name = source_name_override or _extract_source_name(entry, link)
+    content_hash = _compute_hash(title, content)
+
+    return RSSItem(
+        title=title,
+        content=content,
+        item_type=item_type,
+        source_type="rss",
+        source_url=link if link else None,
+        source_name=source_name,
+        published_at=published_at,
+        franchise=None,  # will be set by caller if game-specific
+        game_id=None,
+        content_hash=content_hash,
+        tags=[game_name] if game_name else [],
+    )
 
 
 def collect_rss(

@@ -68,7 +68,7 @@ class WorkerConfig:
     # Status update interval (seconds) — even if nothing changes
     status_interval: float = 30.0
     # Worker capabilities
-    capabilities: list[str] = field(default_factory=lambda: ["mapping", "generation", "knowledge_index"])
+    capabilities: list[str] = field(default_factory=lambda: ["mapping", "generation", "knowledge_index", "enrichment", "content_intelligence"])
     # Worker version info
     worker_version: str = "0.1.0"
     git_commit: str = ""
@@ -599,6 +599,10 @@ class RemoteWorker:
             self._process_generation_job(job)
         elif job_type == "knowledge_index":
             self._process_knowledge_indexing_job(job)
+        elif job_type == "game_enrich":
+            self._process_game_enrich_job(job)
+        elif job_type == "content_collect":
+            self._process_content_collect_job(job)
         else:
             log.warning(f"Unknown job type: {job_type} — marking as completed (no-op)")
             self.update_job_status(job_id, status="running", stage="done", progress=1.0)
@@ -951,6 +955,212 @@ class RemoteWorker:
         except OSError:
             pass
 
+    # ── V2: Game Enrichment + Content Collection ─────────────────────────────
+    # These jobs run on the local PC (not VPS) because:
+    # 1. Ollama (LLM) is only available locally for lore generation + scoring
+    # 2. Wikidata/Wikipedia block VPS datacenter IPs (403/429)
+    # 3. Results are synced back to VPS via dedicated endpoints
+
+    def _process_game_enrich_job(self, job: dict) -> None:
+        """Process a game_enrich job: fetch Wikidata/Wikipedia → generate lore → sync.
+
+        Runs entirely locally (Wikidata + Wikipedia + Ollama for lore).
+        Syncs the enriched Game data back to VPS via /jobs/{id}/sync-enrichment.
+        """
+        job_id = job["id"]
+        game_id = job.get("game_id")
+        if not game_id:
+            self.submit_job_result(job_id, status="failed", error="No game_id in job")
+            return
+
+        self.update_job_status(job_id, status="running", stage="enrichment", progress=0.1)
+        self.send_status("busy", f"Enriquecendo jogo #{game_id}", job_id=job_id)
+
+        from gpcg.application.game_enrichment import fetch_enrichment_data
+        from gpcg.infrastructure.llm import LLMClient
+
+        # Get game name from job data or fetch from VPS API
+        game_name = job.get("game", {}).get("canonical_name", "")
+        if not game_name:
+            try:
+                resp = self.client.get(f"/api/games/{game_id}")
+                if resp.status_code == 200:
+                    game_name = resp.json().get("canonical_name", "")
+            except Exception:
+                pass
+
+        if not game_name:
+            self.submit_job_result(job_id, status="failed", error="Could not determine game name")
+            return
+
+        log.info(f"Enriching game '{game_name}' (id={game_id})")
+
+        # Run enrichment locally (Wikidata + Wikipedia + LLM lore) — headless, no DB
+        try:
+            llm = LLMClient()
+            result = fetch_enrichment_data(game_name, llm=llm)
+        except Exception as e:
+            log.exception(f"Enrichment failed for '{game_name}': {e}")
+            self._sync_enrichment(job_id, enrichment_error=str(e))
+            self.submit_job_result(job_id, status="failed", error=str(e))
+            return
+
+        if not result.success:
+            log.warning(f"Enrichment failed for '{game_name}': {result.error}")
+            self._sync_enrichment(job_id, enrichment_error=result.error)
+            self.submit_job_result(job_id, status="failed", error=result.error)
+            return
+
+        # Sync enriched data back to VPS
+        self.update_job_status(job_id, status="running", stage="sync", progress=0.9)
+        sync_data = {
+            "description": result.description,
+            "developer": result.developer,
+            "publisher": result.publisher,
+            "franchise": result.franchise,
+            "genres": result.genres or [],
+            "themes": result.themes or [],
+            "lore_summary": result.lore_summary,
+            "release_date": result.release_date.isoformat() if result.release_date else None,
+            "external_ids": result.external_ids or {},
+            "aliases": result.aliases or [],
+        }
+        sync_resp = self._sync_enrichment(job_id, **sync_data)
+        log.info(f"Enrichment synced to VPS for '{game_name}': {sync_resp}")
+
+        # Done
+        self.update_job_status(job_id, status="running", stage="done", progress=1.0)
+        self.submit_job_result(job_id, status="completed", artifacts={
+            "enriched": True,
+            "game_id": game_id,
+            "developer": result.developer,
+            "franchise": result.franchise,
+        })
+        log.info(f"Game enrichment job #{job_id} completed for '{game_name}'")
+
+    def _sync_enrichment(self, job_id: int, enrichment_error: str = None, **kwargs) -> dict:
+        """Send enrichment results to VPS."""
+        payload = {"enrichment_error": enrichment_error} if enrichment_error else kwargs
+        resp = self.client.post(f"/api/jobs/{job_id}/sync-enrichment", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+    def _process_content_collect_job(self, job: dict) -> None:
+        """Process a content_collect job: collect RSS → score → sync.
+
+        Runs entirely locally (RSS + Ollama for editorial scoring).
+        Syncs collected KnowledgeItems back to VPS via /jobs/{id}/sync-knowledge-items.
+        """
+        job_id = job["id"]
+
+        self.update_job_status(job_id, status="running", stage="content_collect", progress=0.1)
+        self.send_status("busy", "Coletando conteúdo (RSS)", job_id=job_id)
+
+        from gpcg.application.content_collectors import collect_rss_items
+        from gpcg.infrastructure.llm import LLMClient
+
+        # Get game names from VPS (games that have gameplay sources)
+        game_names = []
+        try:
+            resp = self.client.get("/api/games")
+            if resp.status_code == 200:
+                games = resp.json()
+                if isinstance(games, list):
+                    game_names = [g.get("canonical_name") for g in games if g.get("canonical_name")]
+                elif isinstance(games, dict) and "games" in games:
+                    game_names = [g.get("canonical_name") for g in games["games"] if g.get("canonical_name")]
+        except Exception as e:
+            log.warning(f"Could not fetch game list from VPS: {e}")
+
+        log.info(f"Collecting RSS for games: {game_names}")
+
+        # Collect RSS feeds locally (headless, no DB)
+        try:
+            items = collect_rss_items(game_names=game_names if game_names else None)
+            log.info(f"Collected {len(items)} items from RSS feeds")
+        except Exception as e:
+            log.exception(f"RSS collection failed: {e}")
+            self._sync_knowledge_items(job_id, error=str(e))
+            self.submit_job_result(job_id, status="failed", error=str(e))
+            return
+
+        if not items:
+            log.info("No items collected from RSS")
+            self._sync_knowledge_items(job_id, items=[], cleaned_count=0)
+            self.submit_job_result(job_id, status="completed", artifacts={"collected": 0})
+            return
+
+        # Score items with local LLM
+        self.update_job_status(job_id, status="running", stage="scoring", progress=0.3)
+        try:
+            llm = LLMClient()
+        except Exception as e:
+            log.warning(f"LLM init failed for scoring (using default scores): {e}")
+            llm = None
+
+        scored_items = []
+        for i, item in enumerate(items):
+            if llm:
+                try:
+                    # TODO: implement headless scoring (score_knowledge_item needs DB)
+                    # For now, use heuristic score based on title length and source
+                    item.editorial_score = _heuristic_score(item)
+                except Exception as e:
+                    log.warning(f"Scoring failed for item '{item.title[:50]}': {e}")
+                    item.editorial_score = 50.0
+            else:
+                item.editorial_score = _heuristic_score(item)
+
+            scored_items.append(item)
+
+            if (i + 1) % 10 == 0 or i + 1 == len(items):
+                progress = 0.3 + (i + 1) / len(items) * 0.5
+                self.update_job_status(job_id, status="running", stage="scoring", progress=progress)
+
+        # Sync items back to VPS (VPS handles cleanup of old news)
+        self.update_job_status(job_id, status="running", stage="sync", progress=0.9)
+        sync_items = []
+        for item in scored_items:
+            sync_items.append({
+                "title": item.title,
+                "content": item.content,
+                "item_type": item.item_type,
+                "source_type": item.source_type,
+                "source_url": item.source_url,
+                "source_name": item.source_name,
+                "published_at": item.published_at.isoformat() if item.published_at else None,
+                "editorial_score": item.editorial_score,
+                "franchise": item.franchise,
+                "developer": item.developer,
+                "game_id": item.game_id,
+                "content_hash": item.content_hash,
+                "tags": item.tags,
+            })
+
+        sync_resp = self._sync_knowledge_items(job_id, items=sync_items, cleaned_count=0)
+        log.info(f"Content collection synced to VPS: {sync_resp}")
+
+        # Done
+        self.update_job_status(job_id, status="running", stage="done", progress=1.0)
+        self.submit_job_result(job_id, status="completed", artifacts={
+            "collected": len(scored_items),
+            "synced": sync_resp.get("inserted", 0),
+            "skipped": sync_resp.get("skipped", 0),
+        })
+        log.info(f"Content collection job #{job_id} completed: {len(scored_items)} items")
+
+    def _sync_knowledge_items(self, job_id: int, items: list = None, cleaned_count: int = 0, error: str = None) -> dict:
+        """Send collected KnowledgeItems to VPS."""
+        payload = {
+            "items": items or [],
+            "cleaned_count": cleaned_count,
+        }
+        if error:
+            payload["error"] = error
+        resp = self.client.post(f"/api/jobs/{job_id}/sync-knowledge-items", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
     def _process_generation_job(self, job: dict) -> None:
         """Process a generation job: fetch data → run pipeline → upload video.
 
@@ -1063,3 +1273,43 @@ def run_remote_worker(
     )
     worker = RemoteWorker(config)
     worker.run()
+
+
+def _heuristic_score(item) -> float:
+    """Heuristic editorial score for RSS items (no LLM needed).
+
+    Scores based on:
+    - Title length (longer = more substantive, 10-80 chars is sweet spot)
+    - Content length (longer = more detail)
+    - Source reputation (established gaming sites score higher)
+    - Item type (curiosity > news for editorial value)
+    """
+    score = 50.0  # baseline
+
+    # Title length: sweet spot is 30-80 chars
+    title_len = len(item.title)
+    if 30 <= title_len <= 80:
+        score += 10
+    elif title_len < 15:
+        score -= 10  # too short, probably clickbait
+    elif title_len > 120:
+        score -= 5  # too long
+
+    # Content length: more content = more material for editorial
+    content_len = len(item.content)
+    if content_len > 500:
+        score += 10
+    elif content_len < 100:
+        score -= 5  # too little content
+
+    # Source reputation bonus
+    reputable_sources = {"IGN", "GameSpot", "Polygon", "Eurogamer", "Rock Paper Shotgun", "Kotaku"}
+    if item.source_name in reputable_sources:
+        score += 8
+
+    # Curiosity items score higher (evergreen content)
+    if item.item_type == "curiosity":
+        score += 5
+
+    # Clamp to 0-100
+    return max(0.0, min(100.0, score))
