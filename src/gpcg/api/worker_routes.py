@@ -1420,6 +1420,7 @@ def sync_job_result(
     # NOTE: The content_plan id from the remote worker is the LOCAL DB id,
     # not the VPS DB id. So we always create a new ContentPlan in the VPS DB
     # (unless we find one already linked to this job).
+    print(f"[SYNC] job #{job_id}: content_plan={req.content_plan is not None}, script={req.script is not None}, video={req.video is not None}", flush=True)
     if req.content_plan:
         plan_id = req.content_plan.get("id")
         plan = None
@@ -1430,6 +1431,7 @@ def sync_job_result(
                     if k != "id" and hasattr(plan, k):
                         setattr(plan, k, v)
         if not plan:
+            print(f"[SYNC] job #{job_id}: creating new ContentPlan in VPS DB (local id={plan_id}, topic={req.content_plan.get('topic','')})", flush=True)
             # Create new ContentPlan in VPS DB (local DB id is irrelevant)
             plan = ContentPlan(
                 user_id=job.user_id,
