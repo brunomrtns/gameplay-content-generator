@@ -102,7 +102,7 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
     """
     from gpcg.domain.models import (
         User, Game, GameplaySource, GameplayEvent, GameplayAsset, Fact,
-        ContentPlan, Script, Job, Automation,
+        ContentPlan, Script, Job, Automation, KnowledgeItem,
     )
 
     SessionLocal = _create_temp_db(db_path)
@@ -244,6 +244,23 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
                     used_count=asset_data.get("used_count", 0),
                     metadata_json=asset_data.get("metadata_json", {}),
                 ))
+        session.flush()
+
+        # Knowledge items (V2 content intelligence — used by ContentPlanningService)
+        for ki_data in job_data.get("knowledge_items", []):
+            session.add(KnowledgeItem(
+                id=ki_data["id"],
+                user_id=user_id,
+                game_id=ki_data.get("game_id"),
+                source_type=ki_data.get("source_type", "rss"),
+                title=ki_data.get("title", ""),
+                summary=ki_data.get("summary", ""),
+                content=ki_data.get("content", ""),
+                url=ki_data.get("url", ""),
+                published_at=ki_data.get("published_at"),
+                collected_at=ki_data.get("collected_at"),
+                metadata_json=ki_data.get("metadata_json", {}),
+            ))
         session.flush()
 
         # Content plan (if exists)

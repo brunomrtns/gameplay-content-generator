@@ -1320,6 +1320,24 @@ def get_job_data(
             "used_count": f.used_count, "metadata_json": f.metadata_json,
         } for f in facts]
 
+    # Knowledge items for the game (V2 content intelligence)
+    if job.game_id:
+        try:
+            from gpcg.domain.models import KnowledgeItem
+            ki_list = db.query(KnowledgeItem).filter(
+                KnowledgeItem.game_id == job.game_id
+            ).limit(50).all()
+            data["knowledge_items"] = [{
+                "id": ki.id, "user_id": ki.user_id, "game_id": ki.game_id,
+                "source_type": ki.source_type, "title": ki.title,
+                "summary": ki.summary, "content": ki.content,
+                "url": ki.url, "published_at": ki.published_at.isoformat() if ki.published_at else None,
+                "collected_at": ki.collected_at.isoformat() if ki.collected_at else None,
+                "metadata_json": ki.metadata_json,
+            } for ki in ki_list]
+        except Exception:
+            data["knowledge_items"] = []
+
     # Gameplay sources + events for the game (and general-topic sources)
     sources_query = db.query(GameplaySource).filter(
         GameplaySource.user_id == job.user_id
