@@ -392,6 +392,59 @@ GPCG is now a multi-user platform for automated YouTube channel video generation
 - ASR transcriber (faster-whisper): `src/gpcg/infrastructure/asr_transcriber.py`
 - API routes: `src/gpcg/api/routes.py`
 - Frontend pages: `frontend/src/pages/`
+- **V2 Game Registry:** `src/gpcg/domain/game_registry.py`, `src/gpcg/domain/slug_utils.py`
+- **V2 Game Enrichment:** `src/gpcg/application/game_enrichment.py`,
+  `src/gpcg/infrastructure/wikidata_client.py`, `src/gpcg/infrastructure/wikipedia_client.py`
+- **V2 Content Intelligence:** `src/gpcg/application/content_collectors.py`,
+  `src/gpcg/application/knowledge_item_service.py`, `src/gpcg/api/knowledge_item_routes.py`
+- **V2 Embeddings:** `src/gpcg/application/embedding_service.py`
+- **V2 API routes:** `src/gpcg/api/game_registry_routes.py`, `src/gpcg/api/knowledge_item_routes.py`
+
+## V2 Architecture (Game Registry + Content Intelligence)
+
+GPCG V2 implements a canonical Game Registry, game enrichment, content
+intelligence, and cross-game gameplay expansion. All features are gated by
+feature flags (default: off). See `docs/ARCHITECTURE_V2.md` for the full
+blueprint.
+
+### Feature Flags (all default off)
+
+- `GPCG_GAME_ENRICHMENT_ENABLED`: auto-trigger game_enrich job on new game creation
+- `GPCG_CONTENT_INTELLIGENCE_ENABLED`: content planning queries KnowledgeItems alongside Facts
+- `GPCG_CROSS_GAME_GAMEPLAY_ENABLED`: gameplay selection expands to same franchise/developer
+
+### V2 Data Model
+
+- **Game** (12 new columns): `slug`, `description`, `release_date`, `developer`,
+  `publisher`, `franchise`, `genres`, `themes`, `lore_summary`, `external_ids`,
+  `enriched_at`, `enrichment_error`
+- **GameAlias** (new table): individual aliases indexed by `game_id` + `alias`
+  (replaces JSON `aliases` column as source of truth for lookups)
+- **KnowledgeItem** (new table): external content (news, curiosity, lore) with
+  `editorial_score` (0-100), `content_hash` for dedup, denormalized
+  `franchise`/`developer` for filter-without-JOIN
+- **KnowledgeItemEmbedding** (new table): BLOB embeddings (nomic-embed-text)
+- **GameplayEventEmbedding** (new table): BLOB embeddings for gameplay events
+- **Video**: `knowledge_item_id` (nullable FK → knowledge_items.id, D13 traceability)
+- **New enums:** `KnowledgeItemType`, `KnowledgeItemSource`, `KnowledgeItemStatus`, `ContentScope`
+- **New job types:** `game_enrich`, `content_collect` (run on VPS, not GPU worker)
+
+### V2 Pipeline Changes
+
+- `content_planning`: queries Facts + KnowledgeItems (unified) when
+  `GPCG_CONTENT_INTELLIGENCE_ENABLED` is on. LLM picks `fact_id` or
+  `knowledge_item_id`. Selected KIs marked as "used".
+- `editorial_planning`: receives enriched Game context (description,
+  lore_summary, genres, franchise, developer) for richer editorial decisions
+- `script_review`: factual_accuracy gate validates against
+  `KnowledgeItem.content` (in addition to `Fact.claim`)
+- `gameplay_selection`: accepts `game_ids: list[int]` (cross-game) when
+  `GPCG_CROSS_GAME_GAMEPLAY_ENABLED` is on, with scope=game/franchise/developer
+
+### V2 Frontend
+
+- `/ideas` page: Content Ideas bank (KnowledgeItems list with type badges,
+  editorial scores, reject button, "Coletar Agora" trigger)
 
 ## Environment
 
