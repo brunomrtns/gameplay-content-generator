@@ -296,8 +296,27 @@ class GameplayRetriever:
         if not all_events:
             return []
 
-        # Sort by interesting score (descending) for prioritization
+        # Sort by interesting score (descending) but add randomization
+        # to avoid always picking the same clips. We group events into
+        # score tiers and shuffle within each tier.
+        rng.shuffle(all_events)
         all_events.sort(key=lambda x: x[1].interesting_score, reverse=True)
+        # Re-shuffle the top events to add variety while still preferring
+        # higher-scoring ones. Take top 2x what we likely need and shuffle.
+        estimated_needed = max(5, int(target_duration / 5) * 2)
+        top_events = all_events[:estimated_needed]
+        rest_events = all_events[estimated_needed:]
+        rng.shuffle(top_events)
+        all_events = top_events + rest_events
+
+        # Track used event time ranges to avoid picking overlapping segments
+        used_ranges: list[tuple[float, float, int]] = []  # (start, end, source_id)
+
+        def _is_used(ev_start: float, ev_end: float, src_id: int) -> bool:
+            for ur_start, ur_end, ur_src in used_ranges:
+                if ur_src == src_id and ev_start < ur_end and ev_end > ur_start:
+                    return True
+            return False
 
         # Build clips from events, accumulating until target_duration
         clips: list[SelectedClip] = []
@@ -307,6 +326,10 @@ class GameplayRetriever:
         for src, ev in all_events:
             if total >= target_duration:
                 break
+
+            # Skip events that overlap with already-selected clips
+            if _is_used(ev.start_time, ev.end_time, src.id):
+                continue
 
             # Determine clip duration
             event_duration = ev.end_time - ev.start_time
@@ -359,6 +382,9 @@ class GameplayRetriever:
             )
             clips.append(clip)
             total += clip_duration
+
+            # Track the used range to avoid overlapping clips
+            used_ranges.append((ev.start_time, ev.start_time + clip_duration, src.id))
 
             # Advance scene index if using scene_duration
             if scene_duration > 0 and clip_duration >= scene_duration - 0.1:

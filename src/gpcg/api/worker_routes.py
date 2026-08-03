@@ -1144,6 +1144,27 @@ async def upload_video(
     file_size = dest_path.stat().st_size
     log.info(f"Video uploaded for job #{job_id}: {storage_key} ({file_size} bytes)")
 
+    # Validate the uploaded video file is a valid media file
+    if file_size < 10000:
+        log.error(f"Video file too small for job #{job_id}: {file_size} bytes — likely corrupted")
+        dest_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Uploaded video file is too small — likely corrupted")
+
+    try:
+        from gpcg.infrastructure.media import probe
+        info = probe(dest_path)
+        if not info or info.duration is None or info.duration < 1.0:
+            log.error(f"Invalid video for job #{job_id}: probe failed or duration < 1s")
+            dest_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="Uploaded video is invalid or too short")
+        log.info(f"Video validated for job #{job_id}: duration={info.duration:.1f}s {info.width}x{info.height}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Video validation failed for job #{job_id}: {e}")
+        dest_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"Video validation failed: {e}")
+
     # Generate thumbnail on the VPS from the uploaded video
     thumb_path: Optional[Path] = None
     try:
