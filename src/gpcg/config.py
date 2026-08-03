@@ -114,7 +114,9 @@ class Settings(BaseSettings):
     # (legacy behavior). When true, an extra `creative_engine` stage runs
     # between content_planning and script, producing hooks/angles/punchlines
     # that feed into the script generator.
-    gpcg_creative_engine_enabled: bool = False
+    # REFACTORY_V2: activated by default (was False — pipeline missed creative
+    # material, producing flat scripts without hooks/angles/punchlines).
+    gpcg_creative_engine_enabled: bool = True
     # Ollama model tag for the creative engine. qwen3:14b ships as Q4_K_M GGUF
     # (~9 GB) which fits in 12 GB VRAM alongside the smaller text/vision models.
     gpcg_creative_engine_model: str = "qwen3:14b"
@@ -134,7 +136,9 @@ class Settings(BaseSettings):
     # 3 angles for "development", 3 payoffs for "payoff", 3 observations
     # for commentary). When false, uses the generic prompt (5 of each).
     # See docs/EDITORIAL_REFACTOR_PLAN_V2.md §3.4, Fase 3.
-    gpcg_creative_engine_beat_oriented: bool = False
+    # REFACTORY_V2: activated by default (was False — creative material was
+    # generic 5-of-each instead of oriented by narrative beats).
+    gpcg_creative_engine_beat_oriented: bool = True
 
     # ── Humanization (V2 — break AI patterns, ensure orality) ────────────────
     # NOTE: full config block is defined below (search for "Humanization (V2
@@ -208,7 +212,9 @@ class Settings(BaseSettings):
     # Master switch for the story_finding stage. When false, the pipeline
     # skips story finding and goes straight to editorial_planning (legacy).
     # See docs/EDITORIAL_REFACTOR_PLAN_V2.md §4.1, Fase 2.
-    gpcg_story_finder_enabled: bool = False
+    # REFACTORY_V2: activated by default (was False — facts went to script
+    # without narrative angle analysis, producing encyclopedic content).
+    gpcg_story_finder_enabled: bool = True
     # Model for the story finder (uses default text model if empty).
     gpcg_story_finder_model: str = ""
     # Temperature for the story finder LLM call.
@@ -225,7 +231,9 @@ class Settings(BaseSettings):
     # Master switch for the humanization stage. When false, the pipeline
     # skips humanization and uses the script as-is (legacy).
     # See docs/EDITORIAL_REFACTOR_PLAN_V2.md §4.3, Fase 4.
-    gpcg_humanization_enabled: bool = False
+    # REFACTORY_V2: activated by default (was False — scripts retained AI
+    # patterns like "você não vai acreditar", uniform rhythm, Curse of Knowledge).
+    gpcg_humanization_enabled: bool = True
     # Model for the humanization pass (uses default text model if empty).
     gpcg_humanization_model: str = ""
     # Temperature for the humanization LLM call.
@@ -249,7 +257,9 @@ class Settings(BaseSettings):
     # When true, uses the V2 critic prompt + dimensions. When false, uses
     # the legacy critic (structure, naturalness, humor, coherence, gameplay,
     # factual_accuracy). See docs/EDITORIAL_REFACTOR_PLAN_V2.md §3.6, Fase 5.
-    gpcg_script_critic_v2_enabled: bool = False
+    # REFACTORY_V2: activated by default (was False — critic used legacy
+    # dimensions without hook_strength, retention, pacing, payoff).
+    gpcg_script_critic_v2_enabled: bool = True
     # V2 critic: overall pass threshold (raised from 70 to 75).
     gpcg_script_critic_v2_pass_threshold: float = 75.0
     # V2 critic: per-dimension floor. Any dimension below this triggers REVISE.
@@ -260,7 +270,19 @@ class Settings(BaseSettings):
     # of the script (hook, development, payoff) separately, producing
     # per-section scores and issues. Falls back to holistic review when off.
     # See docs/EDITORIAL_REFACTOR_PLAN_V2.md §4.5, Fase 5.
-    gpcg_script_critic_section_based: bool = False
+    # REFACTORY_V2: activated by default (was False — critic used holistic
+    # review, missing per-section issues like weak hook or flat payoff).
+    gpcg_script_critic_section_based: bool = True
+    # REFACTORY_V2: target_duration constraint with tolerance.
+    # After script generation, if the estimated narration duration is below
+    # target * (1 - tolerance), a warning is logged. This is a diagnostic,
+    # not a hard gate — short scripts can be legitimate for certain topics.
+    # Tolerance is a fraction (0.3 = 30% below target is acceptable).
+    gpcg_target_duration_tolerance: float = 0.3
+    # REFACTORY_V2: min_chars for scripts. Below this, a warning is logged
+    # (diagnostic, not a hard gate). Previously this was an absolute gate
+    # that blocked legitimate short scripts.
+    gpcg_script_min_chars: int = 200
 
     # ── Worker (Compute Plane) ───────────────────────────────────────────────
     gpcg_worker_poll_interval: int = 5

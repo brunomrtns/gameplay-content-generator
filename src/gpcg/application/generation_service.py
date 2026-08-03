@@ -44,7 +44,7 @@ from gpcg.application.humanization import Humanizer, HumanizationResult
 from gpcg.application.metadata_generator import MetadataGenerator
 from gpcg.application.qa_service import QAService, persist_qa_result
 from gpcg.application.render_plan_builder import RenderPlanBuilder
-from gpcg.application.script_critic import ScriptCritic
+from gpcg.application.script_critic import ScriptCritic, CRITIC_VERDICT_REVISE
 from gpcg.application.script_service import ScriptService
 from gpcg.application.story_finder import StoryFinder
 from gpcg.config import get_settings
@@ -526,6 +526,31 @@ class GenerationService:
             job = session.get(Job, job_id)
             script = session.get(Script, script_id)
             plan = session.get(ContentPlan, script.content_plan_id)
+
+            # REFACTORY_V2: diagnostic checks (warnings, not hard gates)
+            # 1. min_chars — log warning if script is very short
+            script_chars = len(script.final or "")
+            min_chars = self.settings.gpcg_script_min_chars
+            if script_chars < min_chars:
+                log.warning(
+                    f"job #{job_id}: script is {script_chars} chars "
+                    f"(below min_chars={min_chars}). This is a diagnostic "
+                    f"warning, not a gate — short scripts can be legitimate."
+                )
+            # 2. target_duration — estimate narration duration and warn if
+            # below target * (1 - tolerance). Average narration speed ~150 wpm.
+            target_dur = plan.target_duration or self.settings.gpcg_default_target_duration
+            tolerance = self.settings.gpcg_target_duration_tolerance
+            word_count = len((script.final or "").split())
+            estimated_dur = (word_count / 150.0) * 60.0  # 150 wpm → seconds
+            acceptable_dur = target_dur * (1.0 - tolerance)
+            if estimated_dur < acceptable_dur:
+                log.warning(
+                    f"job #{job_id}: estimated narration duration {estimated_dur:.1f}s "
+                    f"is below target {target_dur:.1f}s * (1 - {tolerance:.0%}) "
+                    f"= {acceptable_dur:.1f}s. Words={word_count}. "
+                    f"This is a diagnostic warning, not a gate."
+                )
             # TTS output path
             tts_dir = self.settings.jobs_dir / f"job_{job_id}"
             tts_dir.mkdir(parents=True, exist_ok=True)
@@ -1165,6 +1190,21 @@ class GenerationService:
                 "script_review_final_verdict": reviews[-1]["verdict"] if reviews else "PASS",
             }
             session.flush()
+
+        # REFACTORY_V2: editorial gate — if the final verdict is still REVISE
+        # after exhausting max_revisions, FAIL the job instead of silently
+        # proceeding to TTS with a bad script. This prevents publishing
+        # low-quality content that the critic explicitly flagged as needing
+        # more work.
+        final_verdict = reviews[-1]["verdict"] if reviews else "PASS"
+        if final_verdict == CRITIC_VERDICT_REVISE:
+            raise GenerationError(
+                f"script_review: script still needs revision after "
+                f"{max_revisions} attempts (final verdict=REVISE, "
+                f"score={reviews[-1].get('overall_score', 0):.1f}). "
+                f"Editorial gate blocked TTS to prevent low-quality output.",
+                JobStage.script_review.value,
+            )
 
         return current_script
 
