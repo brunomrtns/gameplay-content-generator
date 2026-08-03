@@ -1350,24 +1350,41 @@ def get_job_data(
 
     # Knowledge items for the game (V2 content intelligence)
     # REFACTORY_V2: filter by visibility (own + shared + public)
-    if job.game_id:
-        try:
-            from gpcg.domain.models import KnowledgeItem
-            from gpcg.domain.visibility import visible_to_user as _ki_vis
-            ki_vis = _ki_vis(KnowledgeItem.user_id, KnowledgeItem.is_public, job.user_id)
-            ki_list = db.query(KnowledgeItem).filter(
-                KnowledgeItem.game_id == job.game_id, ki_vis
-            ).limit(50).all()
-            data["knowledge_items"] = [{
-                "id": ki.id, "user_id": ki.user_id, "game_id": ki.game_id,
-                "source_type": ki.source_type, "title": ki.title,
-                "summary": ki.summary, "content": ki.content,
-                "url": ki.url, "published_at": ki.published_at.isoformat() if ki.published_at else None,
-                "collected_at": ki.collected_at.isoformat() if ki.collected_at else None,
-                "metadata_json": ki.metadata_json,
-            } for ki in ki_list]
-        except Exception:
-            data["knowledge_items"] = []
+    # V2: Also sync general KIs (game_id=None) for curiosity_short
+    try:
+        from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
+        from gpcg.domain.visibility import visible_to_user as _ki_vis
+        ki_vis = _ki_vis(KnowledgeItem.user_id, KnowledgeItem.is_public, job.user_id)
+        ki_query = db.query(KnowledgeItem).filter(
+            KnowledgeItem.status == KnowledgeItemStatus.fresh.value,
+            ki_vis,
+        )
+        if job.game_id:
+            # Game-specific KIs + general KIs (for fallback to curiosity_short)
+            ki_query = ki_query.filter(
+                (KnowledgeItem.game_id == job.game_id) | (KnowledgeItem.game_id.is_(None))
+            )
+        ki_list = ki_query.order_by(KnowledgeItem.editorial_score.desc()).limit(50).all()
+        data["knowledge_items"] = [{
+            "id": ki.id, "user_id": ki.user_id, "game_id": ki.game_id,
+            "is_public": ki.is_public,
+            "source_type": ki.source_type, "title": ki.title,
+            "content": ki.content,
+            "item_type": ki.item_type,
+            "editorial_score": ki.editorial_score,
+            "status": ki.status,
+            "franchise": ki.franchise,
+            "developer": ki.developer,
+            "source_url": ki.source_url,
+            "source_name": ki.source_name,
+            "published_at": ki.published_at.isoformat() if ki.published_at else None,
+            "collected_at": ki.collected_at.isoformat() if ki.collected_at else None,
+            "tags": ki.tags,
+            "content_hash": ki.content_hash,
+        } for ki in ki_list]
+    except Exception as e:
+        log.warning(f"Failed to sync knowledge items: {e}")
+        data["knowledge_items"] = []
 
     # Gameplay sources + events for the game (and general-topic sources)
     sources_query = db.query(GameplaySource).filter(

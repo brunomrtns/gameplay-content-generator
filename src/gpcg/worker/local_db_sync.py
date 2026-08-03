@@ -264,16 +264,23 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
         for ki_data in job_data.get("knowledge_items", []):
             session.add(KnowledgeItem(
                 id=ki_data["id"],
-                user_id=user_id,
+                user_id=ki_data.get("user_id", user_id),
                 game_id=ki_data.get("game_id"),
+                is_public=ki_data.get("is_public", True),
                 source_type=ki_data.get("source_type", "rss"),
                 title=ki_data.get("title", ""),
-                summary=ki_data.get("summary", ""),
                 content=ki_data.get("content", ""),
-                url=ki_data.get("url", ""),
+                item_type=ki_data.get("item_type", "news"),
+                editorial_score=ki_data.get("editorial_score", 0.0),
+                status=ki_data.get("status", "fresh"),
+                franchise=ki_data.get("franchise"),
+                developer=ki_data.get("developer"),
+                source_url=ki_data.get("source_url"),
+                source_name=ki_data.get("source_name"),
                 published_at=ki_data.get("published_at"),
                 collected_at=ki_data.get("collected_at"),
-                metadata_json=ki_data.get("metadata_json", {}),
+                tags=ki_data.get("tags"),
+                content_hash=ki_data.get("content_hash"),
             ))
         session.flush()
 
