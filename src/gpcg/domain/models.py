@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import enum
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -820,7 +821,7 @@ class Job(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
-    job_uuid: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    job_uuid: Mapped[str] = mapped_column(String(36), unique=True, index=True, default=lambda: str(uuid.uuid4()))
     type: Mapped[str] = mapped_column(String(30), default=JobType.generate_short.value, index=True)
     game_id: Mapped[Optional[int]] = mapped_column(ForeignKey("games.id"), nullable=True, index=True)
     content_plan_id: Mapped[Optional[int]] = mapped_column(ForeignKey("content_plans.id"), nullable=True)
