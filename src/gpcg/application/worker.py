@@ -95,6 +95,9 @@ def _requeue_stale_jobs() -> None:
 
     stale_timeout = timedelta(minutes=10)
     now = datetime.now(timezone.utc)
+    # Use naive datetime for SQL comparison (SQLite stores naive datetimes)
+    now_naive = now.replace(tzinfo=None)
+    cutoff_naive = now_naive - stale_timeout
 
     with session_scope() as session:
         # Find stale jobs
@@ -103,15 +106,20 @@ def _requeue_stale_jobs() -> None:
             .where(Job.status == JobStatus.running.value)
             .where(
                 (Job.worker_id.is_(None))
-                | (Job.updated_at < (now - stale_timeout))
+                | (Job.updated_at < cutoff_naive)
             )
         ).scalars().all()
 
         for job in stale:
             # Don't re-queue jobs that the VPS worker is actively processing
             # (VPS worker jobs have worker_id=NULL but updated_at is recent)
-            if job.worker_id is None and job.updated_at and (now - job.updated_at) < stale_timeout:
-                continue
+            if job.worker_id is None and job.updated_at:
+                # Handle both offset-aware and offset-naive datetimes (SQLite)
+                updated = job.updated_at
+                if updated.tzinfo is None:
+                    updated = updated.replace(tzinfo=timezone.utc)
+                if (now - updated) < stale_timeout:
+                    continue
 
             log.warning(
                 f"Re-queuing stale job #{job.id} (type={job.type}, "
