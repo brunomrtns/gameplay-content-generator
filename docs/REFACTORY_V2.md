@@ -908,6 +908,68 @@ Se a história não possui material suficiente para sustentar um vídeo bom, o s
 
 NÃO preencher tempo com enrolação.
 
+## Densidade antes de duração (proibição de padding)
+
+Existe um comportamento que deve ser explicitamente proibido:
+
+**NÃO esticar artificialmente uma ideia pequena para atingir o `target_duration`.**
+
+Já aconteceu de uma ideia que naturalmente sustentaria ~20–25 segundos ser transformada em um roteiro de ~60 segundos através de:
+
+* repetição da mesma informação;
+* reformulação do mesmo ponto;
+* contexto irrelevante;
+* frases de preenchimento;
+* explicações óbvias;
+* introduções longas;
+* conclusão redundante;
+* perguntas retóricas;
+* suspense artificial;
+* CTA usado como preenchimento.
+
+Isso NÃO é enriquecimento editorial.
+
+É **padding**.
+
+O plano deve deixar explícito que:
+
+**o sistema deve adaptar a duração à quantidade de história disponível, e nunca fabricar história para preencher duração.**
+
+## Enriquecer ≠ esticar
+
+Deixe clara a diferença.
+
+### Enriquecer
+
+Adicionar informação factual e editorialmente útil que aprofunda a descoberta:
+
+* contexto;
+* causa;
+* consequência;
+* contraste;
+* origem;
+* impacto;
+* cronologia;
+* implicação;
+* conexão relevante;
+* evidência complementar.
+
+### Esticar
+
+Usar mais palavras para dizer essencialmente a mesma coisa.
+
+Isso deve ser rejeitado.
+
+Toda expansão deve passar por uma pergunta simples:
+
+> "Esta nova informação muda ou aprofunda a compreensão do espectador?"
+
+Se não muda, provavelmente é padding.
+
+A expansão deve aumentar densidade factual ou narrativa.
+
+NÃO apenas número de caracteres.
+
 ## Densidade editorial
 
 Avalie se uma ideia possui DENSIDADE suficiente para virar vídeo.
@@ -941,6 +1003,56 @@ O `StoryFinder` já possui `is_story` e `confidence` que gateiam se um fato tem 
 Reaproveite esses mecanismos antes de criar algo novo.
 
 Se eles estiverem inativos por feature flag, avalie se a ativação resolve parte do problema.
+
+## Capacidade narrativa natural da ideia
+
+Adicione ao pipeline o conceito de **capacidade narrativa natural**.
+
+NÃO precisa necessariamente virar um novo campo, modelo ou serviço.
+
+É um conceito editorial a ser avaliado utilizando os mecanismos existentes.
+
+Uma ideia pode naturalmente sustentar:
+
+* ~25s;
+* ~40s;
+* ~60s;
+* ou mais.
+
+O sistema deve tentar avaliar isso antes de produzir o roteiro final.
+
+Exemplo:
+
+Se uma ideia possui:
+
+* uma única afirmação;
+* pouco contexto;
+* nenhuma consequência relevante;
+* nenhuma progressão;
+* nenhum aprofundamento disponível;
+
+ela provavelmente não sustenta um vídeo de 60 segundos.
+
+Nesse caso, NÃO peça ao LLM para simplesmente "expandir".
+
+O sistema deve reconhecer que existe incompatibilidade entre:
+
+* densidade da história;
+* duração desejada.
+
+### Relação com Story Finder
+
+O `StoryFinder` e os mecanismos editoriais existentes devem ajudar a responder não apenas:
+
+> "Existe uma história aqui?"
+
+mas também:
+
+> "Existe história suficiente aqui para o tipo e duração de vídeo que estamos tentando produzir?"
+
+NÃO crie outro componente se isso puder ser incorporado ou inferido pelos mecanismos existentes.
+
+A intenção é fortalecer o fluxo existente, não redesenhá-lo.
 
 ## Expansão inteligente antes da rejeição
 
@@ -1014,6 +1126,38 @@ Esse comportamento permissivo precisa ser revisado: um roteiro que falha repetid
 
 Se os componentes atuais já possuem campos que permitem avaliar densidade/progressão/payoff, fortaleça seu uso em vez de criar um novo gate paralelo.
 
+### Detecção de padding
+
+Avalie se mecanismos existentes, principalmente `ScriptCritic` e/ou `Humanization`, podem detectar sintomas de padding como:
+
+* mesma afirmação repetida em palavras diferentes;
+* baixa quantidade de novas informações por beat;
+* parágrafos que não alteram a compreensão;
+* redundância semântica;
+* contexto que não contribui para o payoff;
+* conclusão repetindo integralmente a abertura;
+* excesso de transições sem conteúdo;
+* suspense sem nova informação;
+* CTA usado para preencher tempo.
+
+NÃO crie uma nova arquitetura sem necessidade.
+
+Fortaleça os mecanismos existentes.
+
+### Critério por beat
+
+Durante revisão, cada beat deveria justificar sua existência.
+
+Uma pergunta útil:
+
+> "Se eu remover este trecho, a história perde alguma informação, progressão, emoção ou compreensão relevante?"
+
+Se a resposta for não, esse trecho provavelmente é preenchimento.
+
+Isso pode ser usado como princípio de revisão pelo mecanismo existente.
+
+NÃO precisa necessariamente virar uma regra determinística isolada.
+
 ## Duração como sintoma
 
 Use duração como um sinal, não como única regra.
@@ -1034,7 +1178,7 @@ Investigue qual dessas causas está acontecendo atualmente.
 
 NÃO assuma que o problema é simplesmente "LLM escreve pouco".
 
-## target_duration precisa ser respeitado
+## target_duration precisa ser respeitado (constraint com tolerância)
 
 Audite o caminho real de `target_duration`:
 
@@ -1056,11 +1200,46 @@ Se o usuário configurou um target de ~60 segundos, um vídeo de 22 segundos NÃ
 
 Isso NÃO significa preencher 38 segundos com redundância.
 
-Significa que:
+`target_duration` deve representar a duração desejada do produto, mas **não um número rígido exato**.
 
-* ou a história precisa ser enriquecida;
-* ou outra história precisa ser escolhida;
-* ou o sistema deve reconhecer que não possui material suficiente.
+A tolerância real deve ser definida com base na arquitetura/configuração existente.
+
+Mas uma regra deve ficar clara:
+
+**`target_duration` não autoriza o sistema a inventar densidade que a história não possui.**
+
+Quando existir incompatibilidade forte entre a história e o target, o pipeline deve decidir entre:
+
+1. enriquecer a história com informação factual realmente relevante;
+2. buscar contexto/fontes complementares;
+3. encontrar um ângulo editorial melhor;
+4. aceitar duração menor, quando editorialmente apropriado;
+5. rejeitar a ideia e selecionar outra.
+
+Nunca:
+
+> transformar uma história de 20 segundos em uma história de 60 segundos apenas aumentando a quantidade de palavras.
+
+### Relação com `gpcg_narration_min_chars`
+
+Audite mecanismos baseados em comprimento mínimo.
+
+Um `min_chars` NÃO pode fazer o sistema concluir automaticamente:
+
+> roteiro curto = adicione palavras até atingir o mínimo.
+
+Se o roteiro estiver abaixo do mínimo, isso deve ser tratado como sinal de possível:
+
+* pouca substância;
+* história incompleta;
+* seleção ruim;
+* necessidade de pesquisa;
+* necessidade de outro ângulo;
+* incompatibilidade com o target.
+
+Somente depois de encontrar material adicional legítimo o roteiro deve crescer.
+
+`min_chars` deve funcionar como sinal/constraint técnica, **não como incentivo ao padding**.
 
 O `ScriptService` já possui bounds de caracteres (`gpcg_narration_min_chars`, `gpcg_narration_max_chars`) e instrui o LLM a expandir se curto.
 
@@ -1071,6 +1250,57 @@ Esse gap precisa ser corrigido: o bound de caracteres deve ser uma constraint, n
 A validação de duração no `QAService` ocorre APÓS o render e é permissiva (um vídeo de 22s com target 60s passa com score 85).
 
 Isso é tarde demais e permissivo demais.
+
+## Duração curta pode ser correta
+
+NÃO transforme a regra anti-padding no extremo oposto.
+
+Um vídeo de 25–30 segundos pode ser excelente se:
+
+* a história realmente termina ali;
+* possui descoberta;
+* possui progressão suficiente;
+* possui payoff;
+* não está truncado;
+* não existe informação relevante adicional necessária.
+
+O problema NÃO é "vídeo curto".
+
+O problema é:
+
+* vídeo curto porque o pipeline não pesquisou ou desenvolveu o suficiente;
+* ou vídeo longo artificialmente porque uma ideia pequena foi esticada.
+
+O objetivo é encontrar a duração coerente com a história.
+
+## Regra de decisão editorial
+
+Conceitualmente, o fluxo deve buscar:
+
+```
+boa ideia
+→ avaliar capacidade narrativa
+→ pesquisar/enriquecer quando houver substância real
+→ construir história
+→ estimar duração natural
+→ comparar com target
+```
+
+Se houver incompatibilidade forte:
+
+```
+enriquecer legitimamente
+OU
+selecionar outra ideia
+OU
+aceitar duração menor quando editorialmente apropriado
+```
+
+Nunca:
+
+```
+pedir ao LLM para falar mais até atingir o número desejado
+```
 
 ## Pesquisa como matéria-prima
 
@@ -1553,9 +1783,31 @@ Isso se conecta com a seção "Auditabilidade".
 
 ## Gate antes do Story Finding
 
-Considere uma etapa conceitual de validação da matéria-prima antes de ela entrar no Story Finder.
+A validação da matéria-prima ocorre conceitualmente **ANTES** do Story Finder:
+
+```
+fonte online
+→ validação factual/relevância
+→ extração da ideia
+→ Story Finding
+→ narrativa
+→ roteiro
+```
 
 NÃO crie necessariamente um novo serviço se a arquitetura atual já tiver lugar adequado para isso.
+
+O objetivo é evitar que:
+
+* notícia crua;
+* clickbait;
+* matéria promocional;
+* informação incoerente;
+* conteúdo irrelevante;
+* informação não sustentada pela própria fonte
+
+chegue diretamente ao pipeline narrativo apenas porque foi coletado.
+
+A fonte precisa primeiro provar que contém matéria-prima editorial válida.
 
 O comportamento desejado é algo como:
 
@@ -1901,6 +2153,44 @@ Casos de regressão obrigatórios para a seção 7:
 2. A auditoria identifica se a ativação resolve parte dos problemas de qualidade.
 3. A decisão de ativar/desativar é documentada com justificativa.
 
+### Anti-padding
+
+1. Uma ideia possui apenas material factual suficiente para aproximadamente 20–25 segundos.
+2. `target_duration` está configurado para ~60 segundos.
+3. Não existe contexto adicional relevante disponível.
+4. O sistema NÃO gera ~60 segundos através de repetição ou reformulação.
+5. O sistema deve aceitar duração menor (se editorialmente permitido) ou rejeitar a ideia e selecionar outra.
+
+### Enriquecimento legítimo
+
+1. Uma ideia inicialmente sustenta ~25 segundos.
+2. Existem fontes complementares com contexto, consequência e impacto relevantes.
+3. O sistema enriquece a história.
+4. O roteiro cresce naturalmente.
+5. Cada parte adicionada possui nova informação ou progressão real.
+6. Esse caso é considerado enriquecimento válido, não padding.
+
+### Beat sem função
+
+1. Um roteiro possui um trecho que repete informação já estabelecida.
+2. A remoção desse trecho não altera compreensão, progressão, emoção nem payoff.
+3. O mecanismo editorial deve identificar esse trecho como redundante e revisar/remover.
+
+### Target incompatível
+
+1. Uma história completa naturalmente sustenta ~30 segundos.
+2. O target está em ~60 segundos.
+3. Não existe material adicional legítimo.
+4. O pipeline não força expansão.
+5. A decisão deve ser explicitamente aceitar duração menor ou selecionar outra ideia.
+
+### Capacidade narrativa natural
+
+1. Uma ideia possui uma única afirmação, pouco contexto, nenhuma consequência relevante.
+2. O sistema avalia a capacidade narrativa natural.
+3. Reconhece incompatibilidade com o target de ~60s.
+4. NÃO pede ao LLM para simplesmente "expandir".
+
 ## Matéria-prima de fontes online
 
 Casos de regressão obrigatórios para a seção "Notícias, artigos e fontes":
@@ -2101,14 +2391,43 @@ Pegue um conjunto fixo de ideias/fontes e compare:
 Para cada vídeo, registre pelo menos:
 
 * duração planejada;
+* duração natural/estimada da história, quando aplicável;
 * duração final;
 * quantidade de material factual usado;
 * Story Concept (quando `StoryFinder` ativo);
 * descoberta central;
-* progressão;
+* curiosity gap;
 * payoff;
+* evidência factual principal;
+* progressão;
 * avaliação do `ScriptCritic`;
+* se houve enriquecimento;
+* quais informações novas foram adicionadas no enriquecimento;
+* se houve sinais de padding;
 * motivo de aprovação/rejeição.
+
+### Critério qualitativo: "Por que este vídeo merece existir?"
+
+Durante a homologação editorial, para cada vídeo avaliado, registre também:
+
+* qual é a descoberta central;
+* qual é a pergunta/lacuna que sustenta a atenção;
+* qual é o payoff;
+* qual é a evidência factual principal;
+* **por que este vídeo merece existir**;
+* por que ele não é apenas um resumo, curiosidade isolada, tradução de notícia ou conteúdo genérico.
+
+Se não for possível responder claramente:
+
+> "Por que este vídeo merece existir?"
+
+trate isso como sinal de baixa densidade editorial e investigue antes de aprovar.
+
+NÃO transforme isso obrigatoriamente em score numérico.
+
+Pode ser um critério qualitativo de homologação/editorial review.
+
+Se a duração maior foi obtida apenas repetindo conteúdo, o vídeo NÃO deve ser considerado aprovado editorialmente.
 
 NÃO transforme tudo em métricas artificiais.
 
@@ -2133,7 +2452,15 @@ Considere concluída quando for possível demonstrar que:
 * a biblioteca própria do usuário é sempre priorizada sobre gameplays públicas;
 * o fallback configurável pelo usuário (stop / allow_public) é respeitado;
 * vídeos editorialmente subdesenvolvidos (rasos, curtos demais, sem progressão, sem payoff) NÃO chegam ao render;
-* `target_duration` é respeitado como constraint, não apenas como referência no prompt;
+* `target_duration` é respeitado como constraint com tolerância, não como número rígido e não como incentivo ao padding;
+* scripts não forem esticados apenas para atingir `min_chars`;
+* duração maior vier acompanhada de maior substância (não de padding);
+* duração menor puder ser aceita quando a história estiver completa;
+* ideias incompatíveis com o target possam ser rejeitadas;
+* expansão adicione informação/progressão real, não apenas caracteres;
+* cada beat tenha função narrativa/editorial;
+* fontes inválidas sejam filtradas antes do Story Finder;
+* seja possível justificar qualitativamente por que cada vídeo aprovado merece existir;
 * um roteiro que falha repetidamente no `ScriptCritic` não prossegue para render silenciosamente;
 * componentes editoriais inativos são auditados e ativados (ou justificadamente mantidos inativos);
 * fontes online são tratadas como matéria-prima (não roteiro), validadas antes do uso, e não copiadas/traduzidas;
