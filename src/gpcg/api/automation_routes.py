@@ -234,7 +234,7 @@ def get_editorial_data(
     EditorialStrategyService locally (with LLM) and then creates the job
     via POST /api/automation/create-job.
     """
-    from gpcg.domain.models import Fact, KnowledgeChunk, ChannelProfile
+    from gpcg.domain.models import Fact, KnowledgeChunk, KnowledgeItem, KnowledgeItemStatus, ChannelProfile
     from sqlalchemy import select, func, desc
     from datetime import datetime, timezone, timedelta
 
@@ -264,7 +264,20 @@ def get_editorial_data(
         ).scalars().all()
     )
 
-    all_game_ids = {g.id for g, _, _ in games_with_gameplay} | games_with_facts | games_with_chunks
+    # V2: Also include games with KnowledgeItems
+    from gpcg.domain.visibility import visible_to_user
+    ki_vis_all = visible_to_user(KnowledgeItem.user_id, KnowledgeItem.is_public, user_id)
+    games_with_kis = set(
+        db.execute(
+            select(KnowledgeItem.game_id)
+            .where(KnowledgeItem.status == KnowledgeItemStatus.fresh.value)
+            .where(KnowledgeItem.game_id.isnot(None))
+            .where(ki_vis_all)
+            .distinct()
+        ).scalars().all()
+    )
+
+    all_game_ids = {g.id for g, _, _ in games_with_gameplay} | games_with_facts | games_with_chunks | games_with_kis
     inventory = []
     for game_id in all_game_ids:
         game = db.get(Game, game_id)
@@ -310,6 +323,34 @@ def get_editorial_data(
             .where(KnowledgeChunk.user_id == user_id)
             .where(KnowledgeChunk.game_id == game.id)
         ).scalar() or 0
+
+        # V2: KnowledgeItems count for this game
+        from gpcg.domain.visibility import visible_to_user
+        ki_vis = visible_to_user(KnowledgeItem.user_id, KnowledgeItem.is_public, user_id)
+        inv["knowledge_items"] = db.execute(
+            select(func.count(KnowledgeItem.id))
+            .where(
+                KnowledgeItem.status == KnowledgeItemStatus.fresh.value,
+                KnowledgeItem.game_id == game.id,
+                ki_vis,
+            )
+        ).scalar() or 0
+
+        # V2: Include KnowledgeItem summaries for this game
+        game_kis = db.execute(
+            select(KnowledgeItem.id, KnowledgeItem.title, KnowledgeItem.editorial_score)
+            .where(
+                KnowledgeItem.status == KnowledgeItemStatus.fresh.value,
+                KnowledgeItem.game_id == game.id,
+                ki_vis,
+            )
+            .order_by(KnowledgeItem.editorial_score.desc())
+            .limit(5)
+        ).all()
+        inv["knowledge_items_list"] = [
+            {"id": ki.id, "title": ki.title, "editorial_score": ki.editorial_score}
+            for ki in game_kis
+        ]
 
         inv["videos_produced"] = db.execute(
             select(func.count(ContentPlan.id))
@@ -366,10 +407,37 @@ def get_editorial_data(
     except Exception:
         pass
 
+    # 4. V2: General KnowledgeItems (content ideas without game_id)
+    # These can be used for curiosity_short videos with any gameplay as background.
+    from gpcg.domain.visibility import visible_to_user
+    ki_vis = visible_to_user(KnowledgeItem.user_id, KnowledgeItem.is_public, user_id)
+    general_kis = db.execute(
+        select(KnowledgeItem)
+        .where(KnowledgeItem.status == KnowledgeItemStatus.fresh.value)
+        .where(KnowledgeItem.editorial_score >= 20)
+        .where(ki_vis)
+        .order_by(KnowledgeItem.editorial_score.desc())
+        .limit(20)
+    ).scalars().all()
+    general_ideas = [
+        {
+            "id": ki.id,
+            "title": ki.title,
+            "summary": (ki.summary or "")[:300],
+            "item_type": ki.item_type,
+            "editorial_score": ki.editorial_score,
+            "game_id": ki.game_id,
+            "franchise": ki.franchise,
+            "developer": ki.developer,
+        }
+        for ki in general_kis
+    ]
+
     return {
         "inventory": inventory,
         "history": history,
         "channel_context": channel_context,
+        "general_ideas": general_ideas,
     }
 
 
@@ -475,6 +543,21 @@ def create_job_from_decision(
             user_id=req.user_id,
             **subtitle_kwargs,
         )
+        # Store editorial decision in artifacts
+        with session_scope() as s2:
+            j = s2.get(Job, job.id)
+            j.artifacts = {
+                **j.artifacts,
+                "editorial_decision": {
+                    "job_type": req.job_type,
+                    "background_game_id": req.background_game_id,
+                    "fact_id": req.fact_id,
+                    "topic_hint": req.topic_hint,
+                    "reason": req.reason,
+                },
+                "fact_id": req.fact_id,
+            }
+            s2.flush()
     else:
         raise HTTPException(status_code=400, detail="Invalid editorial decision")
 

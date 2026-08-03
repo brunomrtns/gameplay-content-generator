@@ -296,6 +296,16 @@ class ScriptService:
             if fact:
                 fact_text = fact.claim
 
+        # V2: If plan was based on a KnowledgeItem, use its content as source
+        if not fact_text and plan.metadata_json:
+            ki_id = plan.metadata_json.get("knowledge_item_id")
+            if ki_id:
+                from gpcg.domain.models import KnowledgeItem
+                ki = session.get(KnowledgeItem, ki_id)
+                if ki:
+                    # Use summary if available, else title, else content
+                    fact_text = ki.summary or ki.title or (ki.content[:500] if ki.content else "")
+
         llm = self.llm or LLMClient()
         s = self.settings
 

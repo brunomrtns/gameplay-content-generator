@@ -643,6 +643,7 @@ class RemoteWorker:
             inventory = data.get("inventory", [])
             history = data.get("history", {})
             channel_context = data.get("channel_context", "")
+            general_ideas = data.get("general_ideas", [])
 
             if not inventory:
                 log.info(f"No games in inventory for user {user_id}")
@@ -672,28 +673,19 @@ class RemoteWorker:
                 inv.facts_available = inv_data.get("facts_available", 0)
                 inv.facts_unused = inv_data.get("facts_unused", 0)
                 inv.knowledge_chunks = inv_data.get("knowledge_chunks", 0)
+                inv.knowledge_items = inv_data.get("knowledge_items", 0)
                 inv.videos_produced = inv_data.get("videos_produced", 0)
                 inv.recent_topics = inv_data.get("recent_topics", [])
                 inventories.append(inv)
 
             # Use LLM to decide (or heuristic fallback)
-            producible = [g for g in inventories if g.is_producible]
-            if not producible:
-                gameplay_only = [g for g in inventories if g.has_gameplay]
-                if gameplay_only:
-                    producible = gameplay_only
-                else:
-                    log.info(f"No producible games for user {user_id}")
-                    return
-
+            # V2: Pass ALL inventories (not just producible) + general_ideas
+            # so the LLM can also choose curiosity_short with a general idea.
+            # The LLM prompt explains both options clearly.
             try:
-                # REFACTORY_V2: pass `producible` (not `inventories`) to the
-                # LLM so it only chooses from games that have both gameplay
-                # AND knowledge. Previously it passed all inventories, causing
-                # the LLM to pick games with gameplay but no facts (which then
-                # fail at content_planning with "no scored facts").
                 decision = editorial._llm_decision_from_data(
-                    producible, history, channel_context
+                    inventories, history, channel_context,
+                    general_ideas=general_ideas,
                 )
             except Exception as e:
                 log.warning(f"LLM editorial decision failed: {e}, using heuristic")
@@ -703,20 +695,26 @@ class RemoteWorker:
                 log.info(f"Editorial decision not successful: {decision.error}")
                 return
 
-            # Pick a fact for the chosen game (from the inventory data)
+            # Pick a fact or knowledge_item for the chosen game
             if decision.game_id:
                 chosen_inv = next((g for g in inventory if g["game_id"] == decision.game_id), None)
-                if chosen_inv and chosen_inv.get("facts"):
-                    recent_fact_ids = set(history.get("recent_fact_ids", []))
-                    fresh_facts = [f for f in chosen_inv["facts"] if f["id"] not in recent_fact_ids]
-                    if fresh_facts:
-                        decision.fact_id = fresh_facts[0]["id"]
-                    elif chosen_inv["facts"]:
-                        decision.fact_id = chosen_inv["facts"][0]["id"]
+                if chosen_inv:
+                    # V2: Prefer KnowledgeItems if available (content ideas)
+                    ki_list = chosen_inv.get("knowledge_items_list", [])
+                    if ki_list:
+                        decision.fact_id = None  # KI will be picked by ContentPlanningService
+                    elif chosen_inv.get("facts"):
+                        recent_fact_ids = set(history.get("recent_fact_ids", []))
+                        fresh_facts = [f for f in chosen_inv["facts"] if f["id"] not in recent_fact_ids]
+                        if fresh_facts:
+                            decision.fact_id = fresh_facts[0]["id"]
+                        elif chosen_inv["facts"]:
+                            decision.fact_id = chosen_inv["facts"][0]["id"]
 
             log.info(
                 f"Editorial decision for user {user_id}: "
                 f"type={decision.job_type} game_id={decision.game_id} "
+                f"bg_game_id={decision.background_game_id} "
                 f"fact_id={decision.fact_id} reason={decision.reason[:80]}"
             )
 

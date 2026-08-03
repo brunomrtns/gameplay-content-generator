@@ -286,7 +286,55 @@ class ContentPlanningService:
             ).scalars().all()
 
         if not facts:
-            log.warning("no scored general facts available")
+            # V2: No general facts — try KnowledgeItems (content ideas)
+            if self.settings.gpcg_content_intelligence_enabled:
+                ki_vis = visible_to_user(KnowledgeItem.user_id, KnowledgeItem.is_public, user_id)
+                general_kis = list(session.execute(
+                    select(KnowledgeItem)
+                    .where(KnowledgeItem.status == KnowledgeItemStatus.fresh.value)
+                    .where(KnowledgeItem.editorial_score >= self.settings.gpcg_content_min_editorial_score)
+                    .where(ki_vis)
+                    .order_by(KnowledgeItem.editorial_score.desc())
+                    .limit(15)
+                ).scalars().all())
+                if general_kis:
+                    # Use the best KnowledgeItem as the basis for the video
+                    ki = general_kis[0]
+                    plan = ContentPlan(
+                        game_id=None,
+                        background_game_id=background_game_id,
+                        topic=ki.title[:200],
+                        tone="curious",
+                        mood="energetic",
+                        fact_id=None,
+                        user_id=user_id,
+                        scope=ContentScope.general.value,
+                        target_duration=self.settings.gpcg_default_target_duration,
+                        metadata={
+                            "mode": "curiosity_short",
+                            "knowledge_item_id": ki.id,
+                            "source_type": "knowledge_item",
+                            "source_id": ki.id,
+                            "provenance": {
+                                "idea": ki.title,
+                                "source": ki.source_type or "rss",
+                                "facts": [],
+                                "script": None,
+                            },
+                            "background_game_id": background_game_id,
+                            "planning_scope": "general_curiosity",
+                        },
+                    )
+                    session.add(plan)
+                    session.flush()
+                    # Mark KI as used
+                    ki.status = KnowledgeItemStatus.used.value
+                    log.info(
+                        f"content plan #{plan.id} [curiosity] bg='{bg_game.canonical_name}': "
+                        f"KI #{ki.id} '{ki.title[:60]}'"
+                    )
+                    return plan
+            log.warning("no scored general facts or knowledge items available")
             return None
 
         if self.settings.gpcg_curiosity_scoring_enabled:

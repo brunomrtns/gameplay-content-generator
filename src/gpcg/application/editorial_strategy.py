@@ -39,6 +39,8 @@ from gpcg.domain.models import (
     Job,
     JobStatus,
     KnowledgeChunk,
+    KnowledgeItem,
+    KnowledgeItemStatus,
     Video,
 )
 from gpcg.logging import get_logger
@@ -84,6 +86,7 @@ class GameInventory:
     facts_available: int = 0
     facts_unused: int = 0
     knowledge_chunks: int = 0
+    knowledge_items: int = 0
     videos_produced: int = 0
     recent_topics: list[str] = field(default_factory=list)
 
@@ -93,7 +96,7 @@ class GameInventory:
 
     @property
     def has_knowledge(self) -> bool:
-        return self.facts_available > 0 or self.knowledge_chunks > 0
+        return self.facts_available > 0 or self.knowledge_chunks > 0 or self.knowledge_items > 0
 
     @property
     def is_producible(self) -> bool:
@@ -108,6 +111,7 @@ class GameInventory:
             "facts": self.facts_available,
             "unused_facts": self.facts_unused,
             "knowledge_chunks": self.knowledge_chunks,
+            "knowledge_items": self.knowledge_items,
             "videos_already_made": self.videos_produced,
             "recent_topics": self.recent_topics[-5:],
         }
@@ -210,7 +214,18 @@ class EditorialStrategyService:
             ).scalars().all()
         )
 
-        all_game_ids = {g.id for g, _, _ in games_with_gameplay} | games_with_facts | games_with_chunks
+        # V2: Also include games with KnowledgeItems (content ideas)
+        games_with_kis = set(
+            session.execute(
+                select(KnowledgeItem.game_id)
+                .where(KnowledgeItem.status == KnowledgeItemStatus.fresh.value)
+                .where(KnowledgeItem.game_id.isnot(None))
+                .where((KnowledgeItem.user_id == user_id) | (KnowledgeItem.user_id.is_(None)))
+                .distinct()
+            ).scalars().all()
+        )
+
+        all_game_ids = {g.id for g, _, _ in games_with_gameplay} | games_with_facts | games_with_chunks | games_with_kis
         if not all_game_ids:
             return []
 
@@ -257,6 +272,16 @@ class EditorialStrategyService:
                 select(func.count(KnowledgeChunk.id))
                 .where(KnowledgeChunk.user_id == user_id)
                 .where(KnowledgeChunk.game_id == game.id)
+            ).scalar() or 0
+
+            # V2: KnowledgeItems (content ideas from RSS/Wikipedia)
+            inv.knowledge_items = session.execute(
+                select(func.count(KnowledgeItem.id))
+                .where(
+                    KnowledgeItem.status == KnowledgeItemStatus.fresh.value,
+                    KnowledgeItem.game_id == game.id,
+                    ((KnowledgeItem.user_id == user_id) | (KnowledgeItem.user_id.is_(None))),
+                )
             ).scalar() or 0
 
             # History: videos produced for this game
@@ -388,12 +413,18 @@ class EditorialStrategyService:
         inventory: list[GameInventory],
         history: dict,
         channel_context: str = "",
+        general_ideas: list[dict] | None = None,
     ) -> EditorialDecision:
         """Use LLM to make an editorial decision from API-provided data.
 
         This is the headless version of _llm_decision — it doesn't need
         a DB session. The channel_context and history are provided by
         the caller (fetched from the VPS API).
+
+        V2: Now also considers general KnowledgeItems (content ideas without
+        a specific game) for curiosity_short videos. The LLM can choose
+        between a game-specific video (generate_short) or a general curiosity
+        video (curiosity_short) with any of the user's gameplays as background.
         """
         games_info = [g.to_prompt_dict() for g in inventory]
         recent_topics = history.get("recent_topics", [])[:10]
@@ -409,25 +440,56 @@ class EditorialStrategyService:
             ", ".join(recent_game_names) if recent_game_names else "Nenhum"
         )
 
+        # V2: Build general ideas section
+        ideas_section = ""
+        if general_ideas:
+            ideas_json = [
+                {"id": idea["id"], "title": idea["title"], "type": idea.get("item_type", ""),
+                 "score": idea.get("editorial_score", 0)}
+                for idea in general_ideas[:15]
+            ]
+            ideas_section = (
+                f"## Ideias de conteúdo gerais (notícias/curiosidades da indústria)\n"
+                f"Estas ideias podem virar vídeos de curiosidade geral (curiosity_short) "
+                f"com gameplay de qualquer jogo como fundo.\n"
+                f"{json.dumps(ideas_json, indent=2, ensure_ascii=False)}\n\n"
+            )
+
+        # Games available for background gameplay
+        gameplay_games = [g for g in inventory if g.has_gameplay]
+        gameplay_names = [g.game_name for g in gameplay_games]
+
         prompt = (
             f"Você é o editor-chefe de um canal no YouTube. Seu trabalho é decidir "
             f"qual vídeo produzir a seguir.\n\n"
             f"## Perfil do canal\n{channel_context}\n\n"
             f"## Jogos disponíveis (com gameplays e/ou conhecimento)\n"
             f"{json.dumps(games_info, indent=2, ensure_ascii=False)}\n\n"
+            f"{ideas_section}"
             f"## Vídeos já produzidos recentemente (evite repetir)\n"
             f"{json.dumps(recent_topics, ensure_ascii=False) if recent_topics else 'Nenhum vídeo ainda'}\n\n"
             f"## Jogos já usados recentemente (NÃO escolha estes)\n"
             f"{recent_games_str}\n\n"
+            f"## Jogos com gameplay disponível para fundo\n"
+            f"{', '.join(gameplay_names) if gameplay_names else 'Nenhum'}\n\n"
             f"## Sua decisão\n"
-            f"Escolha UM jogo para o próximo vídeo. Priorize:\n"
-            f"1. Jogos que têm gameplays E conhecimento (facts/chunks)\n"
-            f"2. Jogos que NÃO estão na lista de jogos já usados recentemente\n"
-            f"3. Jogos com menos vídeos produzidos (para variar)\n"
-            f"4. Facts não utilizados (unused_facts > 0)\n"
-            f"5. Evite repetir temas dos vídeos recentes\n\n"
+            f"Escolha o próximo vídeo. Você tem DUAS opções:\n\n"
+            f"OPÇÃO A — Vídeo específico de um jogo (generate_short):\n"
+            f"  Escolha um jogo que tenha gameplay E conhecimento (facts/knowledge_items).\n"
+            f"  O vídeo será sobre uma curiosidade DAQUELE jogo.\n\n"
+            f"OPÇÃO B — Vídeo de curiosidade geral (curiosity_short):\n"
+            f"  Escolha uma ideia geral da lista acima. O vídeo será sobre aquela ideia\n"
+            f"  com gameplay de qualquer jogo disponível como fundo.\n"
+            f"  Ideal para notícias da indústria, curiosidades gerais, etc.\n\n"
+            f"Priorize:\n"
+            f"1. Variedade (não repetir jogos/temas já usados)\n"
+            f"2. Ideias com maior editorial_score\n"
+            f"3. Jogos com menos vídeos produzidos\n\n"
             f"Responda em JSON:\n"
-            f'{{"game_name": "nome do jogo", "reason": "por que escolheu este jogo"}}\n'
+            f'{{"format": "generate_short" ou "curiosity_short", '
+            f'"game_name": "nome do jogo (para generate_short)", '
+            f'"idea_id": <id da ideia (para curiosity_short)>, '
+            f'"reason": "por que escolheu"}}\n'
         )
 
         system = (
@@ -438,8 +500,30 @@ class EditorialStrategyService:
 
         data = self.llm.chat_json(system, prompt, temperature=0.7, max_tokens=500)
 
-        chosen_name = (data.get("game_name") or "").strip()
+        chosen_format = (data.get("format") or data.get("job_type") or "generate_short").strip()
         reason = (data.get("reason") or "").strip()
+
+        # Handle curiosity_short (general idea with background gameplay)
+        if chosen_format == "curiosity_short" and data.get("idea_id"):
+            idea_id = int(data["idea_id"])
+            # Pick the game with most gameplay for background
+            if gameplay_games:
+                # Sort by: least videos produced, then most gameplay duration
+                gameplay_games.sort(key=lambda g: (g.videos_produced, -g.total_gameplay_duration))
+                bg_game = gameplay_games[0]
+                return EditorialDecision(
+                    job_type="curiosity_short",
+                    background_game_id=bg_game.game_id,
+                    fact_id=None,
+                    topic_hint=reason,
+                    reason=f"LLM escolheu ideia #{idea_id}: {reason}",
+                )
+            else:
+                log.warning("curiosity_short chosen but no gameplay games available")
+                return self._heuristic_decision(inventory, history)
+
+        # Handle generate_short (game-specific)
+        chosen_name = (data.get("game_name") or "").strip()
 
         # Find the game by name (fuzzy match)
         chosen_game = None

@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     # narration_duration, a single contiguous scene is used. If a gameplay
     # video is shorter than scene_duration, multiple videos are chained.
     # Default 0 = auto (use individual asset durations, legacy behavior).
-    gpcg_scene_duration: float = 0.0
+    gpcg_scene_duration: float = 8.0
     # Video format: "9:16", "16:9", "1:1", "4:5"
     gpcg_video_format: str = "9:16"
     # Subtitle customization (defaults from profile, overridden if non-empty)
