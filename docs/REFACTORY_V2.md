@@ -234,7 +234,58 @@ Não implemente outra análise paralela.
 
 O problema atual NÃO é falta de análise.
 
-É ausência de um controle de utilização em nível de **intervalo temporal** dentro de cada arquivo de gameplay.
+É ausência de um controle de utilização em nível de **intervalo temporal** dentro de cada arquivo de gameplay, **escopado por usuário consumidor**.
+
+## Conceito fundamental: owner, visibilidade e histórico de consumo
+
+NÃO trate "gameplay utilizada" como um estado global.
+
+Existem três conceitos separados que NÃO devem ser confundidos:
+
+1. **Owner da gameplay** — o usuário que fez o upload; ownership nunca é transferido.
+2. **Visibilidade da gameplay** — privada (somente o owner) ou pública (disponível no pool de outros usuários, conforme configuração do consumidor).
+3. **Histórico de consumo por usuário** — quais intervalos cada usuário consumidor já utilizou, escopado por consumidor, não por arquivo.
+
+Exemplo que define o comportamento esperado:
+
+```text
+Gameplay X
+Owner: User A
+Visibility: public
+
+Histórico User A:
+  13:22 → 13:40 usado
+
+Histórico User B:
+  nenhum trecho usado
+
+Resultado:
+  User A deve evitar 13:22 → 13:40
+  User B ainda pode usar 13:22 → 13:40
+```
+
+Portanto, o histórico de utilização é escopado pelo **usuário consumidor**, não globalmente pelo arquivo.
+
+Não imponha previamente uma tabela ou modelo específico.
+
+Primeiro analise os modelos atuais e escolha a representação arquitetural adequada.
+
+Mas o comportamento funcional deve equivaler conceitualmente a:
+
+```text
+consumer_user
+  + gameplay_source
+  + intervalo temporal
+  + estado de utilização
+```
+
+A regra arquitetural que esta seção transmite sem ambiguidade é:
+
+**Gameplay tem owner.
+Gameplay tem visibility.
+Histórico de trechos pertence ao usuário consumidor.
+Material próprio tem prioridade.
+Gameplay pública é fallback configurável.**
 
 ## Conceito central: trecho ≠ arquivo
 
@@ -313,13 +364,102 @@ O formato real deve seguir os modelos existentes.
 
 Isso é necessário tanto para auditabilidade (seção "Auditabilidade") quanto para a liberação opcional de trechos ao excluir vídeos (seção 5b).
 
-### Escopo por usuário
+### Escopo por usuário (histórico por consumidor)
 
 O histórico de utilização deve respeitar o isolamento multiusuário.
 
-O conceito de "trecho já utilizado" deve ser considerado dentro da biblioteca/contexto do usuário correspondente.
+O conceito de "trecho já utilizado" deve ser considerado dentro da biblioteca/contexto do **usuário consumidor** correspondente — não globalmente por arquivo.
 
 Trechos consumidos pelo usuário A não podem influenciar a seleção do usuário B, e nenhum controle de utilização pode criar mistura entre usuários.
+
+Mesmo para uma mesma gameplay pública, cada usuário consumidor mantém histórico independente:
+
+```text
+Gameplay pública X
+
+User A já usou:
+  02:10 → 02:30
+  13:22 → 13:40
+
+User B já usou:
+  05:00 → 05:20
+
+User C nunca usou.
+
+Disponibilidade:
+  A: evitar seus próprios intervalos usados.
+  B: evitar apenas 05:00 → 05:20.
+  C: todo o material elegível permanece inicialmente disponível.
+```
+
+Uso por um usuário NÃO reduz a disponibilidade para outro usuário.
+
+### Gameplay privada
+
+O usuário que fizer upload de uma gameplay pode mantê-la privada.
+
+Gameplay privada:
+
+* pertence ao usuário que fez upload;
+* somente esse usuário pode utilizá-la;
+* nunca deve aparecer no pool de candidatos de outros usuários;
+* deve respeitar normalmente o histórico de trechos daquele usuário.
+
+Valide ownership em todos os pontos relevantes (seleção, download, render, publicação).
+
+### Gameplay pública
+
+O proprietário também pode optar por tornar uma gameplay pública.
+
+Gameplay pública significa que ela pode entrar no pool de gameplays disponíveis para outros usuários da plataforma, conforme as configurações de fallback de cada usuário consumidor.
+
+Mesmo pública:
+
+* continua possuindo owner;
+* não perde ownership;
+* não possui histórico global de consumo;
+* cada usuário consumidor mantém histórico independente;
+* uso por um usuário não reduz a disponibilidade para outro usuário.
+
+Nunca acesse gameplay privada de terceiros.
+
+### Prioridade obrigatória da biblioteca própria
+
+O sistema deve SEMPRE priorizar gameplays pertencentes ao usuário que está gerando o vídeo.
+
+Não escolha gameplay pública de terceiros apenas porque possui score maior.
+
+A lógica deve funcionar conceitualmente assim:
+
+```text
+1. Buscar gameplays próprias elegíveis.
+2. Aplicar histórico daquele usuário.
+3. Aplicar overlap/diversidade/qualidade.
+4. Selecionar material próprio enquanto existir material adequado.
+5. Somente quando a biblioteca própria estiver insuficiente/esgotada:
+   consultar a política de fallback configurada pelo usuário.
+```
+
+Gameplays públicas de terceiros funcionam como fallback/extensão da biblioteca, e não como substituição automática.
+
+### Esgotamento é por usuário
+
+Uma gameplay pública não fica "esgotada para o sistema".
+
+Ela pode estar esgotada para um usuário e completamente nova para outro.
+
+```text
+Gameplay pública com 30 minutos.
+
+User A: já consumiu praticamente todas as regiões elegíveis.
+User B: usou apenas dois intervalos.
+
+Resultado:
+  Para A: gameplay pode estar esgotada.
+  Para B: ainda existe muito material disponível.
+```
+
+Todo cálculo de disponibilidade deve considerar o usuário consumidor.
 
 ### Reserva versus uso efetivo (estados do trecho)
 
@@ -349,13 +489,51 @@ O controle de utilização deve interagir corretamente com o ciclo de vida do jo
 
 Defina explicitamente em qual ponto do pipeline cada transição de estado acontece.
 
-### Concorrência entre jobs
+### Concorrência entre jobs (escopada por consumidor)
 
-Se a arquitetura permitir execuções paralelas (multi-worker ou múltiplos jobs do mesmo usuário), dois jobs concorrentes não devem selecionar simultaneamente exatamente o mesmo intervalo elegível.
+Qualquer mecanismo de reserva deve respeitar o **usuário consumidor**.
 
-A estratégia exata (reserva atômica no banco, lock por `GameplaySource`, particionamento do espaço de busca, ou outra) deve ser decidida com base na arquitetura atual de claim de jobs (`/api/jobs/claim` usa UPDATE condicional atômico — siga o mesmo padrão quando aplicável).
+NÃO implemente lock global da gameplay pública inteira.
 
-O comportamento verificável: dois jobs paralelos que encontram o mesmo melhor segmento não produzem dupla utilização indevida do mesmo intervalo.
+Se houver reserva atômica, lease, lock ou mecanismo equivalente, o escopo precisa permitir que:
+
+* **usuários diferentes** utilizem a mesma região de uma gameplay pública (históricos independentes);
+* **jobs do mesmo usuário** não colidam entre si no mesmo intervalo.
+
+Exemplo permitido (históricos independentes):
+
+```text
+User A / Job 1: Gameplay pública X, 13:22 → 13:40
+User B / Job 1: Gameplay pública X, 13:22 → 13:40
+```
+
+Isso é permitido porque são históricos independentes.
+
+Exemplo que deve ser impedido (mesmo consumidor):
+
+```text
+User A / Job 1: Gameplay pública X, 13:22 → 13:40
+User A / Job 2: Gameplay pública X, 13:22 → 13:40
+```
+
+Dois jobs concorrentes do MESMO usuário não devem reservar o mesmo intervalo.
+
+A estratégia exata (reserva atômica no banco, lock por `(consumer_user, gameplay_source)`, particionamento do espaço de busca, ou outra) deve ser decidida com base na arquitetura atual de claim de jobs (`/api/jobs/claim` usa UPDATE condicional atômico — siga o mesmo padrão quando aplicável).
+
+Comportamentos verificáveis:
+
+* dois jobs paralelos do mesmo usuário que encontram o mesmo melhor segmento não produzem dupla utilização indevida do mesmo intervalo;
+* dois jobs paralelos de usuários diferentes podem utilizar o mesmo intervalo de uma gameplay pública.
+
+Preserve mecanismo de recuperação de reserva em caso de:
+
+* worker crash;
+* timeout;
+* job cancelado;
+* desconexão;
+* retry.
+
+Nenhum trecho deve ficar reservado para sempre por causa de execução abandonada.
 
 ## Overlap
 
@@ -404,19 +582,80 @@ A prioridade é:
 
 > selecionar bons trechos que ainda não tenham sido explorados antes de reutilizar material recente.
 
-### Comportamento de fallback
+### Comportamento de fallback (configurável por usuário)
 
-Se, excepcionalmente, não existir material suficiente (todos os trechos elegíveis já foram utilizados, ou a biblioteca do usuário é pequena), o sistema deve possuir um comportamento **explícito e previsível** em vez de silenciosamente voltar sempre aos mesmos clips.
+Se, excepcionalmente, não existir material próprio suficiente (todos os trechos próprios elegíveis já foram utilizados, ou a biblioteca do usuário é pequena), o sistema deve possuir um comportamento **explícito e previsível** em vez de silenciosamente voltar sempre aos mesmos clips ou usar gameplays públicas sem autorização.
 
-Decida, com base na arquitetura atual, qual deve ser esse fallback.
+O usuário deve poder escolher o comportamento de fallback quando não existirem mais trechos próprios elegíveis suficientes.
 
-Opções aceitáveis (escolha uma e justifique):
+Inclua no `REFACTORY_V2` explicitamente pelo menos duas opções:
 
-* permitir reutilização com penalização progressiva (trechos mais utilizados primeiro);
-* reiniciar o histórico de utilização daquela gameplay de forma controlada e registrada;
+#### Opção A — Parar geração
+
+Se todos os trechos próprios elegíveis forem consumidos:
+
+* não reutilizar silenciosamente material já gasto;
+* não usar gameplay pública;
+* não continuar a automação como se nada tivesse acontecido;
+* interromper/pausar o fluxo da forma mais coerente com a arquitetura atual;
+* registrar claramente que a biblioteca de gameplay própria foi esgotada.
+
+#### Opção B — Permitir gameplays públicas
+
+Se essa opção estiver habilitada:
+
+* primeiro tentar a biblioteca própria;
+* somente quando não houver material próprio adequado, expandir o pool;
+* considerar somente gameplays marcadas como públicas;
+* aplicar o histórico de utilização do **usuário consumidor** sobre essas gameplays;
+* continuar respeitando relevância, qualidade, `interesting_score`, overlap, diversidade e estratégia editorial.
+
+Nunca acessar gameplay privada de terceiros.
+
+#### Fallback dentro do pool (reutilização)
+
+Independentemente da opção acima, se mesmo dentro do pool elegível (próprio ou público) não existir material totalmente novo, o sistema pode — de forma explícita, configurável e testável — adotar uma política de reutilização:
+
+* permitir reutilização com penalização progressiva (trechos menos utilizados primeiro);
+* reiniciar o histórico de utilização daquela gameplay **para aquele usuário consumidor** de forma controlada e registrada (não globalmente por arquivo);
 * falhar o job com mensagem clara de "material insuficiente" para o usuário.
 
+Decida, com base na arquitetura atual, qual política interna de reutilização adotar, e documente.
+
 O fallback escolhido deve ser documentado, configurável quando relevante, e testável.
+
+## Seleção consolidada
+
+A seleção deve funcionar conceitualmente assim:
+
+```text
+1.  Identificar o usuário do job.
+2.  Buscar gameplays pertencentes ao usuário.
+3.  Aplicar o histórico temporal desse usuário.
+4.  Excluir/penalizar overlaps já consumidos.
+5.  Rankear por:
+      - compatibilidade;
+      - estratégia editorial;
+      - semantic relevance;
+      - interesting_score;
+      - visual quality;
+      - diversidade;
+      - disponibilidade.
+6.  Se existir material próprio adequado:
+      usar material próprio.
+7.  Se não existir:
+      consultar a configuração de fallback.
+8.  Se fallback = stop:
+      interromper explicitamente.
+9.  Se fallback = allow_public:
+      expandir o pool para gameplays públicas.
+10. Aplicar novamente o histórico do mesmo usuário consumidor
+    sobre o pool público.
+11. Rankear e selecionar.
+12. Reservar o intervalo de forma segura (escopada por consumidor).
+13. Após render válido:
+    registrar uso efetivo.
+```
 
 ## Objetivo verificável
 
@@ -458,13 +697,31 @@ Excluir o vídeo e liberar a gameplay são **decisões diferentes**.
 Se o usuário excluir o vídeo e optar por **liberar os trechos**:
 
 * o vídeo é removido conforme a política atual de exclusão (arquivo, thumbnail, registro, referências em `Job`/`ContentPlan` quando aplicável);
-* os intervalos associados a ele voltam a ser elegíveis para futuras gerações.
+* os intervalos associados a ele voltam a ser elegíveis para futuras gerações **daquele usuário consumidor**.
 
 Se o usuário excluir o vídeo e optar por **NÃO liberar**:
 
 * o vídeo é removido;
 * aqueles intervalos continuam registrados como utilizados;
 * o sistema continua evitando reutilizá-los no futuro.
+
+## Escopo da liberação (por consumidor)
+
+A liberação afeta **somente o histórico do usuário que gerou aquele vídeo**.
+
+Exemplo:
+
+* User A é dono da gameplay pública.
+* User B gera um vídeo usando essa gameplay.
+* B exclui o vídeo e escolhe liberar os trechos.
+
+Resultado:
+
+* somente o histórico de B é liberado;
+* nada muda no histórico de A;
+* nada muda para User C;
+* a gameplay continua pública;
+* ownership continua sendo de A.
 
 ## Requisitos de implementação
 
@@ -473,6 +730,62 @@ Se o usuário excluir o vídeo e optar por **NÃO liberar**:
 * A exclusão deve respeitar o isolamento multiusuário (somente o dono do vídeo pode excluí-lo);
 * A liberação deve ser idempotente: excluir novamente (ou chamar o endpoint duas vezes) não pode causar efeito colateral;
 * Se o vídeo já tiver sido publicado no YouTube, a exclusão local NÃO deve remover o vídeo do YouTube automaticamente (isso é uma ação separada) — deixe explícito na UI quando aplicável.
+
+# 5c. Visibilidade de gameplay: pública/privada e aceite explícito
+
+Esta seção define o fluxo de tornar uma gameplay pública/privada e o aceite explícito do usuário.
+
+## Publicar gameplay — aceite explícito
+
+Ao tornar uma gameplay pública, o usuário deve passar por um aceite explícito.
+
+NÃO publique gameplays automaticamente.
+
+A UI deve mostrar um modal/termo antes da confirmação.
+
+Evite linguagem juridicamente incorreta como "os direitos da gameplay se tornam públicos".
+
+A intenção correta é conceder/autorizar o uso daquela gameplay dentro dos usos previstos pela plataforma.
+
+A UX deve deixar claro, em linguagem simples, que:
+
+* aquela gameplay poderá ser utilizada pelo sistema na geração de vídeos para outros usuários;
+* o usuário declara possuir os direitos/permissões necessários para disponibilizá-la;
+* tornar a gameplay pública permite uso futuro por outros usuários;
+* mudar a gameplay para privada depois NÃO desfaz usos já ocorridos;
+* o usuário precisa aceitar explicitamente antes da alteração.
+
+A redação jurídica definitiva deve seguir os termos reais da plataforma.
+
+NÃO invente cláusulas legais.
+
+## Persistência do aceite
+
+O aceite para tornar pública deve ser auditável.
+
+Avalie a forma adequada de persistir informações como:
+
+* usuário;
+* gameplay;
+* momento do aceite;
+* versão do termo/política;
+* mudança de visibilidade realizada.
+
+Não imponha modelo novo se a arquitetura atual já permitir representar isso de forma limpa (ex.: `metadata_json`, tabela de auditoria existente, etc.).
+
+## Retornar gameplay pública para privada
+
+Ao tornar uma gameplay privada novamente:
+
+* novos jobs de terceiros deixam de poder selecioná-la;
+* ela deve sair imediatamente dos novos pools públicos;
+* vídeos já gerados/publicados com ela permanecem válidos;
+* o histórico de uso dos consumidores anteriores continua consistente;
+* jobs já em execução/reservas existentes precisam ter comportamento explicitamente definido.
+
+Analise o código e escolha a política mais segura para jobs já em andamento (ex.: permitir concluir a execução atual, ou cancelar e requeue, ou falhar explicitamente).
+
+Documente a política escolhida.
 
 # 6. Repetição editorial
 
@@ -687,7 +1000,7 @@ Verifique se retries podem:
 * consumir conteúdo mais de uma vez incorretamente;
 * alterar configuração;
 * trocar canal;
-* repetir gameplay;
+* repetir gameplay (reutilização duplicada indevida do mesmo intervalo em retry — distinta da liberação legítima após falha, definida na seção 5);
 * criar inconsistência de estado.
 
 Não assuma que existe um problema.
@@ -931,6 +1244,68 @@ Casos de regressão obrigatórios para a seção 5 / 5b:
 2. O sistema executa um novo job.
 3. O comportamento segue o fallback definido (penalização progressiva, reinício controlado, ou falha explícita) — nunca reutilização silenciosa e repetitiva dos mesmos clips.
 
+### Privacidade de gameplay
+
+1. User A envia gameplay privada.
+2. User B gera vídeo.
+3. Gameplay de A nunca aparece no pool de B.
+
+### Gameplay pública como fallback
+
+1. User A torna gameplay pública.
+2. User B possui fallback público habilitado.
+3. Após esgotar material próprio, B pode selecionar gameplay de A.
+
+### Prioridade da biblioteca própria
+
+1. User B ainda possui material próprio adequado.
+2. Existe gameplay pública com score melhor.
+3. Resultado: usar material próprio de B.
+
+### Histórico independente (gameplay pública)
+
+1. User A usa `13:22 → 13:40` de gameplay pública X.
+2. Para A: trecho fica utilizado.
+3. Para B: trecho continua disponível.
+
+### Concorrência do mesmo usuário
+
+1. User A tem dois jobs concorrentes.
+2. Ambos querem `13:22 → 13:40`.
+3. Somente um pode reservar/utilizar o intervalo.
+
+### Concorrência entre usuários (gameplay pública)
+
+1. User A e User B executam jobs simultaneamente.
+2. Ambos escolhem `13:22 → 13:40` de uma gameplay pública.
+3. Ambos podem utilizar (históricos independentes).
+
+### Esgotamento — parar
+
+1. User A esgotou todos os trechos próprios.
+2. Fallback = stop.
+3. Resultado: não reutilizar material gasto, não usar públicas, interromper explicitamente.
+
+### Esgotamento — públicas
+
+1. User A esgotou os trechos próprios.
+2. Fallback = allow_public.
+3. Resultado: sistema passa a procurar gameplay pública.
+
+### Pública → privada
+
+1. User A torna gameplay pública.
+2. User B consegue utilizá-la.
+3. A torna gameplay privada novamente.
+4. Novos jobs de B não podem mais selecioná-la.
+5. Vídeos existentes permanecem consistentes.
+
+### Exclusão com gameplay pública
+
+1. User B usa gameplay pública de A.
+2. B exclui o vídeo e libera os trechos.
+3. Somente o histórico de B é alterado; nada muda para A ou C.
+
 ## Retry/idempotência
 
 Simule falhas em pontos críticos.
@@ -969,6 +1344,10 @@ Considere concluída quando for possível demonstrar que:
 * a direção editorial existente está sendo aplicada;
 * gameplay não dita indevidamente o conteúdo editorial;
 * seleção de gameplay possui diversidade adequada;
+* ownership e visibilidade de gameplay são respeitadas (privada nunca vira pool de terceiros; pública exige aceite explícito);
+* o histórico de trechos é escopado por usuário consumidor (uso por A não bloqueia B);
+* a biblioteca própria do usuário é sempre priorizada sobre gameplays públicas;
+* o fallback configurável pelo usuário (stop / allow_public) é respeitado;
 * retries são seguros;
 * comportamento é rastreável;
 * a arquitetura suporta evolução para múltiplos workers sem depender de estado implícito.
