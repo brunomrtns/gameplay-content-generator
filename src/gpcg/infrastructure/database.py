@@ -138,6 +138,23 @@ def init_db() -> None:
     # Document: file_hash + upload_token for worker download (Control/Compute Plane)
     _ensure_column(engine, "documents", "file_hash", "VARCHAR(64)")
     _ensure_column(engine, "documents", "upload_token", "VARCHAR(64)")
+    # V2: Game Registry Canônico — new columns on games
+    _ensure_column(engine, "games", "slug", "VARCHAR(200)")
+    _ensure_column(engine, "games", "description", "TEXT")
+    _ensure_column(engine, "games", "release_date", "DATETIME")
+    _ensure_column(engine, "games", "developer", "VARCHAR(200)")
+    _ensure_column(engine, "games", "publisher", "VARCHAR(200)")
+    _ensure_column(engine, "games", "franchise", "VARCHAR(200)")
+    _ensure_column(engine, "games", "genres", "JSON")
+    _ensure_column(engine, "games", "themes", "JSON")
+    _ensure_column(engine, "games", "lore_summary", "TEXT")
+    _ensure_column(engine, "games", "external_ids", "JSON")
+    _ensure_column(engine, "games", "enriched_at", "DATETIME")
+    _ensure_column(engine, "games", "enrichment_error", "TEXT")
+    # V2: Video.knowledge_item_id for traceability (D13)
+    _ensure_column(engine, "videos", "knowledge_item_id", "INTEGER")
+    # V2: data migrations (slug generation, aliases JSON → game_aliases, user_id deprecation)
+    _migrate_v2_game_registry(engine)
     # Seed admin user if not exists (linked to BI Identity by email)
     _seed_admin_user()
 
@@ -182,3 +199,122 @@ def _seed_admin_user() -> None:
         session.add(admin)
         session.flush()
         log.info(f"Seeded admin user '{admin_email}' (BI Identity SSO — no local password)")
+
+
+def _migrate_v2_game_registry(engine) -> None:
+    """V2 data migration: generate slugs, migrate JSON aliases to game_aliases table,
+    deprecate user_id on games.
+
+    Idempotent — guarded by metadata_json.schema_migrations flag. Safe to run
+    on every startup. See ARCHITECTURE_V2.md §4.4.
+    """
+    import logging
+    from sqlalchemy import text, inspect
+    from gpcg.domain.models import Game, GameAlias
+    from gpcg.domain.slug_utils import slugify
+
+    log = logging.getLogger(__name__)
+
+    # Check if games table exists (might not on first init)
+    inspector = inspect(engine)
+    if "games" not in inspector.get_table_names():
+        return
+    if "game_aliases" not in inspector.get_table_names():
+        return  # create_all hasn't run yet or failed
+
+    with session_scope() as session:
+        # Check if migration already ran
+        result = session.execute(text(
+            "SELECT value FROM json_each("
+            "(SELECT metadata_json FROM games LIMIT 1)) WHERE key = 'v2_game_registry_migrated'"
+        )).first()
+        # Simpler: check if any game has a slug — if yes, migration ran
+        any_with_slug = session.execute(
+            text("SELECT COUNT(*) FROM games WHERE slug IS NOT NULL")
+        ).scalar()
+        if any_with_slug and any_with_slug > 0:
+            # Migration already ran — just ensure any new games without slug get one
+            games_without_slug = session.execute(
+                text("SELECT id, canonical_name FROM games WHERE slug IS NULL")
+            ).all()
+            for row in games_without_slug:
+                slug = _generate_unique_slug(session, slugify(row[1]))
+                session.execute(
+                    text("UPDATE games SET slug = :slug WHERE id = :id"),
+                    {"slug": slug, "id": row[0]},
+                )
+            return
+
+        # Generate slugs for all existing games
+        games = session.execute(text("SELECT id, canonical_name, aliases, user_id, metadata_json FROM games")).all()
+        for row in games:
+            game_id = row[0]
+            canonical_name = row[1] or f"game-{game_id}"
+            aliases_json = row[2] if row[2] else "[]"
+            user_id = row[3]
+            metadata_json = row[4] if row[4] else "{}"
+
+            # Generate unique slug
+            slug = _generate_unique_slug(session, slugify(canonical_name), exclude_id=game_id)
+            session.execute(
+                text("UPDATE games SET slug = :slug WHERE id = :id"),
+                {"slug": slug, "id": game_id},
+            )
+
+            # Migrate JSON aliases to game_aliases table
+            import json
+            try:
+                aliases = json.loads(aliases_json) if isinstance(aliases_json, str) else (aliases_json or [])
+            except (json.JSONDecodeError, TypeError):
+                aliases = []
+            for alias in aliases:
+                if alias and alias.strip():
+                    # Check if alias already exists for this game
+                    existing = session.execute(
+                        text("SELECT id FROM game_aliases WHERE game_id = :gid AND alias = :alias"),
+                        {"gid": game_id, "alias": alias.strip()},
+                    ).first()
+                    if not existing:
+                        session.execute(
+                            text(
+                                "INSERT INTO game_aliases (game_id, alias, alias_type, source, created_at) "
+                                "VALUES (:gid, :alias, 'alternative', 'migration', datetime('now'))"
+                            ),
+                            {"gid": game_id, "alias": alias.strip()},
+                        )
+
+            # Deprecate user_id: move to metadata_json.legacy_user_id
+            if user_id is not None:
+                try:
+                    meta = json.loads(metadata_json) if isinstance(metadata_json, str) else (metadata_json or {})
+                except (json.JSONDecodeError, TypeError):
+                    meta = {}
+                if "legacy_user_id" not in meta:
+                    meta["legacy_user_id"] = user_id
+                    session.execute(
+                        text("UPDATE games SET user_id = NULL, metadata_json = :meta WHERE id = :id"),
+                        {"meta": json.dumps(meta), "id": game_id},
+                    )
+
+        log.info(f"V2 game registry migration: processed {len(games)} games (slug + aliases + user_id deprecation)")
+
+
+def _generate_unique_slug(session, base_slug: str, exclude_id: int = None) -> str:
+    """Generate a unique slug, appending -2, -3, etc. on collisions."""
+    from sqlalchemy import text
+
+    if not base_slug:
+        base_slug = "game"
+    slug = base_slug
+    suffix = 2
+    while True:
+        params = {"slug": slug}
+        query = "SELECT id FROM games WHERE slug = :slug"
+        if exclude_id is not None:
+            query += " AND id != :exclude"
+            params["exclude"] = exclude_id
+        existing = session.execute(text(query), params).first()
+        if not existing:
+            return slug
+        slug = f"{base_slug}-{suffix}"
+        suffix += 1

@@ -1,8 +1,14 @@
-"""Game resolver — hierarchical game identification in 3 layers.
+"""Game resolver — hierarchical game identification in 3 layers (V2).
 
-L1: Deterministic — filename parsing + alias registry match.
+L1: Deterministic — filename parsing + slug/alias registry match (O(log n)).
 L2: Prior — historical association of capture_source → game.
 L3: VLM — sample frames + gemma3:12b multimodal identification.
+
+V2 changes (ARCHITECTURE_V2.md §6.3):
+- L1 now uses the game_aliases table (indexed on LOWER(alias)) and Game.slug
+  instead of scanning all games and checking JSON aliases.
+- L3 builds the candidate catalog from canonical_name + game_aliases table.
+- The resolver identifies existing games; the GameRegistry decides create/reuse.
 """
 
 from __future__ import annotations
@@ -15,7 +21,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from gpcg.domain.filename_parser import ParsedFilename, parse_filename
-from gpcg.domain.models import Game, GameplaySource, GameResolutionMethod
+from gpcg.domain.models import Game, GameAlias, GameplaySource, GameResolutionMethod
+from gpcg.domain.slug_utils import normalize_name, slugify
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.infrastructure.media import extract_frames
 from gpcg.logging import get_logger
@@ -40,39 +47,62 @@ def _normalize(s: str) -> str:
     return s.lower().strip()
 
 
-def _match_alias(game: Game, candidate: str) -> bool:
-    cand = _normalize(candidate)
-    if _normalize(game.canonical_name) == cand:
-        return True
-    for alias in (game.aliases or []):
-        if _normalize(alias) == cand:
-            return True
-    # Substring match (e.g. "Bully Scholarship Edition" contains "Bully")
-    if cand and len(cand) >= 4:
-        if cand in _normalize(game.canonical_name):
-            return True
-        for alias in (game.aliases or []):
-            if cand in _normalize(alias):
-                return True
-    return False
-
-
 def resolve_l1(parsed: ParsedFilename, session: Session) -> Optional[ResolutionResult]:
-    """Layer 1 — deterministic: filename candidate vs. alias registry."""
+    """Layer 1 — deterministic: filename candidate vs. slug + alias registry.
+
+    V2: Uses indexed lookups (O(log n)) instead of scanning all games.
+    1. Search game_aliases by LOWER(alias) = normalize(candidate)
+    2. Search Game by slug = slugify(candidate)
+    3. Search Game by LOWER(canonical_name) = normalize(candidate)
+    """
     if not parsed.candidate_game or parsed.is_capture_source_only:
         return None
 
     candidate = parsed.candidate_game
-    games = session.execute(select(Game)).scalars().all()
-    for game in games:
-        if _match_alias(game, candidate):
+    normalized = normalize_name(candidate)
+    slug = slugify(candidate)
+
+    # 1. Search game_aliases (indexed on LOWER(alias))
+    alias_row = session.execute(
+        select(GameAlias).where(func.lower(GameAlias.alias) == normalized)
+    ).scalar_one_or_none()
+    if alias_row:
+        game = session.get(Game, alias_row.game_id)
+        if game:
             return ResolutionResult(
                 game_name=game.canonical_name,
                 method=GameResolutionMethod.deterministic.value,
                 confidence=0.95,
                 capture_source=parsed.capture_source,
-                notes=f"matched alias for '{candidate}'",
+                notes=f"matched alias '{candidate}' → game '{game.canonical_name}' (slug={game.slug})",
             )
+
+    # 2. Search by slug (indexed)
+    game = session.execute(
+        select(Game).where(Game.slug == slug)
+    ).scalar_one_or_none()
+    if game:
+        return ResolutionResult(
+            game_name=game.canonical_name,
+            method=GameResolutionMethod.deterministic.value,
+            confidence=0.95,
+            capture_source=parsed.capture_source,
+            notes=f"matched slug '{slug}' → game '{game.canonical_name}'",
+        )
+
+    # 3. Search by canonical_name (case-insensitive)
+    game = session.execute(
+        select(Game).where(func.lower(Game.canonical_name) == normalized)
+    ).scalar_one_or_none()
+    if game:
+        return ResolutionResult(
+            game_name=game.canonical_name,
+            method=GameResolutionMethod.deterministic.value,
+            confidence=0.95,
+            capture_source=parsed.capture_source,
+            notes=f"matched canonical name '{candidate}'",
+        )
+
     return None
 
 
@@ -121,6 +151,7 @@ def resolve_l3(
     """Layer 3 — VLM: sample frames + gemma3:12b identification.
 
     Expensive — only called when L1 and L2 fail.
+    V2: builds candidate catalog from canonical_name + game_aliases table.
     """
     import tempfile
 
@@ -128,9 +159,9 @@ def resolve_l3(
     if candidate_games is None:
         games = session.execute(select(Game)).scalars().all()
         candidate_games = [g.canonical_name for g in games]
-        # Include aliases flattened
-        for g in games:
-            candidate_games.extend(g.aliases or [])
+        # Include aliases from game_aliases table (V2)
+        alias_rows = session.execute(select(GameAlias)).scalars().all()
+        candidate_games.extend(a.alias for a in alias_rows)
 
     catalog_str = ", ".join(candidate_games[:50]) if candidate_games else "(unknown — open set)"
 

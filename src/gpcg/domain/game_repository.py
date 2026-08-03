@@ -1,26 +1,38 @@
-"""Game registry repository — CRUD + alias lookup for games."""
+"""Game registry repository — legacy compatibility wrapper (V2).
+
+This module is kept for backward compatibility with existing imports.
+New code should use `gpcg.domain.game_registry` directly, which
+implements the V2 canonical registry with slug + game_aliases dedup.
+
+See ARCHITECTURE_V2.md §4 (Game Registry Canônico).
+"""
 
 from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from gpcg.domain.game_registry import (
+    add_alias as _add_alias,
+    find_by_name as _find_by_name,
+    find_by_slug,
+    get_aliases,
+    get_or_create as _get_or_create,
+    list_all as _list_all,
+    remove_alias,
+    search,
+)
 from gpcg.domain.models import Game
 
 
 def find_by_name(session: Session, name: str) -> Optional[Game]:
-    """Find a game by canonical name or alias (case-insensitive)."""
-    name_l = name.lower().strip()
-    games = session.execute(select(Game)).scalars().all()
-    for g in games:
-        if g.canonical_name.lower() == name_l:
-            return g
-        for alias in (g.aliases or []):
-            if alias.lower() == name_l:
-                return g
-    return None
+    """Find a game by canonical name, slug, or alias (case-insensitive).
+
+    V2: delegates to game_registry.find_by_name which checks slug,
+    canonical_name, and game_aliases table (in that order).
+    """
+    return _find_by_name(session, name)
 
 
 def get_or_create(
@@ -31,40 +43,21 @@ def get_or_create(
     platforms: Optional[list[str]] = None,
     capture_sources: Optional[list[str]] = None,
 ) -> Game:
-    """Get an existing game by name/alias, or create a new one."""
-    existing = find_by_name(session, canonical_name)
-    if existing:
-        # Merge new aliases/platforms if provided
-        changed = False
-        if aliases:
-            merged = list(set((existing.aliases or []) + aliases))
-            if merged != (existing.aliases or []):
-                existing.aliases = merged
-                changed = True
-        if platforms:
-            merged = list(set((existing.platforms or []) + platforms))
-            if merged != (existing.platforms or []):
-                existing.platforms = merged
-                changed = True
-        if capture_sources:
-            merged = list(set((existing.capture_sources or []) + capture_sources))
-            if merged != (existing.capture_sources or []):
-                existing.capture_sources = merged
-                changed = True
-        if changed:
-            session.flush()
-        return existing
+    """Get an existing game by name/slug/alias, or create a new one.
 
-    game = Game(
-        canonical_name=canonical_name,
-        aliases=aliases or [],
-        platforms=platforms or [],
-        capture_sources=capture_sources or [],
+    V2: delegates to game_registry.get_or_create which implements
+    the canonical dedup algorithm (slug → alias → create).
+    """
+    return _get_or_create(
+        session,
+        canonical_name,
+        aliases=aliases,
+        platforms=platforms,
+        capture_sources=capture_sources,
+        alias_source="legacy",
     )
-    session.add(game)
-    session.flush()
-    return game
 
 
 def list_all(session: Session) -> list[Game]:
-    return list(session.execute(select(Game).order_by(Game.canonical_name)).scalars().all())
+    """List all games ordered by canonical_name."""
+    return _list_all(session)

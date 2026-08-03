@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from gpcg.domain.game_registry import get_aliases
 from gpcg.domain.game_repository import find_by_name, get_or_create, list_all
 from gpcg.domain.game_resolver import (
     ResolutionResult,
@@ -11,7 +12,7 @@ from gpcg.domain.game_resolver import (
     resolve_l2,
 )
 from gpcg.domain.filename_parser import parse_filename
-from gpcg.domain.models import Game, GameplaySource, GameResolutionMethod
+from gpcg.domain.models import Game, GameAlias, GameplaySource, GameResolutionMethod
 from gpcg.infrastructure.database import init_db, session_scope
 
 
@@ -64,8 +65,10 @@ class TestGameRepository:
             get_or_create(s, "Bully", aliases=["Scholarship Edition"])
         with session_scope() as s:
             g = get_or_create(s, "Bully", aliases=["Rockstar Games"])
-            assert "Scholarship Edition" in g.aliases
-            assert "Rockstar Games" in g.aliases
+            # V2: aliases are stored in game_aliases table, not JSON column
+            alias_names = [a.alias for a in get_aliases(s, g.id)]
+            assert "Scholarship Edition" in alias_names
+            assert "Rockstar Games" in alias_names
 
 
 class TestResolveL1:

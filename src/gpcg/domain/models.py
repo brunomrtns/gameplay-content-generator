@@ -34,6 +34,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -113,6 +114,9 @@ class JobType(str, enum.Enum):
     # Control Plane + Compute Plane: mapping is a worker job
     mapping = "mapping"  # analyze a gameplay (download → VLM → ASR → index events)
     knowledge_index = "knowledge_index"  # index a document for RAG (download → OCR → chunk → embed)
+    # V2: enrichment + content intelligence (run on VPS, no GPU)
+    game_enrich = "game_enrich"  # enrich a Game with Wikidata + Wikipedia data
+    content_collect = "content_collect"  # collect external content (RSS) into KnowledgeItems
 
 
 class JobStatus(str, enum.Enum):
@@ -158,6 +162,9 @@ class JobStage(str, enum.Enum):
     confirm_download = "confirm_download"  # verifying checksum, confirming integrity
     mapping = "mapping"  # running GameplayAnalyzer (VLM + ASR + merge + score)
     knowledge_indexing = "knowledge_indexing"  # worker indexing a document (OCR + chunk + embed)
+    # V2: VPS-side stages (no GPU)
+    enrichment = "enrichment"  # fetching Wikidata/Wikipedia + generating lore
+    content_collection = "content_collection"  # collecting RSS + scoring KnowledgeItems
 
 
 class WorkerStatus(str, enum.Enum):
@@ -178,6 +185,46 @@ class WorkerCapability(str, enum.Enum):
     knowledge_index = "knowledge_index"  # document indexing (OCR, chunking, embeddings)
     youtube = "youtube"  # YouTube upload via google-integration
     future_ai = "future_ai"  # reserved for future AI capabilities
+    # V2: VPS-side capabilities (no GPU needed)
+    enrichment = "enrichment"  # game enrichment (Wikidata + Wikipedia + LLM lore)
+    content_intelligence = "content_intelligence"  # RSS collection + scoring
+
+
+class KnowledgeItemType(str, enum.Enum):
+    """Type of content in a KnowledgeItem (V2 content intelligence)."""
+    news = "news"  # current news (RSS, high freshness weight)
+    curiosity = "curiosity"  # evergreen curiosity
+    lore = "lore"  # game narrative/history (Wikipedia)
+    fact = "fact"  # fact from user document (user_doc source)
+
+
+class KnowledgeItemSource(str, enum.Enum):
+    """Source of a KnowledgeItem (V2 content intelligence)."""
+    rss = "rss"
+    wikipedia = "wikipedia"
+    steam = "steam"  # future
+    reddit = "reddit"  # future
+    igdb = "igdb"  # future
+    user_doc = "user_doc"
+
+
+class KnowledgeItemStatus(str, enum.Enum):
+    """Lifecycle status of a KnowledgeItem (V2 content intelligence)."""
+    fresh = "fresh"  # available for content planning
+    used = "used"  # already used in a generated video
+    rejected = "rejected"  # user discarded this idea
+
+
+class ContentScope(str, enum.Enum):
+    """Scope for content intelligence and gameplay selection (V2).
+
+    - game: only the specific game
+    - franchise: games in the same franchise (Game.franchise match)
+    - developer: games by the same developer (Game.developer match)
+    """
+    game = "game"
+    franchise = "franchise"
+    developer = "developer"
 
 
 class GameplayProcessingStatus(str, enum.Enum):
@@ -299,7 +346,7 @@ class Game(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     canonical_name: Mapped[str] = mapped_column(String(200), index=True)
-    aliases: Mapped[list] = mapped_column(JSON, default=list)  # ["Bully", "Bully Scholarship Edition"]
+    aliases: Mapped[list] = mapped_column(JSON, default=list)  # deprecated — game_aliases is source of truth (V2)
     platforms: Mapped[list] = mapped_column(JSON, default=list)  # ["PS2", "PC"]
     capture_sources: Mapped[list] = mapped_column(JSON, default=list)  # ["OBS", "Yuzu"]
     # Camera perspective — drives the GameplayAnalyzer's frame extraction
@@ -313,15 +360,80 @@ class Game(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
+    # ── V2: Canonical identity + enrichment fields ──────────────────────────
+    # Slug is the canonical unique identifier (slugify(canonical_name)).
+    # Generated on creation, never changes (even if canonical_name is edited).
+    slug: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, unique=True, index=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # from Wikipedia
+    release_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # from Wikidata
+    # Canonical names from Wikidata (strings, not FKs — see D1 in ARCHITECTURE_V2.md)
+    developer: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, index=True)
+    publisher: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    franchise: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, index=True)
+    genres: Mapped[list] = mapped_column(JSON, default=list)  # ["action", "adventure", "open-world"]
+    themes: Mapped[list] = mapped_column(JSON, default=list)  # ["school", "rebellion"]
+    lore_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # LLM-generated from Wikipedia
+    external_ids: Mapped[dict] = mapped_column(JSON, default=dict)  # {"wikidata": "Q123", "steam": 123456}
+    enriched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # NULL = not enriched
+    enrichment_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # NULL = no error
+
     sources: Mapped[list["GameplaySource"]] = relationship(back_populates="game", cascade="all, delete-orphan")
     facts: Mapped[list["Fact"]] = relationship(back_populates="game", cascade="all, delete-orphan")
     documents: Mapped[list["Document"]] = relationship(back_populates="game", cascade="all, delete-orphan")
     content_plans: Mapped[list["ContentPlan"]] = relationship(
         back_populates="game", cascade="all, delete-orphan", foreign_keys="ContentPlan.game_id"
     )
+    # V2: aliases as individual rows (indexable, with provenance)
+    alias_rows: Mapped[list["GameAlias"]] = relationship(
+        back_populates="game", cascade="all, delete-orphan", foreign_keys="GameAlias.game_id"
+    )
 
     def __repr__(self) -> str:
         return f"<Game {self.canonical_name}>"
+
+    @property
+    def is_enriched(self) -> bool:
+        """True when enriched_at is set AND no enrichment error (V2)."""
+        return self.enriched_at is not None and self.enrichment_error is None
+
+    @property
+    def enrichment_state(self) -> str:
+        """One of: 'pending', 'enriched', 'error' (V2)."""
+        if self.enrichment_error is not None:
+            return "error"
+        if self.enriched_at is not None:
+            return "enriched"
+        return "pending"
+
+
+class GameAlias(Base):
+    """Individual alias for a Game, indexable and with provenance (V2).
+
+    Replaces the JSON `aliases` column on Game as the source of truth for
+    alias lookups. The JSON column is kept for backward compatibility but
+    is no longer the primary lookup mechanism.
+
+    Provenance (`source`):
+    - "manual": user added via UI/API
+    - "resolver": added by the GameResolver when a filename differs from canonical
+    - "wikidata": added during enrichment (alternative names from Wikidata)
+    """
+    __tablename__ = "game_aliases"
+    __table_args__ = (
+        UniqueConstraint("game_id", "alias", name="uq_game_alias_per_game"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id", ondelete="CASCADE"), nullable=False, index=True)
+    alias: Mapped[str] = mapped_column(String(200), nullable=False)
+    alias_type: Mapped[str] = mapped_column(String(30), default="alternative")  # alternative, abbreviation, etc.
+    source: Mapped[str] = mapped_column(String(50), default="manual")  # manual, resolver, wikidata
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    game: Mapped["Game"] = relationship(back_populates="alias_rows", foreign_keys=[game_id])
+
+    def __repr__(self) -> str:
+        return f"<GameAlias '{self.alias}' → game={self.game_id}>"
 
 
 class GameplaySource(Base):
@@ -773,9 +885,20 @@ class Video(Base):
     youtube_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     youtube_video_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
 
+    # V2: traceability — if the video was based on a KnowledgeItem (external content),
+    # this FK links back to it. NULL = video based on a Fact (legacy) or no specific item.
+    # See D13 in ARCHITECTURE_V2.md — direction is Video→KnowledgeItem (not reverse).
+    knowledge_item_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("knowledge_items.id"), nullable=True, index=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     content_plan: Mapped[Optional["ContentPlan"]] = relationship(back_populates="videos")
+    # V2: link back to KnowledgeItem if video was based on external content
+    knowledge_item: Mapped[Optional["KnowledgeItem"]] = relationship(
+        foreign_keys=[knowledge_item_id], back_populates="videos"
+    )
 
     def __repr__(self) -> str:
         return f"<Video #{self.id} [{self.status}]>"
@@ -895,3 +1018,108 @@ class KnowledgeChunk(Base):
 
     def __repr__(self) -> str:
         return f"<KnowledgeChunk #{self.id} doc={self.document_id} idx={self.chunk_index}>"
+
+
+# ── V2: Content Intelligence + Embeddings ────────────────────────────────────
+
+
+class KnowledgeItem(Base):
+    """External content collected for the idea bank (V2 content intelligence).
+
+    Distinct from Fact (which is user-uploaded document content). KnowledgeItem
+    is exclusively for external content (RSS, Wikipedia, etc.). No mirroring
+    between Fact and KnowledgeItem (D3 in ARCHITECTURE_V2.md) — unification
+    happens at query time in ContentPlanningService.
+
+    Lifecycle: fresh → used (after a video is generated from it) | rejected
+    (user discarded). See D12.
+    """
+    __tablename__ = "knowledge_items"
+    __table_args__ = (
+        UniqueConstraint("content_hash", name="uq_ki_content_hash"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    game_id: Mapped[Optional[int]] = mapped_column(ForeignKey("games.id"), nullable=True, index=True)
+
+    # Identification
+    title: Mapped[str] = mapped_column(String(500))
+    content: Mapped[str] = mapped_column(Text)
+
+    # Classification
+    item_type: Mapped[str] = mapped_column(String(30), default=KnowledgeItemType.news.value, index=True)
+    source_type: Mapped[str] = mapped_column(String(30), default=KnowledgeItemSource.rss.value)
+
+    # Provenance
+    source_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    source_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    # Editorial quality (single score — see D9 in ARCHITECTURE_V2.md)
+    editorial_score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+
+    # Lifecycle state
+    status: Mapped[str] = mapped_column(
+        String(20), default=KnowledgeItemStatus.fresh.value, index=True
+    )
+
+    # Denormalized from Game for filter-without-JOIN (see §7.1)
+    franchise: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, index=True)
+    developer: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, index=True)
+
+    # Metadata
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+
+    # Deduplication: SHA256(normalize(title) + normalize(content[:500]))
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    # Relationship to videos that used this item (D13: Video→KnowledgeItem direction)
+    videos: Mapped[list["Video"]] = relationship(
+        foreign_keys="Video.knowledge_item_id", back_populates="knowledge_item"
+    )
+
+    def __repr__(self) -> str:
+        return f"<KnowledgeItem #{self.id} [{self.item_type}/{self.status}] score={self.editorial_score}>"
+
+
+class KnowledgeItemEmbedding(Base):
+    """Embedding vector for a KnowledgeItem, in a separate table (D4).
+
+    Stored as BLOB (serialized float array). Separate table facilitates
+    migration to pgvector without touching the main knowledge_items schema.
+    """
+    __tablename__ = "knowledge_item_embeddings"
+
+    item_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_items.id", ondelete="CASCADE"), primary_key=True
+    )
+    embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    def __repr__(self) -> str:
+        return f"<KnowledgeItemEmbedding item={self.item_id} model={self.model}>"
+
+
+class GameplayEventEmbedding(Base):
+    """Embedding vector for a GameplayEvent, in a separate table (D4).
+
+    Generated during mapping (worker local, GPU) after the VLM produces
+    event descriptions. Model: nomic-embed-text (Ollama).
+    """
+    __tablename__ = "gameplay_event_embeddings"
+
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("gameplay_events.id", ondelete="CASCADE"), primary_key=True
+    )
+    embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    def __repr__(self) -> str:
+        return f"<GameplayEventEmbedding event={self.event_id} model={self.model}>"
