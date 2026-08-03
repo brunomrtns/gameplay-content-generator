@@ -423,7 +423,7 @@ def get_editorial_data(
         {
             "id": ki.id,
             "title": ki.title,
-            "summary": (ki.summary or "")[:300],
+            "summary": (ki.content or "")[:300],
             "item_type": ki.item_type,
             "editorial_score": ki.editorial_score,
             "game_id": ki.game_id,

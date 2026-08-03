@@ -304,7 +304,7 @@ class ScriptService:
                 ki = session.get(KnowledgeItem, ki_id)
                 if ki:
                     # Use summary if available, else title, else content
-                    fact_text = ki.summary or ki.title or (ki.content[:500] if ki.content else "")
+                    fact_text = ki.content[:500] if ki.content else (ki.title or "")
 
         llm = self.llm or LLMClient()
         s = self.settings
