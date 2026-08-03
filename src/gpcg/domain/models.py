@@ -574,12 +574,20 @@ class GameplayClipUsage(Base):
 
     When a video is deleted with the "release clips" option, the corresponding
     usage records are removed, making those segments available again.
+
+    REFACTORY_V2: ``consumer_user_id`` is the user who consumed this segment
+    (the video owner). This allows per-consumer usage history for public
+    gameplays — user A using a public gameplay segment doesn't block user B
+    from using the same segment.
     """
     __tablename__ = "gameplay_clip_usage"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     video_id: Mapped[int] = mapped_column(ForeignKey("videos.id"), index=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("gameplay_sources.id"), index=True)
+    # REFACTORY_V2: consumer who used this segment (denormalized from Video.user_id
+    # for efficient per-consumer queries without JOIN).
+    consumer_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     start_sec: Mapped[float] = mapped_column(Float, default=0.0)
     end_sec: Mapped[float] = mapped_column(Float, default=0.0)
     duration: Mapped[float] = mapped_column(Float, default=0.0)
@@ -588,7 +596,7 @@ class GameplayClipUsage(Base):
     source: Mapped["GameplaySource"] = relationship(back_populates="clip_usages")
 
     def __repr__(self) -> str:
-        return f"<GameplayClipUsage video={self.video_id} source={self.source_id} [{self.start_sec:.1f}-{self.end_sec:.1f}]>"
+        return f"<GameplayClipUsage video={self.video_id} source={self.source_id} consumer={self.consumer_user_id} [{self.start_sec:.1f}-{self.end_sec:.1f}]>"
 
 
 class GameplayEvent(Base):

@@ -283,11 +283,10 @@ penalização por proximidade temporal (cooldown).
 
 **Causa raiz 18 — Sync de clip_usages entre VPS e worker é por-source, não global.**
 `worker_routes.py:1407-1413`: inclui `clip_usages` por source no payload.
-`local_db_sync.py:249-258`: popula no DB local. **MAS** há um bug crítico
-no local_db_sync: `source_id=cu_data["id"]` (linha 254) deveria ser
-`source_id=cu_data["source_id"]` — está usando o ID do usage como
-source_id. Isso corrompe o vínculo e pode fazer o worker não encontrar
-usos reais.
+`local_db_sync.py:249-258`: popula no DB local. O `source_id` é definido
+como `src_data["id"]` (source do loop externo), o que está correto já que
+o payload filtra clip_usages por source. **Não há bug aqui** (corrigido
+após verificação direta do código — o subagent reportou incorretamente).
 
 ### B.6 Repetição editorial
 
@@ -435,7 +434,7 @@ se artifact crítico estiver ausente, em vez de aplicar default silencioso.
 | **Gameplay — Cooldown** | Tolerância 1s apenas (clip_usage_service.py:50) | Cooldown configurável | Gap | Adicionar `gpcg_gameplay_cooldown_sec` (default 30s); penalizar candidatos dentro de cooldown |
 | **Gameplay — Deleção pendente vs publicado** | Não diferencia (routes.py:1089-1158) | Pendente libera automático; publicado mantém | Gap | Verificar `Video.status` antes de liberar; pendente → `release_clips=True` automático; publicado → perguntar |
 | **Gameplay — Aceite explícito pública** | Toggle direto (routes.py:376-401) | Modal/termo + persistência do aceite | Gap | Adicionar endpoint `POST /gameplays/{id}/request-public` com termo; `PATCH /visibility` exige aceite prévio |
-| **Gameplay — bug local_db_sync** | `source_id=cu_data["id"]` (local_db_sync.py:254) | `source_id=cu_data["source_id"]` | Bug | Corrigir |
+| **Gameplay — bug local_db_sync** | `source_id=src_data["id"]` (local_db_sync.py:254) | Correto (não é bug) | Falso positivo | Nenhuma mudança necessária |
 | **Worker — contratos** | Payload implícito, defaults globais | Payload explícito com user_id, config snapshot | Gap parcial | Garantir que `GET /jobs/{id}/data` inclua `user_id` em todos os sub-payloads; worker não infere user |
 | **QA — validação determinística** | LLM + FFprobe (qa_service.py) | Validar config aplicada (formato, legenda) | Gap | Adicionar checks determinísticos: aspect ratio = config, duração dentro de tolerância |
 | **Retry — idempotência** | Não testado | Retry seguro (não duplica publish, não duplica clip usage) | Gap | Adicionar idempotency keys; testar failure paths |

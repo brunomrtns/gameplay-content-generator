@@ -1412,9 +1412,11 @@ def get_job_data(
             "metadata_json": a.metadata_json,
         } for a in assets]
         # V2: Clip usage records (so worker can avoid reusing segments)
+        # REFACTORY_V2: include consumer_user_id for per-consumer filtering
         clip_usages = db.query(GameplayClipUsage).filter(GameplayClipUsage.source_id == src.id).all()
         src_data["clip_usages"] = [{
             "id": cu.id, "video_id": cu.video_id, "source_id": cu.source_id,
+            "consumer_user_id": cu.consumer_user_id,
             "start_sec": cu.start_sec, "end_sec": cu.end_sec,
             "duration": cu.duration,
         } for cu in clip_usages]

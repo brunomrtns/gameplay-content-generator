@@ -1124,17 +1124,26 @@ def publish_video(
 @router.delete("/videos/{video_id}")
 def delete_video(
     video_id: int,
-    release_clips: bool = Query(False, description="Release gameplay clips used in this video"),
+    release_clips: Optional[bool] = Query(None, description="Release gameplay clips. If omitted, auto-releases for pending videos, keeps for published."),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Delete a video and optionally release its gameplay clips.
 
+    REFACTORY_V2 lifecycle rules:
+    - **Pending video** (not yet published to YouTube): clips are released
+      **automatically** (no need to ask the user). The video never went public,
+      so the segments are free to reuse.
+    - **Published video** (already on YouTube): clips **remain used** by default.
+      Deleting the local record doesn't un-publish the YouTube video, so the
+      segments should stay marked as used. The user can explicitly pass
+      ``release_clips=true`` to override this (future use case).
+
     Args:
         video_id: ID of the video to delete.
-        release_clips: If True, the gameplay segments used in this video
-            are released back to the available pool (can be used in future videos).
-            If False, the clips remain marked as used.
+        release_clips: Explicit override. If None, the behavior depends on
+            video status (auto-release for pending, keep for published).
+            If True, always release. If False, never release.
 
     The video file and thumbnail are also deleted from disk.
     """
@@ -1145,6 +1154,14 @@ def delete_video(
         raise HTTPException(404, "video not found")
     if v.user_id != user.id:
         raise HTTPException(403, "not your video")
+
+    # REFACTORY_V2: determine clip release behavior based on video status
+    is_published = v.status == VideoStatus.published.value
+    if release_clips is None:
+        # Auto: pending → release, published → keep
+        should_release = not is_published
+    else:
+        should_release = release_clips
 
     # Delete video file from disk
     if v.file_path:
@@ -1176,9 +1193,9 @@ def delete_video(
         except Exception as e:
             log.warning(f"failed to delete video by storage_key {v.storage_key}: {e}")
 
-    # Release clip usage if requested
+    # Release clip usage based on lifecycle rules
     clips_released = 0
-    if release_clips:
+    if should_release:
         clips_released = release_clip_usage(db, video_id)
 
     # Delete the video record

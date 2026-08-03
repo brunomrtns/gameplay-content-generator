@@ -247,11 +247,13 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
                     metadata_json=asset_data.get("metadata_json", {}),
                 ))
             # V2: Clip usage records (so GameplaySelector avoids used segments)
+            # REFACTORY_V2: include consumer_user_id for per-consumer filtering
             for cu_data in src_data.get("clip_usages", []):
                 session.add(GameplayClipUsage(
                     id=cu_data["id"],
                     video_id=cu_data.get("video_id"),
                     source_id=src_data["id"],
+                    consumer_user_id=cu_data.get("consumer_user_id"),
                     start_sec=cu_data["start_sec"],
                     end_sec=cu_data["end_sec"],
                     duration=cu_data.get("duration", cu_data["end_sec"] - cu_data["start_sec"]),

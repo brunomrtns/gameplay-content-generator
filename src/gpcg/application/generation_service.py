@@ -559,15 +559,26 @@ class GenerationService:
             video_type = "GENERAL_TOPIC" if is_curiosity else "GAME_RELATED"
             # V2: pass user_id and accept_public for user-scoped selection
             # with public gameplay fallback
+            # REFACTORY_V2: fallback_policy = "stop" | "allow_public"
+            # (backward compat: accept_public_gameplays boolean still works)
             user_id = job.user_id
             accept_public = False
             if user_id is not None:
-                # Check automation config for accept_public_gameplays
+                # Check automation config for fallback policy
                 auto = session.execute(
                     select(Automation).where(Automation.user_id == user_id)
                 ).scalars().first()
                 if auto and isinstance(auto.config, dict):
-                    accept_public = auto.config.get("accept_public_gameplays", False)
+                    # REFACTORY_V2: prefer fallback_policy string, fall back
+                    # to legacy accept_public_gameplays boolean
+                    fallback_policy = auto.config.get("fallback_policy")
+                    if fallback_policy == "allow_public":
+                        accept_public = True
+                    elif fallback_policy == "stop":
+                        accept_public = False
+                    else:
+                        # Legacy boolean field
+                        accept_public = auto.config.get("accept_public_gameplays", False)
             clips = self.gameplay_retriever.retrieve(
                 session, select_game_id, target_duration=narration_dur,
                 creative_plan=creative_plan,
@@ -735,13 +746,17 @@ class GenerationService:
             session.flush()
             persist_qa_result(session, video, qa_result, video_path)
             # V2: Record clip usage to prevent reusing the same gameplay segments
+            # REFACTORY_V2: pass consumer_user_id for per-consumer usage history
             selected_clips = job.artifacts.get("selected_clips", [])
             for clip_info in selected_clips:
                 source_id = clip_info.get("source_id")
                 start = clip_info.get("start", 0.0)
                 end = clip_info.get("end", 0.0)
                 if source_id and end > start:
-                    record_clip_usage(session, video.id, source_id, start, end)
+                    record_clip_usage(
+                        session, video.id, source_id, start, end,
+                        consumer_user_id=job.user_id,
+                    )
             # Update artifacts using the SAME session (avoid nested session_scope → SQLite lock)
             job.artifacts = {**job.artifacts, "video_id": video.id, "qa_passed": qa_result.passed}
             session.flush()

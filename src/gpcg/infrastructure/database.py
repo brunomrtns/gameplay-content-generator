@@ -161,6 +161,9 @@ def init_db() -> None:
     _ensure_column(engine, "facts", "is_public", "BOOLEAN DEFAULT 0")
     _ensure_column(engine, "documents", "is_public", "BOOLEAN DEFAULT 0")
     _ensure_column(engine, "knowledge_items", "is_public", "BOOLEAN DEFAULT 0")
+    # REFACTORY_V2: consumer_user_id on gameplay_clip_usage for per-consumer
+    # usage history (public gameplay: A using a segment doesn't block B).
+    _ensure_column(engine, "gameplay_clip_usage", "consumer_user_id", "INTEGER")
     # V2: gameplay_clip_usage table is created by create_all() above
     # V2: data migrations (slug generation, aliases JSON → game_aliases, user_id deprecation)
     _migrate_v2_game_registry(engine)

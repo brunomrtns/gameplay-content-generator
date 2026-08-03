@@ -96,6 +96,10 @@ class Settings(BaseSettings):
     # applied its own internal defaults when artifacts didn't include them).
     gpcg_transition_type: str = "fade"  # FFmpeg xfade name
     gpcg_transition_duration: float = 0.5  # seconds
+    # REFACTORY_V2: gameplay clip cooldown — segments within N seconds of a
+    # used range are penalized (not blocked) during selection. This prevents
+    # always picking adjacent segments. Overlap > tolerance is still blocked.
+    gpcg_gameplay_cooldown_sec: float = 30.0
 
     # ── Anti-plagiarism ──────────────────────────────────────────────────────
     # Max automatic rewrites when originality score < 70 (n-gram overlap check)

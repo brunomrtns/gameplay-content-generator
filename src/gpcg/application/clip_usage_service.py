@@ -29,17 +29,31 @@ class UsedRange:
     end_sec: float
 
 
-def get_used_ranges(session: Session, source_id: int) -> list[UsedRange]:
+def get_used_ranges(
+    session: Session,
+    source_id: int,
+    *,
+    consumer_user_id: Optional[int] = None,
+) -> list[UsedRange]:
     """Get all used time ranges for a gameplay source (from non-deleted videos).
 
     Since we use cascade delete on the Video → GameplayClipUsage relationship
     (via the delete endpoint), any usage records here belong to active videos.
+
+    REFACTORY_V2: when ``consumer_user_id`` is provided, only returns ranges
+    consumed by that user. This implements per-consumer usage history for
+    public gameplays — user A using a public segment doesn't block user B.
+    When ``consumer_user_id`` is None (legacy/CLI), returns all ranges
+    regardless of consumer (backward compatible).
     """
-    rows = session.execute(
+    stmt = (
         select(GameplayClipUsage.start_sec, GameplayClipUsage.end_sec)
         .where(GameplayClipUsage.source_id == source_id)
-        .order_by(GameplayClipUsage.start_sec)
-    ).all()
+    )
+    if consumer_user_id is not None:
+        stmt = stmt.where(GameplayClipUsage.consumer_user_id == consumer_user_id)
+    stmt = stmt.order_by(GameplayClipUsage.start_sec)
+    rows = session.execute(stmt).all()
     return [UsedRange(start_sec=r[0], end_sec=r[1]) for r in rows]
 
 
@@ -146,11 +160,19 @@ def record_clip_usage(
     source_id: int,
     start_sec: float,
     end_sec: float,
+    *,
+    consumer_user_id: Optional[int] = None,
 ) -> GameplayClipUsage:
-    """Record that a specific time range of a gameplay source was used in a video."""
+    """Record that a specific time range of a gameplay source was used in a video.
+
+    REFACTORY_V2: ``consumer_user_id`` is the user who consumed this segment
+    (the video owner). This allows per-consumer usage history for public
+    gameplays — user A using a public gameplay segment doesn't block user B.
+    """
     usage = GameplayClipUsage(
         video_id=video_id,
         source_id=source_id,
+        consumer_user_id=consumer_user_id,
         start_sec=start_sec,
         end_sec=end_sec,
         duration=end_sec - start_sec,
@@ -159,7 +181,7 @@ def record_clip_usage(
     session.flush()
     log.info(
         f"recorded clip usage: video={video_id} source={source_id} "
-        f"[{start_sec:.1f}s-{end_sec:.1f}s]"
+        f"consumer={consumer_user_id} [{start_sec:.1f}s-{end_sec:.1f}s]"
     )
     return usage
 

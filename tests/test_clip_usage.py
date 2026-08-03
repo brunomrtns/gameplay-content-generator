@@ -309,7 +309,7 @@ class TestClipUsageAvoidance:
             _make_asset(s, src.id, 0, 100.0)
             video = _make_video(s)
             # Mark first 50s as used
-            record_clip_usage(s, video.id, src.id, 0.0, 50.0)
+            record_clip_usage(s, video.id, src.id, 0.0, 50.0, consumer_user_id=1)
             s.flush()
 
         selector = GameplaySelector()

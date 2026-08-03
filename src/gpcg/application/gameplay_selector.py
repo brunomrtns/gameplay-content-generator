@@ -181,13 +181,17 @@ class GameplaySelector:
             return []
 
         # Preload source paths and used ranges
+        # REFACTORY_V2: filter used ranges by consumer_user_id so that public
+        # gameplay usage by user A doesn't block user B from the same segment.
         source_cache: dict[int, GameplaySource] = {}
         used_ranges_cache: dict[int, list] = {}
         for a in assets:
             if a.source_id not in source_cache:
                 src = session.get(GameplaySource, a.source_id)
                 source_cache[a.source_id] = src
-                used_ranges_cache[a.source_id] = get_used_ranges(session, a.source_id)
+                used_ranges_cache[a.source_id] = get_used_ranges(
+                    session, a.source_id, consumer_user_id=user_id,
+                )
 
         if scene_duration > 0:
             clips = self._select_scene_based(
