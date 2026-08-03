@@ -300,16 +300,67 @@ def _process_content_collect_job(job_id: int) -> None:
     """Process a content_collect job — collect RSS + score KnowledgeItems.
 
     V2: runs on the VPS (Control Plane). See ARCHITECTURE_V2.md §7, §13.1.
-    Placeholder — full implementation in Phase 3.
+    Collects RSS for all games with gameplay available, scores new items,
+    and cleans up old news.
     """
-    log.info(f"content_collect job #{job_id}: Phase 3 not yet implemented, marking as completed")
+    from gpcg.application.content_collectors import collect_rss, cleanup_old_news
+    from gpcg.application.knowledge_item_service import score_all_fresh
+    from gpcg.infrastructure.llm import get_llm
+    from gpcg.domain.models import Game, GameplaySource
+    from sqlalchemy import distinct, select as sa_select
+
+    log.info(f"processing content_collect job #{job_id}")
+
+    llm = None
+    try:
+        llm = get_llm()
+    except Exception as e:
+        log.warning(f"LLM init failed for content scoring: {e}")
+
+    total_collected = 0
+    total_scored = 0
+    total_cleaned = 0
+
     with session_scope() as session:
         job = session.get(Job, job_id)
         if not job:
+            log.error(f"content_collect job #{job_id} not found")
             return
-        job.status = JobStatus.completed.value
-        job.completed_at = _utcnow()
-        job.stage = JobStage.done.value
+
+        try:
+            # Get all games that have gameplay sources (only collect for games in use)
+            game_ids = session.execute(
+                sa_select(distinct(GameplaySource.game_id)).where(GameplaySource.game_id.isnot(None))
+            ).scalars().all()
+
+            for game_id in game_ids:
+                count = collect_rss(session, game_id)
+                total_collected += count
+
+            # Score new fresh items
+            if llm:
+                total_scored = score_all_fresh(session, llm, limit=50)
+
+            # Cleanup old news
+            settings = get_settings()
+            total_cleaned = cleanup_old_news(session, days=settings.gpcg_news_retention_days)
+
+            job.status = JobStatus.completed.value
+            job.completed_at = _utcnow()
+            job.stage = JobStage.done.value
+            job.artifacts = {
+                **(job.artifacts or {}),
+                "collected": total_collected,
+                "scored": total_scored,
+                "cleaned": total_cleaned,
+            }
+            log.info(
+                f"content_collect job #{job_id} completed: "
+                f"collected={total_collected}, scored={total_scored}, cleaned={total_cleaned}"
+            )
+        except Exception as e:
+            log.exception(f"content_collect job #{job_id} error: {e}")
+            _fail_job(session, job, str(e))
 
 
 def _fail_job(session, job, error: str) -> None:
