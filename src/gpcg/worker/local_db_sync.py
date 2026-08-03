@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -29,6 +30,16 @@ from sqlalchemy.orm import sessionmaker
 from gpcg.domain.models import Base
 
 log = logging.getLogger(__name__)
+
+
+def _parse_dt(val):
+    """Parse ISO string to datetime, or pass through if already datetime/None."""
+    if val is None or isinstance(val, datetime):
+        return val
+    try:
+        return datetime.fromisoformat(val.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
 
 
 def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Path) -> Optional[str]:
@@ -277,8 +288,8 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
                 developer=ki_data.get("developer"),
                 source_url=ki_data.get("source_url"),
                 source_name=ki_data.get("source_name"),
-                published_at=ki_data.get("published_at"),
-                collected_at=ki_data.get("collected_at"),
+                published_at=_parse_dt(ki_data.get("published_at")),
+                collected_at=_parse_dt(ki_data.get("collected_at")),
                 tags=ki_data.get("tags"),
                 content_hash=ki_data.get("content_hash"),
             ))
