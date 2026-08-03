@@ -15,6 +15,7 @@ Reestruturar e fortalecer o fluxo de geração end-to-end para que:
 * o banco de ideias seja utilizado de forma efetiva;
 * os roteiros parem de cair em assuntos genéricos e repetitivos;
 * gameplays e trechos de gameplay parem de ser reutilizados excessivamente;
+* vídeos editorialmente subdesenvolvidos (rasos, curtos demais, sem densidade, sem progressão) parem de ser produzidos;
 * o pipeline editorial existente passe a produzir conteúdo coerente com a direção editorial já definida no projeto;
 * publicação em conta/canal incorreto seja arquiteturalmente impedida;
 * retries, workers e execuções concorrentes não permitam mistura de contexto;
@@ -801,6 +802,335 @@ Aparecem repetidamente formatos como:
 
 Isso precisa ser analisado em conjunto com a arquitetura editorial existente.
 
+# 7. Qualidade de conteúdo e densidade editorial
+
+Esta seção NÃO substitui a arquitetura editorial existente.
+
+O projeto já passou por uma fase extensa de pesquisa e engenharia editorial baseada em livros, artigos, princípios de retenção, psicologia, narrativa, curiosidade, humanização e revisão crítica.
+
+Já existem documentos, decisões e implementações relacionadas a:
+
+* Editorial Planner;
+* Creative Engine;
+* Script Critic;
+* Story Finder;
+* Humanization;
+* Curiosity Scorer;
+* curiosity gap;
+* familiarity;
+* payoff;
+* narrative beats;
+* retenção;
+* anti-plágio;
+* factualidade;
+* padrões de escrita artificial;
+* metodologia de avaliação editorial.
+
+Esta seção é **auditar o que já existe, preservar o que está correto e acrescentar mecanismos para evitar vídeos fracos, rasos, curtos demais ou sem densidade editorial.**
+
+A regra é: **preservar → auditar → identificar gaps → acrescentar.**
+
+NÃO crie um segundo Story Finder, outro Script Critic ou outro Creative Engine se os existentes puderem ser fortalecidos.
+
+## Problema observado em homologação
+
+Mesmo com toda a estrutura editorial, alguns vídeos ainda estão saindo:
+
+* curtos demais (20–30 segundos quando o conteúdo poderia sustentar muito mais);
+* com pouca substância;
+* com assunto fraco;
+* parecendo apenas uma observação rápida;
+* sem desenvolvimento;
+* sem aprofundamento;
+* sem descoberta real;
+* sem payoff forte.
+
+Quero que exista diferença entre:
+
+**um vídeo tecnicamente gerável**
+
+e
+
+**um vídeo que realmente vale a pena publicar.**
+
+## Estado real do pipeline editorial (auditar antes de modificar)
+
+ANTES de propor mudanças, audite o estado real do código.
+
+No mínimo, examine:
+
+* `EditorialPlanner` (`src/gpcg/application/editorial_planner.py`);
+* `ScriptCritic` (`src/gpcg/application/script_critic.py`);
+* `StoryFinder` (`src/gpcg/application/story_finder.py`);
+* `Humanization` (`src/gpcg/application/humanization.py`);
+* `CuriosityScorer` (`src/gpcg/application/curiosity_scorer.py`);
+* `CreativeEngine` (`src/gpcg/application/creative_engine.py`);
+* `ScriptService` (`src/gpcg/application/script_service.py`);
+* `ContentPlanningService` (`src/gpcg/application/content_planning_service.py`);
+* `GenerationService` (`src/gpcg/application/generation_service.py`);
+* `QAService` (`src/gpcg/application/qa_service.py`);
+* as feature flags em `config.py` que gateiam cada componente.
+
+Para cada componente, determine:
+
+1. o que já foi implementado;
+2. se está ativo ou inativo por feature flag;
+3. se já resolve os problemas de qualidade;
+4. o que está falhando na prática;
+5. quais gaps permanecem.
+
+Muitos componentes editoriais já implementados podem estar **inativos por feature flag**.
+
+Antes de criar qualquer mecanismo novo, avalie se o problema é ausência de implementação ou simplesmente ausência de ativação.
+
+## Não otimizar para duração mínima
+
+NÃO crie artificialmente uma regra do tipo "todo vídeo precisa ter 60 segundos".
+
+Isso seria errado.
+
+Existem histórias excelentes que funcionam em 35 ou 40 segundos.
+
+O problema é diferente:
+
+**o sistema não deve produzir vídeos de 20–25 segundos simplesmente porque encontrou um fato pequeno e conseguiu transformá-lo em algumas frases.**
+
+A duração deve ser consequência da quantidade de substância editorial disponível.
+
+Se a história não possui material suficiente para sustentar um vídeo bom, o sistema deve considerar:
+
+* aprofundar a pesquisa;
+* buscar contexto adicional nas fontes;
+* buscar fatos relacionados;
+* enriquecer a narrativa;
+* encontrar outro ângulo;
+* ou rejeitar aquela ideia.
+
+NÃO preencher tempo com enrolação.
+
+## Densidade editorial
+
+Avalie se uma ideia possui DENSIDADE suficiente para virar vídeo.
+
+NÃO necessariamente como um novo campo/modelo — primeiro analise o que já existe.
+
+A decisão deveria considerar conceitos como:
+
+* existe uma descoberta clara?
+* existe contexto suficiente?
+* existe desenvolvimento?
+* existem consequências ou implicações?
+* existe algo novo sendo aprendido ao longo do vídeo?
+* existe progressão?
+* existe payoff?
+* existe material factual suficiente para sustentar a narrativa?
+* existe profundidade suficiente para justificar o vídeo?
+
+Um conteúdo que só sustenta:
+
+```
+hook → fato → fim
+```
+
+provavelmente não deveria virar vídeo.
+
+O `CuriosityScorer` já possui um sub-score `retention_potential` que avalia se o fato sustenta ~60s.
+
+O `StoryFinder` já possui `is_story` e `confidence` que gateiam se um fato tem potencial narrativo.
+
+Reaproveite esses mecanismos antes de criar algo novo.
+
+Se eles estiverem inativos por feature flag, avalie se a ativação resolve parte do problema.
+
+## Expansão inteligente antes da rejeição
+
+Se uma ideia é boa, mas possui pouco material isoladamente, o sistema deve tentar enriquecê-la antes de desistir.
+
+Hoje o `StoryFinder` rejeita fatos sem história (`is_story=false`) e tenta outro fato.
+
+NÃO existe mecanismo de "enriquecer este fato antes de rejeitá-lo".
+
+Dependendo da arquitetura existente, isso pode envolver:
+
+* recuperar mais informações da fonte original;
+* utilizar informações relacionadas já persistidas;
+* buscar fatos complementares;
+* conectar o evento ao contexto histórico;
+* explicar por que aquilo importa;
+* mostrar consequência;
+* mostrar contraste;
+* mostrar origem;
+* mostrar impacto;
+* conectar com algo familiar ao público.
+
+Mas isso deve continuar respeitando:
+
+* factualidade;
+* anti-plágio;
+* qualidade das fontes;
+* direção editorial existente.
+
+NÃO invente informação para preencher duração.
+
+## Progressão editorial
+
+Um vídeo forte não deveria ser:
+
+```
+hook → resposta → CTA
+```
+
+Deve existir progressão editorial real.
+
+O `VideoCreativePlan` já define `narrative_beats` (hook → context → development → escalation → payoff → conclusion).
+
+NÃO imponha uma fórmula rígida, mas avalie se o roteiro realmente executa os beats planejados.
+
+O espectador deve sentir que aprendeu/descobriu mais ao longo do vídeo.
+
+Se o `EditorialPlanner` planejou 6 beats mas o `ScriptService` gerou um roteiro que só executa hook + fato + fim, existe um gap entre planejamento e execução que precisa ser corrigido.
+
+## Gate editorial antes de TTS/render
+
+Inclua um gate editorial antes de TTS/render.
+
+O objetivo é impedir que um roteiro seja renderizado apenas porque:
+
+* passou anti-plágio;
+* tem português correto;
+* tem começo/meio/fim;
+* cabe na duração;
+* não contém erros factuais óbvios.
+
+O gate precisa considerar se o roteiro realmente possui valor editorial.
+
+Reaproveite o `ScriptCritic`, `StoryFinder`, `Humanization`, `CuriosityScorer` e outras estruturas existentes antes de criar algo novo.
+
+Hoje o `ScriptCritic` avalia 6 dimensões (structure, naturalness, humor, coherence, gameplay, factual_accuracy) e produz veredito PASS/REVISE.
+
+MAS após 3 revisões sem sucesso, o pipeline prossegue com o roteiro mesmo assim.
+
+Esse comportamento permissivo precisa ser revisado: um roteiro que falha repetidamente no critic não deveria chegar ao render como se nada tivesse acontecido.
+
+Se os componentes atuais já possuem campos que permitem avaliar densidade/progressão/payoff, fortaleça seu uso em vez de criar um novo gate paralelo.
+
+## Duração como sintoma
+
+Use duração como um sinal, não como única regra.
+
+Um vídeo inesperadamente curto pode indicar:
+
+* fato raso;
+* Story Concept pobre (ou `StoryFinder` inativo);
+* pouca pesquisa;
+* narrativa incompleta;
+* `ScriptService` resumindo demais;
+* configuração incorreta de `target_duration`;
+* TTS encurtando;
+* conteúdo sendo truncado;
+* outro bug de pipeline.
+
+Investigue qual dessas causas está acontecendo atualmente.
+
+NÃO assuma que o problema é simplesmente "LLM escreve pouco".
+
+## target_duration precisa ser respeitado
+
+Audite o caminho real de `target_duration`:
+
+```
+UI/configuração
+→ job
+→ content planning
+→ editorial planning
+→ script
+→ TTS
+→ duração real
+```
+
+Hoje `target_duration` é apenas uma referência no prompt do LLM.
+
+NÃO existe validação que impeça um script curto de prosseguir.
+
+Se o usuário configurou um target de ~60 segundos, um vídeo de 22 segundos NÃO deveria ser considerado normal sem uma justificativa editorial clara.
+
+Isso NÃO significa preencher 38 segundos com redundância.
+
+Significa que:
+
+* ou a história precisa ser enriquecida;
+* ou outra história precisa ser escolhida;
+* ou o sistema deve reconhecer que não possui material suficiente.
+
+O `ScriptService` já possui bounds de caracteres (`gpcg_narration_min_chars`, `gpcg_narration_max_chars`) e instrui o LLM a expandir se curto.
+
+MAS se o LLM ignorar e retornar um script curto, não há gate que impeça o prosseguimento.
+
+Esse gap precisa ser corrigido: o bound de caracteres deve ser uma constraint, não apenas uma sugestão.
+
+A validação de duração no `QAService` ocorre APÓS o render e é permissiva (um vídeo de 22s com target 60s passa com score 85).
+
+Isso é tarde demais e permissivo demais.
+
+## Pesquisa como matéria-prima
+
+O projeto já possui coleta de fontes, notícias, artigos e banco de ideias.
+
+Use isso para criar conteúdo rico.
+
+Uma notícia não deve ser resumida em três frases.
+
+Uma fonte pode conter:
+
+* contexto;
+* causa;
+* consequência;
+* comparação;
+* histórico;
+* personagens;
+* números;
+* mudança de cenário;
+* implicações.
+
+O pipeline editorial deve conseguir encontrar a história dentro desse material.
+
+NÃO necessariamente usar tudo.
+
+Usar o que fortalece a descoberta.
+
+## Não voltar para conteúdo genérico
+
+Fortalecer profundidade NÃO significa voltar para formatos como:
+
+* "5 curiosidades";
+* "3 coisas que você não sabia";
+* "segredos de X";
+* "você sabia?";
+* listas genéricas.
+
+A arquitetura editorial existente já possui princípios melhores do que isso.
+
+Preserve-os.
+
+## Critério de publicação
+
+Um vídeo só deve avançar para produção quando houver confiança suficiente de que:
+
+* existe uma história;
+* existe uma descoberta;
+* existe substância;
+* existe progressão;
+* existe payoff;
+* existe material factual;
+* existe duração coerente com a história;
+* o roteiro não parece apenas um fato expandido artificialmente.
+
+Se não houver:
+
+**melhor escolher outra ideia do que publicar conteúdo fraco.**
+
+Isso é coerente com o manifesto editorial existente: "melhor não fazer um vídeo do que fazer um vídeo que não provoca nada".
+
 # Direção editorial existente
 
 NÃO invente uma nova filosofia editorial.
@@ -1049,7 +1379,7 @@ Leia, no mínimo:
 * docs/EDITORIAL_PRINCIPLES.md;
 * docs/EDITORIAL_RESEARCH_JOURNAL.md;
 * docs/EDITORIAL_CONSOLIDATION_REPORT.md;
-* docs/EDITORIAL_EVALUATION_METHODOLOGY.md.
+* docs/EDITORIAL_EVALUATION.md.
 
 Depois mapeie no código o caminho completo:
 
@@ -1186,6 +1516,57 @@ Execute múltiplas gerações com material suficiente.
 Verifique que o sistema não cai sistematicamente no mesmo assunto/estrutura quando há alternativas adequadas.
 
 Não dependa somente de teste literal de string.
+
+## Qualidade de conteúdo e densidade editorial
+
+Casos de regressão obrigatórios para a seção 7:
+
+### Densidade editorial — rejeição de conteúdo raso
+
+1. Uma ideia/fato possui material muito raso (só sustenta hook → fato → fim).
+2. O sistema avalia a densidade.
+3. O vídeo NÃO é produzido apenas porque passou anti-plágio e tem português correto.
+4. O sistema tenta enriquecer ou escolhe outra ideia.
+
+### Duração coerente com target
+
+1. `target_duration` configurado para ~60 segundos.
+2. O roteiro gerado produziria ~22 segundos de narração.
+3. O sistema NÃO prossegue silenciosamente para TTS/render sem justificativa editorial.
+4. O sistema tenta enriquecer o roteiro, escolhe outra ideia, ou falha explicitamente.
+
+### Gate editorial antes de render
+
+1. Um roteiro passa anti-plágio e tem português correto.
+2. Mas possui baixa densidade editorial (sem progressão, sem payoff, sem desenvolvimento).
+3. O gate editorial bloqueia o prosseguimento para TTS/render.
+4. O roteiro é revisado, enriquecido ou rejeitado.
+
+### ScriptCritic — falha persistente
+
+1. O `ScriptCritic` retorna REVISE após o máximo de revisões.
+2. O pipeline NÃO prossegue com o roteiro como se nada tivesse acontecido.
+3. O comportamento é explícito (rejeitar, escalar, ou marcar como falha editorial).
+
+### Progressão editorial
+
+1. O `EditorialPlanner` planeja 6 narrative_beats.
+2. O roteiro gerado executa apenas hook + fato + fim.
+3. O sistema detecta o gap entre planejamento e execução.
+4. O roteiro é revisado ou rejeitado.
+
+### Expansão antes da rejeição
+
+1. Uma ideia é boa mas possui pouco material isoladamente.
+2. O sistema tenta enriquecer (contexto, consequência, contraste, impacto).
+3. Se enriquecida com sucesso, o vídeo prosome.
+4. Se não enriquecível, a ideia é rejeitada — não preenchida com enrolação.
+
+### Componentes inativos
+
+1. `StoryFinder`, `Humanization`, `CuriosityScorer`, `CreativeEngine` estão implementados mas inativos.
+2. A auditoria identifica se a ativação resolve parte dos problemas de qualidade.
+3. A decisão de ativar/desativar é documentada com justificativa.
 
 ## Diversidade de gameplay (controle por intervalo temporal)
 
@@ -1330,6 +1711,31 @@ Gere casos suficientes para verificar:
 
 Compare o resultado produzido com a configuração solicitada.
 
+## Homologação editorial
+
+Além dos testes automatizados, execute uma etapa de homologação editorial.
+
+Pegue um conjunto fixo de ideias/fontes e compare:
+
+* pipeline atual;
+* pipeline após as melhorias.
+
+Para cada vídeo, registre pelo menos:
+
+* duração planejada;
+* duração final;
+* quantidade de material factual usado;
+* Story Concept (quando `StoryFinder` ativo);
+* descoberta central;
+* progressão;
+* payoff;
+* avaliação do `ScriptCritic`;
+* motivo de aprovação/rejeição.
+
+NÃO transforme tudo em métricas artificiais.
+
+Use também a metodologia editorial já existente no projeto (`docs/EDITORIAL_EVALUATION.md`).
+
 # Critério de conclusão
 
 Não considere a tarefa concluída porque “os testes passam”.
@@ -1348,6 +1754,10 @@ Considere concluída quando for possível demonstrar que:
 * o histórico de trechos é escopado por usuário consumidor (uso por A não bloqueia B);
 * a biblioteca própria do usuário é sempre priorizada sobre gameplays públicas;
 * o fallback configurável pelo usuário (stop / allow_public) é respeitado;
+* vídeos editorialmente subdesenvolvidos (rasos, curtos demais, sem progressão, sem payoff) NÃO chegam ao render;
+* `target_duration` é respeitado como constraint, não apenas como referência no prompt;
+* um roteiro que falha repetidamente no `ScriptCritic` não prossegue para render silenciosamente;
+* componentes editoriais inativos são auditados e ativados (ou justificadamente mantidos inativos);
 * retries são seguros;
 * comportamento é rastreável;
 * a arquitetura suporta evolução para múltiplos workers sem depender de estado implícito.
