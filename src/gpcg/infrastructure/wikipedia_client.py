@@ -20,7 +20,7 @@ log = get_logger(__name__)
 
 WIKIPEDIA_API_URL = "https://en.wikipedia.org/w/api.php"
 WIKIPEDIA_REST_URL = "https://en.wikipedia.org/api/rest_v1"
-USER_AGENT = "GPCG/2.0 (gameplay-content-generator; contact@example.com)"
+USER_AGENT = "GPCG/2.0 (gameplay-content-generator; brunointegrationsgaming@gmail.com)"
 REQUEST_TIMEOUT = 30.0
 
 

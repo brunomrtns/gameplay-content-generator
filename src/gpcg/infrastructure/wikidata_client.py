@@ -22,7 +22,7 @@ log = get_logger(__name__)
 WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
 WIKIDATA_API_URL = "https://www.wikidata.org/w/api.php"
 WIKIDATA_REST_URL = "https://www.wikidata.org/wiki/Special:EntityData"
-USER_AGENT = "GPCG/2.0 (gameplay-content-generator; contact@example.com)"
+USER_AGENT = "GPCG/2.0 (gameplay-content-generator; brunointegrationsgaming@gmail.com)"
 REQUEST_TIMEOUT = 30.0
 
 
