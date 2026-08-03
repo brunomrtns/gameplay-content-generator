@@ -383,6 +383,73 @@ class EditorialStrategyService:
             reason=f"LLM escolheu {chosen_game.game_name}: {reason}",
         )
 
+    def _llm_decision_from_data(
+        self,
+        inventory: list[GameInventory],
+        history: dict,
+        channel_context: str = "",
+    ) -> EditorialDecision:
+        """Use LLM to make an editorial decision from API-provided data.
+
+        This is the headless version of _llm_decision — it doesn't need
+        a DB session. The channel_context and history are provided by
+        the caller (fetched from the VPS API).
+        """
+        games_info = [g.to_prompt_dict() for g in inventory]
+        recent_topics = history.get("recent_topics", [])[:10]
+
+        prompt = (
+            f"Você é o editor-chefe de um canal no YouTube. Seu trabalho é decidir "
+            f"qual vídeo produzir a seguir.\n\n"
+            f"## Perfil do canal\n{channel_context}\n\n"
+            f"## Jogos disponíveis (com gameplays e/ou conhecimento)\n"
+            f"{json.dumps(games_info, indent=2, ensure_ascii=False)}\n\n"
+            f"## Vídeos já produzidos recentemente (evite repetir)\n"
+            f"{json.dumps(recent_topics, ensure_ascii=False) if recent_topics else 'Nenhum vídeo ainda'}\n\n"
+            f"## Sua decisão\n"
+            f"Escolha UM jogo para o próximo vídeo. Priorize:\n"
+            f"1. Jogos que têm gameplays E conhecimento (facts/chunks)\n"
+            f"2. Jogos com menos vídeos produzidos (para variar)\n"
+            f"3. Facts não utilizados (unused_facts > 0)\n"
+            f"4. Evite repetir temas dos vídeos recentes\n\n"
+            f"Responda em JSON:\n"
+            f'{{"game_name": "nome do jogo", "reason": "por que escolheu este jogo"}}\n'
+        )
+
+        system = (
+            "Você é um editor de canal do YouTube especializado em games. "
+            "Você decide o conteúdo de forma autônoma, maximizando variedade "
+            "e qualidade. Responda sempre em JSON válido."
+        )
+
+        data = self.llm.chat_json(system, prompt, temperature=0.7, max_tokens=500)
+
+        chosen_name = (data.get("game_name") or "").strip()
+        reason = (data.get("reason") or "").strip()
+
+        # Find the game by name (fuzzy match)
+        chosen_game = None
+        for inv in inventory:
+            if inv.game_name.lower() == chosen_name.lower():
+                chosen_game = inv
+                break
+        if not chosen_game:
+            for inv in inventory:
+                if chosen_name.lower() in inv.game_name.lower() or inv.game_name.lower() in chosen_name.lower():
+                    chosen_game = inv
+                    break
+        if not chosen_game:
+            log.warning(f"editorial: LLM chose '{chosen_name}' but no matching game found")
+            return self._heuristic_decision(inventory, history)
+
+        return EditorialDecision(
+            job_type="generate_short",
+            game_id=chosen_game.game_id,
+            fact_id=None,  # Fact picking is done by the caller (from API data)
+            topic_hint=reason,
+            reason=f"LLM escolheu {chosen_game.game_name}: {reason}",
+        )
+
     def _pick_fact(
         self,
         session: Session,

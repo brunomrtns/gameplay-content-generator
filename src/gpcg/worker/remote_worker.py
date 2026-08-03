@@ -578,17 +578,131 @@ class RemoteWorker:
     def _check_automations(self) -> None:
         """Check if any running automation needs a new job created.
 
-        Calls the VPS API to create a job from the automation config, which
-        properly passes subtitle/transition/voice settings to the job.
+        V2 flow:
+        1. POST /api/automation/check — VPS returns pending automations
+           (running, no active job, has gameplays, YouTube connected)
+        2. For each pending automation, GET /api/automation/editorial-data/{user_id}
+           — VPS returns inventory + history + channel profile
+        3. Run EditorialStrategyService locally (with LLM/Ollama)
+        4. POST /api/automation/create-job — VPS creates the job with
+           automation config (subtitle/transition/voice settings)
         """
         try:
             resp = self.client.post("/api/automation/check")
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("job_id"):
-                    log.info(f"Automation created job #{data['job_id']}")
-        except Exception:
-            pass  # Non-critical: automation check is best-effort
+            if resp.status_code != 200:
+                return
+            data = resp.json()
+            pending = data.get("pending", [])
+            if not pending:
+                return
+
+            for item in pending:
+                user_id = item["user_id"]
+                self._make_editorial_decision(user_id)
+        except Exception as e:
+            log.warning(f"Automation check failed: {e}")
+
+    def _make_editorial_decision(self, user_id: int) -> None:
+        """Fetch editorial data from VPS, decide locally with LLM, create job."""
+        try:
+            # 1. Fetch editorial data from VPS
+            resp = self.client.get(f"/api/automation/editorial-data/{user_id}")
+            if resp.status_code != 200:
+                log.warning(f"Failed to fetch editorial data for user {user_id}: {resp.status_code}")
+                return
+            data = resp.json()
+            inventory = data.get("inventory", [])
+            history = data.get("history", {})
+            channel_context = data.get("channel_context", "")
+
+            if not inventory:
+                log.info(f"No games in inventory for user {user_id}")
+                return
+
+            # 2. Run editorial decision locally (with LLM)
+            from gpcg.infrastructure.llm import LLMClient
+            from gpcg.application.editorial_strategy import (
+                EditorialStrategyService,
+                EditorialDecision,
+                GameInventory,
+            )
+
+            llm = LLMClient()
+            editorial = EditorialStrategyService(llm=llm)
+
+            # Reconstruct GameInventory objects from the API data
+            inventories = []
+            for inv_data in inventory:
+                inv = GameInventory(
+                    game_id=inv_data["game_id"],
+                    game_name=inv_data["game_name"],
+                )
+                inv.gameplay_sources_ready = inv_data.get("gameplay_sources_ready", 0)
+                inv.total_gameplay_duration = inv_data.get("total_gameplay_duration", 0.0)
+                inv.gameplay_sources_total = inv_data.get("gameplay_sources_total", 0)
+                inv.facts_available = inv_data.get("facts_available", 0)
+                inv.facts_unused = inv_data.get("facts_unused", 0)
+                inv.knowledge_chunks = inv_data.get("knowledge_chunks", 0)
+                inv.videos_produced = inv_data.get("videos_produced", 0)
+                inv.recent_topics = inv_data.get("recent_topics", [])
+                inventories.append(inv)
+
+            # Use LLM to decide (or heuristic fallback)
+            producible = [g for g in inventories if g.is_producible]
+            if not producible:
+                gameplay_only = [g for g in inventories if g.has_gameplay]
+                if gameplay_only:
+                    producible = gameplay_only
+                else:
+                    log.info(f"No producible games for user {user_id}")
+                    return
+
+            try:
+                decision = editorial._llm_decision_from_data(
+                    inventories, history, channel_context
+                )
+            except Exception as e:
+                log.warning(f"LLM editorial decision failed: {e}, using heuristic")
+                decision = editorial._heuristic_decision(inventories, history)
+
+            if not decision.success:
+                log.info(f"Editorial decision not successful: {decision.error}")
+                return
+
+            # Pick a fact for the chosen game (from the inventory data)
+            if decision.game_id:
+                chosen_inv = next((g for g in inventory if g["game_id"] == decision.game_id), None)
+                if chosen_inv and chosen_inv.get("facts"):
+                    recent_fact_ids = set(history.get("recent_fact_ids", []))
+                    fresh_facts = [f for f in chosen_inv["facts"] if f["id"] not in recent_fact_ids]
+                    if fresh_facts:
+                        decision.fact_id = fresh_facts[0]["id"]
+                    elif chosen_inv["facts"]:
+                        decision.fact_id = chosen_inv["facts"][0]["id"]
+
+            log.info(
+                f"Editorial decision for user {user_id}: "
+                f"type={decision.job_type} game_id={decision.game_id} "
+                f"fact_id={decision.fact_id} reason={decision.reason[:80]}"
+            )
+
+            # 3. Create the job on VPS via API
+            create_resp = self.client.post("/api/automation/create-job", json={
+                "user_id": user_id,
+                "game_id": decision.game_id,
+                "fact_id": decision.fact_id,
+                "job_type": decision.job_type,
+                "background_game_id": decision.background_game_id,
+                "topic_hint": decision.topic_hint,
+                "reason": decision.reason,
+            })
+            if create_resp.status_code == 200:
+                job_data = create_resp.json()
+                log.info(f"Automation created job #{job_data.get('job_id')} for user {user_id}")
+            else:
+                log.warning(f"Failed to create job from decision: {create_resp.status_code} {create_resp.text}")
+        except Exception as e:
+            log.warning(f"Editorial decision for user {user_id} failed: {e}")
 
     def _process_job(self, job: dict) -> None:
         """Process a claimed job. Dispatches by job type."""

@@ -173,16 +173,21 @@ def check_automation(
     _: None = Depends(worker_auth),
     db: Session = Depends(get_db),
 ):
-    """Check all running automations and create jobs if needed.
+    """Check all running automations and return which ones need a job.
 
     Called by the remote worker on each poll cycle. For each automation
     with status='running', if there's no active job (queued/running) for
-    that user, creates a new job from the automation config (which properly
-    passes subtitle/transition/voice settings).
+    that user, returns the automation info so the remote worker can make
+    the editorial decision locally (where the LLM/Ollama is available)
+    and create the job via the API.
+
+    V2: The editorial decision (which game, which topic) is now made by
+    the remote worker, NOT on the VPS, because the LLM (Ollama) runs on
+    the local PC. The VPS only checks if a job should be created.
     """
     autos = db.query(Automation).filter(Automation.status == "running").all()
 
-    created_job_id = None
+    pending = []
     for auto in autos:
         # Check if there's already an active job for this user
         active = db.query(Job).filter(
@@ -194,16 +199,285 @@ def check_automation(
         if active:
             continue
 
-        # No active job — create one from the automation config
-        try:
-            job_id = create_job_from_automation(auto.user_id)
-            if job_id:
-                created_job_id = job_id
-                log.info(f"Automation check: created job #{job_id} for user {auto.user_id}")
-        except Exception as e:
-            log.warning(f"Automation check failed for user {auto.user_id}: {e}")
+        # Check if user has YouTube connected
+        user = db.get(User, auto.user_id)
+        if not user or not user.google_user_id:
+            continue
 
-    return {"job_id": created_job_id}
+        # Check if there are gameplays available
+        ready_count = db.query(GameplaySource).filter(
+            GameplaySource.user_id == auto.user_id,
+            GameplaySource.ingestion_status == IngestionStatus.ready.value,
+        ).count()
+        if ready_count == 0:
+            continue
+
+        pending.append({
+            "user_id": auto.user_id,
+            "automation_id": auto.id,
+            "config": auto.config or {},
+        })
+
+    return {"pending": pending}
+
+
+@router.get("/automation/editorial-data/{user_id}")
+def get_editorial_data(
+    user_id: int,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Return all data needed for the editorial decision.
+
+    Called by the remote worker after /automation/check reports a pending
+    automation. The remote worker uses this data to run the
+    EditorialStrategyService locally (with LLM) and then creates the job
+    via POST /api/automation/create-job.
+    """
+    from gpcg.domain.models import Fact, KnowledgeChunk, ChannelProfile
+    from sqlalchemy import select, func, desc
+    from datetime import datetime, timezone, timedelta
+
+    # 1. Build inventory: games with gameplay sources
+    games_with_gameplay = db.execute(
+        select(Game, func.count(GameplaySource.id), func.sum(GameplaySource.duration))
+        .join(GameplaySource, GameplaySource.game_id == Game.id)
+        .where(GameplaySource.user_id == user_id)
+        .where(GameplaySource.ingestion_status == IngestionStatus.ready.value)
+        .group_by(Game.id)
+    ).all()
+
+    games_with_facts = set(
+        db.execute(
+            select(Fact.game_id)
+            .where(Fact.user_id == user_id)
+            .where(Fact.game_id.isnot(None))
+            .distinct()
+        ).scalars().all()
+    )
+    games_with_chunks = set(
+        db.execute(
+            select(KnowledgeChunk.game_id)
+            .where(KnowledgeChunk.user_id == user_id)
+            .where(KnowledgeChunk.game_id.isnot(None))
+            .distinct()
+        ).scalars().all()
+    )
+
+    all_game_ids = {g.id for g, _, _ in games_with_gameplay} | games_with_facts | games_with_chunks
+    inventory = []
+    for game_id in all_game_ids:
+        game = db.get(Game, game_id)
+        if not game:
+            continue
+        inv = {
+            "game_id": game.id,
+            "game_name": game.canonical_name,
+            "franchise": game.franchise,
+            "developer": game.developer,
+            "lore_summary": game.lore_summary or "",
+        }
+        for g, count, total_dur in games_with_gameplay:
+            if g.id == game.id:
+                inv["gameplay_sources_ready"] = count
+                inv["total_gameplay_duration"] = total_dur or 0.0
+                break
+        else:
+            inv["gameplay_sources_ready"] = 0
+            inv["total_gameplay_duration"] = 0.0
+
+        inv["gameplay_sources_total"] = db.execute(
+            select(func.count(GameplaySource.id))
+            .where(GameplaySource.user_id == user_id)
+            .where(GameplaySource.game_id == game.id)
+        ).scalar() or 0
+
+        inv["facts_available"] = db.execute(
+            select(func.count(Fact.id))
+            .where(Fact.user_id == user_id)
+            .where(Fact.game_id == game.id)
+        ).scalar() or 0
+
+        inv["facts_unused"] = db.execute(
+            select(func.count(Fact.id))
+            .where(Fact.user_id == user_id)
+            .where(Fact.game_id == game.id)
+            .where(Fact.used_count == 0)
+        ).scalar() or 0
+
+        inv["knowledge_chunks"] = db.execute(
+            select(func.count(KnowledgeChunk.id))
+            .where(KnowledgeChunk.user_id == user_id)
+            .where(KnowledgeChunk.game_id == game.id)
+        ).scalar() or 0
+
+        inv["videos_produced"] = db.execute(
+            select(func.count(ContentPlan.id))
+            .where(ContentPlan.user_id == user_id)
+            .where(ContentPlan.game_id == game.id)
+        ).scalar() or 0
+
+        recent_plans = db.execute(
+            select(ContentPlan.topic)
+            .where(ContentPlan.user_id == user_id)
+            .where(ContentPlan.game_id == game.id)
+            .order_by(desc(ContentPlan.created_at))
+            .limit(5)
+        ).scalars().all()
+        inv["recent_topics"] = [t for t in recent_plans if t]
+
+        # Include fact summaries for the LLM
+        facts = db.execute(
+            select(Fact.id, Fact.claim, Fact.used_count, Fact.quality_score)
+            .where(Fact.user_id == user_id)
+            .where(Fact.game_id == game.id)
+            .order_by(Fact.used_count.asc(), Fact.quality_score.desc())
+            .limit(10)
+        ).all()
+        inv["facts"] = [
+            {"id": f.id, "claim": f.claim, "used_count": f.used_count, "quality_score": f.quality_score}
+            for f in facts
+        ]
+
+        inventory.append(inv)
+
+    # 2. Recent editorial history
+    recent_plans = db.execute(
+        select(ContentPlan)
+        .where(ContentPlan.user_id == user_id)
+        .order_by(desc(ContentPlan.created_at))
+        .limit(10)
+    ).scalars().all()
+    history = {
+        "recent_topics": [p.topic for p in recent_plans if p.topic],
+        "recent_game_ids": [p.game_id for p in recent_plans if p.game_id],
+        "recent_fact_ids": [p.fact_id for p in recent_plans if p.fact_id],
+        "total_videos": len(recent_plans),
+    }
+
+    # 3. Channel profile
+    channel_context = ""
+    try:
+        profile = db.query(ChannelProfile).filter(
+            ChannelProfile.user_id == user_id
+        ).first()
+        if profile:
+            channel_context = profile.to_prompt_context()
+    except Exception:
+        pass
+
+    return {
+        "inventory": inventory,
+        "history": history,
+        "channel_context": channel_context,
+    }
+
+
+class CreateJobRequest(BaseModel):
+    """Request to create a job from an editorial decision."""
+    user_id: int
+    game_id: Optional[int] = None
+    fact_id: Optional[int] = None
+    job_type: str = "generate_short"
+    background_game_id: Optional[int] = None
+    topic_hint: str = ""
+    reason: str = ""
+
+
+@router.post("/automation/create-job")
+def create_job_from_decision(
+    req: CreateJobRequest,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Create a job from an editorial decision made by the remote worker.
+
+    The remote worker runs the EditorialStrategyService locally (with LLM)
+    and sends the decision here. The VPS creates the job with the automation
+    config (subtitle/transition/voice settings).
+    """
+    auto = db.query(Automation).filter(Automation.user_id == req.user_id).first()
+    if not auto:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    if auto.status != "running":
+        raise HTTPException(status_code=400, detail="Automation is not running")
+
+    config = auto.config or {}
+
+    from gpcg.application.generation_service import GenerationService
+
+    service = GenerationService()
+
+    subtitle_kwargs = dict(
+        scene_duration=config.get("scene_duration", 0),
+        video_format=config.get("video_format", ""),
+        subtitle_font=config.get("subtitle_font", ""),
+        subtitle_font_size=config.get("subtitle_font_size", 0),
+        subtitle_color=config.get("subtitle_color", ""),
+        subtitle_outline_color=config.get("subtitle_outline_color", ""),
+        subtitle_position=config.get("subtitle_position", ""),
+        subtitle_case=config.get("subtitle_case", ""),
+        subtitle_box_enabled=config.get("subtitle_box_enabled"),
+        subtitle_box_color=config.get("subtitle_box_color", ""),
+        subtitle_box_padding=config.get("subtitle_box_padding", 0),
+        subtitle_stroke_color=config.get("subtitle_stroke_color", ""),
+        subtitle_stroke_width=config.get("subtitle_stroke_width", 0),
+        subtitle_rounded_box=config.get("subtitle_rounded_box"),
+        transition_type=config.get("transition_type", ""),
+        transition_duration=config.get("transition_duration", 0),
+        creative_style=config.get("creative_style", ""),
+    )
+    voice_name = config.get("voice", "")
+    voice_path = ""
+    if voice_name:
+        from gpcg.config import get_settings
+        settings = get_settings()
+        vp = settings.voices_dir / voice_name
+        if vp.exists():
+            voice_path = str(vp)
+    subtitle_kwargs["voice_path"] = voice_path
+
+    if req.job_type == "generate_short" and req.game_id:
+        game = db.get(Game, req.game_id)
+        if not game:
+            raise HTTPException(status_code=404, detail="Game not found")
+        job = service.create_job(
+            req.game_id,
+            user_id=req.user_id,
+            **subtitle_kwargs,
+        )
+        # Store editorial decision in artifacts
+        with session_scope() as s2:
+            j = s2.get(Job, job.id)
+            j.artifacts = {
+                **j.artifacts,
+                "editorial_decision": {
+                    "job_type": req.job_type,
+                    "game_id": req.game_id,
+                    "fact_id": req.fact_id,
+                    "topic_hint": req.topic_hint,
+                    "reason": req.reason,
+                },
+                "fact_id": req.fact_id,
+            }
+            s2.flush()
+    elif req.job_type == "curiosity_short" and req.background_game_id:
+        job = service.create_curiosity_job(
+            background_game_id=req.background_game_id,
+            fact_id=req.fact_id,
+            user_id=req.user_id,
+            **subtitle_kwargs,
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Invalid editorial decision")
+
+    # Update last_run_at
+    from datetime import datetime, timezone
+    auto.last_run_at = datetime.now(timezone.utc)
+    db.flush()
+
+    log.info(f"Automation created job #{job.id} for user {req.user_id} (editorial decision from remote worker)")
+    return {"job_id": job.id, "job_uuid": job.job_uuid}
 
 
 def create_job_from_automation(user_id: int) -> int | None:
