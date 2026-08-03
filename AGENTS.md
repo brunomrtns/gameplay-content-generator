@@ -403,15 +403,82 @@ GPCG is now a multi-user platform for automated YouTube channel video generation
 ## V2 Architecture (Game Registry + Content Intelligence)
 
 GPCG V2 implements a canonical Game Registry, game enrichment, content
-intelligence, and cross-game gameplay expansion. All features are gated by
-feature flags (default: off). See `docs/ARCHITECTURE_V2.md` for the full
-blueprint.
+intelligence, and cross-game gameplay expansion. See `docs/ARCHITECTURE_V2.md`
+for the full blueprint.
 
-### Feature Flags (all default off)
+### Feature Flags (REFACTORY_V2 — most now default ON)
 
 - `GPCG_GAME_ENRICHMENT_ENABLED`: auto-trigger game_enrich job on new game creation
-- `GPCG_CONTENT_INTELLIGENCE_ENABLED`: content planning queries KnowledgeItems alongside Facts
+- `GPCG_CONTENT_INTELLIGENCE_ENABLED`: **True** (REFACTORY_V2) — content planning queries KnowledgeItems alongside Facts
 - `GPCG_CROSS_GAME_GAMEPLAY_ENABLED`: gameplay selection expands to same franchise/developer
+- `GPCG_CURIOSITY_SCORING_ENABLED`: **True** (REFACTORY_V2) — facts ranked by curiosity_score
+- `GPCG_STORY_FINDER_ENABLED`: **True** (REFACTORY_V2) — narrative angle analysis before script
+- `GPCG_HUMANIZATION_ENABLED`: **True** (REFACTORY_V2) — break AI patterns, ensure orality
+- `GPCG_CREATIVE_ENGINE_ENABLED`: **True** (REFACTORY_V2) — hooks/angles/punchlines generation
+- `GPCG_CREATIVE_ENGINE_BEAT_ORIENTED`: **True** (REFACTORY_V2) — beat-oriented creative material
+- `GPCG_SCRIPT_CRITIC_V2_ENABLED`: **True** (REFACTORY_V2) — V2 critic dimensions
+- `GPCG_SCRIPT_CRITIC_SECTION_BASED`: **True** (REFACTORY_V2) — per-section review
+
+## REFACTORY_V2 — Multi-User Integrity + Editorial Quality
+
+Refactoring based on `docs/REFACTORY_V2_DIAGNOSTIC.md`. Addresses multi-user
+integrity, configuration propagation, gameplay lifecycle, and editorial quality.
+
+### Hybrid Content Pool Model
+
+- `Fact`, `Document`, `KnowledgeItem` have `is_public` column
+- `user_id=NULL` → system-collected (shared pool, visible to all)
+- `user_id=X, is_public=False` → private to owner X
+- `user_id=X, is_public=True` → shared with other users
+- `visible_to_user()` helper in `src/gpcg/domain/visibility.py` for consistent filtering
+- Applied in ContentPlanningService, worker_routes, ScriptService, API endpoints
+
+### Per-Consumer Gameplay Usage
+
+- `GameplayClipUsage.consumer_user_id` tracks who consumed each segment
+- User A using a public gameplay segment doesn't block user B
+- `get_used_ranges()` filters by `consumer_user_id`
+- `GameplaySelector` passes `job.user_id` as consumer
+
+### Video Deletion Lifecycle
+
+- Pending video (not on YouTube): clips auto-released
+- Published video (on YouTube): clips remain used by default
+- `release_clips` param is now `Optional[bool]`: None=auto, True=force, False=never
+
+### Editorial Gate
+
+- After `script_review` loop, if final verdict is still REVISE after
+  `max_revisions`, the job FAILS (GenerationError)
+- Prevents publishing low-quality content that the critic flagged
+
+### KnowledgeItem Quality Gate
+
+- Deterministic clickbait/promotion/rumor detection via regex
+- Auto-rejects low-quality items before LLM scoring (no LLM call needed)
+- `rejection_reason` field on KnowledgeItem
+
+### Provenance Tracking
+
+- `ContentPlan.metadata_json["provenance"]` tracks: source_type, source_id,
+  source_claim, source_document_id, game_name, planning_scope
+
+### Duration Diagnostics (warnings, not gates)
+
+- `gpcg_target_duration_tolerance` (default 0.3)
+- `gpcg_script_min_chars` (default 200)
+- Log warnings before TTS if script is too short or estimated duration is below target
+
+### YouTube Adapter
+
+- `user_id` is mandatory — no global `gpcg_youtube_user_id` fallback
+- Raises `ValueError` if `user_id=None`
+
+### Voices Isolation
+
+- `data/voices/{user_id}/` per-user directory
+- Legacy shared root is read-only for backward compat
+- Job creation: user dir first, shared root fallback
 
 ### V2 Data Model
 
