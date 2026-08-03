@@ -988,10 +988,18 @@ def serve_video(video_id: int, db: Session = Depends(get_db)):
     v = db.get(Video, video_id)
     if v is None:
         raise HTTPException(404, "video not found")
-    p = Path(v.file_path)
-    if not p.exists():
-        raise HTTPException(404, "video file missing")
-    return FileResponse(str(p), media_type="video/mp4")
+    # REFACTORY_V2: prefer storage_key (VPS-local path) over file_path
+    # (which may point to the worker's local filesystem).
+    settings = get_settings()
+    if v.storage_key:
+        p = settings.videos_dir / v.storage_key
+        if p.exists():
+            return FileResponse(str(p), media_type="video/mp4")
+    # Fallback to file_path
+    p = Path(v.file_path) if v.file_path else None
+    if p and p.exists():
+        return FileResponse(str(p), media_type="video/mp4")
+    raise HTTPException(404, "video file missing")
 
 
 @router.get("/videos/{video_id}/thumbnail")

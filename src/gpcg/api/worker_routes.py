@@ -744,7 +744,9 @@ def submit_job_result(
                 job_id=job.id,
                 content_plan_id=job.content_plan_id,
                 game_id=job.game_id,
-                file_path=vdata.get("file_path", ""),
+                # REFACTORY_V2: don't use worker's file_path (it points to the
+                # worker's local filesystem, not the VPS). Use storage_key instead.
+                file_path="",  # will be set by upload-video endpoint
                 storage_key=vdata.get("storage_key"),
                 duration=vdata.get("duration", 0.0),
                 width=vdata.get("width", 0),
