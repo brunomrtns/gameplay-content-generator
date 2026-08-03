@@ -1214,7 +1214,31 @@ Use os planos aprovados como especificação.
 
 Use manifesto, princípios, pesquisa e consolidação para compreender a intenção editorial.
 
-# Notícias, artigos e fontes
+# Notícias, artigos e fontes (matéria-prima editorial de fontes online)
+
+A partir de agora, boa parte da matéria-prima editorial virá de ideias extraídas de fontes online.
+
+Isso NÃO significa que o GPCG deve simplesmente resumir, traduzir ou reescrever notícias.
+
+O fluxo precisa tratar artigos, notícias e fontes externas como **matéria-prima editorial**.
+
+O fluxo desejado é:
+
+```
+fonte online
+→ coleta
+→ validação
+→ compreensão
+→ avaliação editorial
+→ extração da ideia central
+→ contextualização
+→ Story Finding
+→ narrativa
+→ roteiro original
+→ humanização
+→ revisão
+→ vídeo
+```
 
 Conteúdo coletado automaticamente não deve virar simples tradução ou cópia.
 
@@ -1222,6 +1246,7 @@ Quando uma boa fonte é selecionada, o pipeline precisa usá-la como matéria-pr
 
 A intenção é:
 
+```
 fonte
 → compreensão
 → seleção do que vale a pena contar
@@ -1230,6 +1255,7 @@ fonte
 → roteiro original em PT-BR
 → humanização/revisão
 → narração
+```
 
 Respeitando:
 
@@ -1242,6 +1268,313 @@ Respeitando:
 O sistema já possui mecanismos de originalidade e pipeline editorial.
 
 Reaproveite-os.
+
+## Cuidado com o que entra no pipeline
+
+Nem toda informação encontrada online merece virar vídeo.
+
+Antes de uma ideia entrar de fato no pipeline editorial, valide se ela é:
+
+* relevante;
+* coerente;
+* factual;
+* suficientemente clara;
+* relacionada ao universo de conteúdo do sistema;
+* editorialmente aproveitável;
+* sustentada pela própria fonte;
+* não simplesmente clickbait da publicação original.
+
+O sistema NÃO deve confiar automaticamente no título ou resumo de uma notícia.
+
+A IA deve analisar o conteúdo da fonte e verificar se existe substância real por trás da chamada.
+
+## Validação com IA antes do uso editorial
+
+Use IA para avaliar a informação coletada antes de transformá-la em conteúdo.
+
+A validação deve responder questões como:
+
+* O que realmente aconteceu?
+* Qual é a afirmação principal?
+* A fonte sustenta essa afirmação?
+* Existe contexto suficiente?
+* O título exagera o conteúdo?
+* A informação é relevante ou apenas promocional?
+* Existe algo aqui que vale a pena explicar para o público?
+* Há contradições ou pontos incertos?
+* A informação parece opinião, rumor, anúncio, interpretação ou fato confirmado?
+* Existe risco de o pipeline transformar uma nuance em afirmação absoluta?
+
+NÃO invente certezas que a fonte não possui.
+
+Quando houver incerteza, preserve a incerteza no tratamento editorial ou rejeite a ideia.
+
+## Não copiar a notícia
+
+A saída não deve ser:
+
+> "Segundo a GameSpot, aconteceu X, depois Y, depois Z."
+
+Também NÃO quero simples tradução para PT-BR.
+
+O conteúdo original deve servir de base factual para construir um vídeo novo.
+
+A transformação editorial deve encontrar:
+
+* o que realmente importa;
+* por que isso é interessante;
+* qual é a implicação;
+* qual é a surpresa;
+* qual é o conflito;
+* qual é a mudança;
+* qual é a consequência;
+* o que o espectador provavelmente ainda não percebeu;
+* qual é a melhor forma de explicar aquilo.
+
+## Aplicar a arquitetura editorial existente sobre a notícia
+
+Depois da validação factual, a ideia deve passar normalmente pelos mecanismos já existentes no projeto.
+
+NÃO crie um pipeline editorial paralelo para notícias.
+
+A fonte online deve alimentar a mesma arquitetura:
+
+```
+content_planning
+→ story_finding
+→ editorial_planning
+→ creative_engine
+→ script
+→ humanization
+→ script_review
+```
+
+Os princípios já definidos continuam válidos:
+
+* curiosity gap;
+* familiarity;
+* discovery;
+* narrative progression;
+* payoff;
+* emoção;
+* clareza;
+* humanidade;
+* factualidade;
+* anti-plágio.
+
+## A notícia não é a história
+
+Um artigo pode conter dezenas de informações.
+
+O sistema precisa encontrar qual delas realmente vira uma história.
+
+Exemplo conceitual:
+
+A fonte pode dizer:
+
+> "Sony registrou aumento de lucro em parte por causa de reembolso de tarifas."
+
+O vídeo não precisa simplesmente repetir o artigo.
+
+Pode encontrar um ângulo como:
+
+> "Os consumidores pagaram consoles mais caros por causa das tarifas. Agora a Sony recebeu parte desse dinheiro de volta — mas isso não significa que o consumidor vai receber algo."
+
+Esse é apenas um exemplo conceitual.
+
+O importante é:
+
+extrair a tensão, consequência ou contradição real existente na fonte.
+
+Nunca inventar uma tensão que a fonte não sustenta.
+
+## Contexto adicional quando necessário
+
+Uma notícia isolada pode ser insuficiente.
+
+Se a ideia for boa, mas faltar contexto para produzir um vídeo realmente rico, o pipeline pode buscar informações complementares.
+
+Por exemplo:
+
+* histórico do assunto;
+* declaração anterior da empresa;
+* lançamento relacionado;
+* contexto da franquia;
+* comparação com evento anterior;
+* impacto para jogadores;
+* números;
+* cronologia.
+
+Mas toda expansão deve respeitar factualidade e proveniência.
+
+O sistema precisa saber quais informações vieram de quais fontes.
+
+NÃO use contexto adicional para "encher" o vídeo.
+
+Use apenas quando isso melhora entendimento, narrativa ou relevância.
+
+## Múltiplas fontes quando necessário
+
+Para assuntos sensíveis, complexos ou potencialmente contraditórios, avalie a possibilidade de validar com mais de uma fonte antes de gerar o roteiro.
+
+NÃO transforme isso em obrigação para qualquer curiosidade trivial.
+
+Mas quando a afirmação central depender de:
+
+* rumor;
+* declaração controversa;
+* números;
+* política de empresa;
+* processo judicial;
+* lançamento ainda não confirmado;
+* mudança de preço;
+* informação potencialmente desatualizada;
+
+a arquitetura deve permitir corroborar ou qualificar a informação antes da publicação.
+
+## Diferenciar notícia, opinião, rumor e promoção
+
+A IA precisa identificar a natureza da fonte.
+
+Exemplos:
+
+* notícia factual;
+* artigo de opinião;
+* review;
+* rumor;
+* vazamento;
+* press release;
+* conteúdo promocional;
+* oferta comercial;
+* patch notes;
+* análise;
+* entrevista.
+
+NÃO trate todos esses formatos como equivalentes.
+
+Uma promoção de pré-venda, por exemplo, não deve automaticamente virar vídeo apenas porque possui score alto.
+
+O sistema precisa perguntar:
+
+> "Existe uma história aqui ou apenas uma oferta comercial?"
+
+## Relevância editorial acima do score bruto
+
+NÃO permita que um score alto isolado faça qualquer notícia entrar no vídeo.
+
+O score deve ser um sinal.
+
+A decisão final deve considerar também:
+
+* relevância para o público;
+* familiaridade;
+* potencial de descoberta;
+* qualidade da fonte;
+* profundidade;
+* consequência;
+* novidade real;
+* contexto;
+* possibilidade de narrativa.
+
+Uma notícia tecnicamente "nova" pode continuar sendo editorialmente fraca.
+
+## Explicação, não reprodução
+
+O resultado precisa ser compreensível até para quem não leu a matéria original.
+
+O vídeo deve explicar:
+
+* o que aconteceu;
+* por que aconteceu, quando houver informação suficiente;
+* por que isso importa;
+* o que muda;
+* qual é a parte realmente interessante.
+
+Evite pressupor que o espectador conhece a notícia.
+
+Mas também evite despejar todo o contexto existente.
+
+Explique apenas o necessário para que a descoberta funcione.
+
+## Conteúdo chamativo sem clickbait
+
+O objetivo continua sendo prender atenção.
+
+Mas "chamativo" não significa exagerar fatos.
+
+O hook pode explorar:
+
+* contraste;
+* ironia;
+* consequência inesperada;
+* mudança de contexto;
+* pergunta legítima;
+* detalhe surpreendente;
+* contradição real.
+
+Nunca:
+
+* inventar urgência;
+* exagerar consequência;
+* afirmar algo que a fonte não confirma;
+* esconder informação essencial apenas para prolongar artificialmente retenção.
+
+A retenção precisa vir da qualidade da história.
+
+## Preservar originalidade
+
+O roteiro final não deve manter:
+
+* estrutura do artigo;
+* ordem dos parágrafos;
+* frases traduzidas;
+* expressões características;
+* sequência narrativa da fonte.
+
+A fonte fornece fatos.
+
+O GPCG constrói uma narrativa própria.
+
+Preserve e fortaleça os mecanismos anti-plágio já existentes.
+
+## Rastreabilidade da fonte
+
+Para cada vídeo derivado de conteúdo online, deve ser possível descobrir:
+
+* qual ideia foi selecionada;
+* qual fonte originou a ideia;
+* quais fontes complementares foram utilizadas;
+* quais fatos principais sustentaram o roteiro;
+* qual foi a interpretação editorial aplicada.
+
+NÃO necessariamente exiba tudo isso ao usuário final, mas preserve a rastreabilidade internamente.
+
+Isso se conecta com a seção "Auditabilidade".
+
+## Gate antes do Story Finding
+
+Considere uma etapa conceitual de validação da matéria-prima antes de ela entrar no Story Finder.
+
+NÃO crie necessariamente um novo serviço se a arquitetura atual já tiver lugar adequado para isso.
+
+O comportamento desejado é algo como:
+
+```
+source validation
+→ factual extraction
+→ relevance check
+→ editorial viability
+→ story finding
+```
+
+Se a fonte falhar nesses critérios:
+
+* rejeitar;
+* reduzir score;
+* marcar como inadequada;
+* ou impedir seleção.
+
+Escolha o mecanismo de acordo com a arquitetura existente.
 
 # Auditabilidade
 
@@ -1568,6 +1901,51 @@ Casos de regressão obrigatórios para a seção 7:
 2. A auditoria identifica se a ativação resolve parte dos problemas de qualidade.
 3. A decisão de ativar/desativar é documentada com justificativa.
 
+## Matéria-prima de fontes online
+
+Casos de regressão obrigatórios para a seção "Notícias, artigos e fontes":
+
+### Validação de fonte — rejeição de clickbait
+
+1. Uma fonte possui título chamativo mas conteúdo raso.
+2. O sistema analisa o conteúdo (não confia no título).
+3. A ideia é rejeitada ou reduzida no score por falta de substância.
+
+### Validação de fonte — preservação de incerteza
+
+1. Uma fonte apresenta informação ambígua/não confirmada.
+2. O sistema NÃO transforma a nuance em afirmação absoluta.
+3. A incerteza é preservada no tratamento editorial ou a ideia é rejeitada.
+
+### Diferenciação de tipo de fonte
+
+1. Uma promoção de pré-venda chega com score alto.
+2. O sistema identifica que é conteúdo promocional, não notícia factual.
+3. NÃO vira vídeo automaticamente apenas por score alto.
+
+### Não cópia / não tradução
+
+1. Um artigo em inglês é selecionado como matéria-prima.
+2. O roteiro final NÃO mantém estrutura, ordem de parágrafos, frases traduzidas ou expressões características da fonte.
+3. O anti-plágio detecta e corrige sobreposição excessiva.
+
+### Múltiplas fontes para assunto sensível
+
+1. Uma afirmação central depende de rumor não confirmado.
+2. O sistema busca fonte corroborante antes de gerar o roteiro.
+3. Se não corroborada, a afirmação é qualificada ou rejeitada.
+
+### Rastreabilidade da fonte
+
+1. Um vídeo é gerado a partir de uma fonte online.
+2. É possível rastrear: ideia selecionada, fonte originária, fontes complementares, fatos principais, interpretação editorial aplicada.
+
+### Gate antes do Story Finding
+
+1. Uma fonte falha na validação (irrelevante, incoerente, ou não sustentada).
+2. A ideia NÃO entra no Story Finder.
+3. É rejeitada, reduzida no score, ou marcada como inadequada.
+
 ## Diversidade de gameplay (controle por intervalo temporal)
 
 Forneça múltiplos eventos/clips elegíveis.
@@ -1758,6 +2136,8 @@ Considere concluída quando for possível demonstrar que:
 * `target_duration` é respeitado como constraint, não apenas como referência no prompt;
 * um roteiro que falha repetidamente no `ScriptCritic` não prossegue para render silenciosamente;
 * componentes editoriais inativos são auditados e ativados (ou justificadamente mantidos inativos);
+* fontes online são tratadas como matéria-prima (não roteiro), validadas antes do uso, e não copiadas/traduzidas;
+* factualidade nunca é sacrificada por retenção — incerteza é preservada ou ideia é rejeitada;
 * retries são seguros;
 * comportamento é rastreável;
 * a arquitetura suporta evolução para múltiplos workers sem depender de estado implícito.
