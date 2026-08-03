@@ -27,6 +27,7 @@ from gpcg.domain.models import (
     IngestionStatus,
     Job,
     JobStatus,
+    JobType,
     User,
     Video,
     VideoStatus,
@@ -35,6 +36,7 @@ from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db, session_scope
 from gpcg.infrastructure.google_integration_adapter import GoogleIntegrationAdapter
 from gpcg.logging import get_logger
+from gpcg.api.worker_routes import worker_auth
 
 log = get_logger(__name__)
 
@@ -164,6 +166,44 @@ def pause_automation(
         session.flush()
 
     return {"status": "paused"}
+
+
+@router.post("/automation/check")
+def check_automation(
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Check all running automations and create jobs if needed.
+
+    Called by the remote worker on each poll cycle. For each automation
+    with status='running', if there's no active job (queued/running) for
+    that user, creates a new job from the automation config (which properly
+    passes subtitle/transition/voice settings).
+    """
+    autos = db.query(Automation).filter(Automation.status == "running").all()
+
+    created_job_id = None
+    for auto in autos:
+        # Check if there's already an active job for this user
+        active = db.query(Job).filter(
+            Job.user_id == auto.user_id,
+            Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
+            Job.type.in_([JobType.generate_short.value, JobType.curiosity_short.value]),
+        ).first()
+
+        if active:
+            continue
+
+        # No active job — create one from the automation config
+        try:
+            job_id = create_job_from_automation(auto.user_id)
+            if job_id:
+                created_job_id = job_id
+                log.info(f"Automation check: created job #{job_id} for user {auto.user_id}")
+        except Exception as e:
+            log.warning(f"Automation check failed for user {auto.user_id}: {e}")
+
+    return {"job_id": created_job_id}
 
 
 def create_job_from_automation(user_id: int) -> int | None:

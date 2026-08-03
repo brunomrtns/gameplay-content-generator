@@ -545,6 +545,9 @@ class RemoteWorker:
 
         while self._running:
             try:
+                # Check if any automation needs a new job created
+                self._check_automations()
+
                 job = self.claim_job()
                 if job is None:
                     time.sleep(self.config.poll_interval)
@@ -570,7 +573,20 @@ class RemoteWorker:
                 log.error(f"Main loop error: {e}", exc_info=True)
                 time.sleep(self.config.poll_interval)
 
-        self.stop()
+    def _check_automations(self) -> None:
+        """Check if any running automation needs a new job created.
+
+        Calls the VPS API to create a job from the automation config, which
+        properly passes subtitle/transition/voice settings to the job.
+        """
+        try:
+            resp = self.client.post("/api/automation/check")
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("job_id"):
+                    log.info(f"Automation created job #{data['job_id']}")
+        except Exception:
+            pass  # Non-critical: automation check is best-effort
 
     def _process_job(self, job: dict) -> None:
         """Process a claimed job. Dispatches by job type."""
