@@ -44,6 +44,7 @@ class KnowledgeItemOut(BaseModel):
     collected_at: str
     editorial_score: float
     status: str
+    rejection_reason: Optional[str] = None  # REFACTORY_V2
     franchise: Optional[str] = None
     developer: Optional[str] = None
     tags: list = []
@@ -77,6 +78,7 @@ def _item_to_out(item) -> KnowledgeItemOut:
         collected_at=item.collected_at.isoformat() if item.collected_at else "",
         editorial_score=item.editorial_score,
         status=item.status,
+        rejection_reason=getattr(item, "rejection_reason", None),  # REFACTORY_V2
         franchise=item.franchise,
         developer=item.developer,
         tags=item.tags or [],

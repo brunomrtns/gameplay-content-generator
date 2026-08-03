@@ -191,7 +191,9 @@ class Settings(BaseSettings):
     # a curiosity_score is computed from 5 editorial sub-scores + 1 technical
     # sub-score and used to rank fact candidates in content planning.
     # See docs/EDITORIAL_REFACTOR_PLAN_V2.md §3.1, §4.2.
-    gpcg_curiosity_scoring_enabled: bool = False
+    # REFACTORY_V2: activated by default (was False — caused content planning
+    # to rank by quality*novelty only, ignoring editorial curiosity potential).
+    gpcg_curiosity_scoring_enabled: bool = True
     # Model for curiosity scoring (uses default text model if empty).
     gpcg_curiosity_scorer_model: str = ""
     # Temperature for the curiosity scorer LLM call.
@@ -286,7 +288,10 @@ class Settings(BaseSettings):
     # Master switch for content intelligence (RSS collection + KnowledgeItems).
     # When true, content_collect jobs are scheduled by /api/automation/check.
     # See ARCHITECTURE_V2.md §7, Fase 3.
-    gpcg_content_intelligence_enabled: bool = False
+    # REFACTORY_V2: activated by default (was False — caused KIs to never
+    # enter the pipeline). ContentPlanningService already has unified
+    # candidates logic; it just needs this flag on to query KnowledgeItems.
+    gpcg_content_intelligence_enabled: bool = True
     # RSS feed URL for news collection (Google News search by game name).
     gpcg_rss_feed_url: str = "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
     # Collection interval in hours (how often to collect RSS for each game).

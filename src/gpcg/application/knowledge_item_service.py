@@ -9,6 +9,7 @@ See ARCHITECTURE_V2.md §7 (Knowledge Items e Content Intelligence).
 from __future__ import annotations
 
 import json
+import re
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -146,6 +147,46 @@ def get_stats(session: Session, *, user_id: Optional[int] = None) -> dict:
 
 # ── Editorial Scoring ─────────────────────────────────────────────────────────
 
+# REFACTORY_V2: deterministic clickbait/promotion patterns (checked before LLM).
+# These are fast regex checks that immediately penalize obvious low-quality
+# content. The LLM scoring prompt also includes a factual gate for subtler cases.
+_CLICKBAIT_PATTERNS = [
+    re.compile(r"\b(você não vai acreditar|you won'?t believe)\b", re.I),
+    re.compile(r"\b(chocante|shocking|mind[- ]?blowing)\b", re.I),
+    re.compile(r"\b(número \d+ que|this one trick|este truque)\b", re.I),
+    re.compile(r"\b(antes que deletem|before they delete)\b", re.I),
+    re.compile(r"\b(segredo que|secret that)\b", re.I),
+]
+_PROMOTION_PATTERNS = [
+    re.compile(r"\b(compre agora|buy now|oferta especial|special offer)\b", re.I),
+    re.compile(r"\b(use o código|use code|cupom|coupon|discount)\b", re.I),
+    re.compile(r"\b(patrocinad|sponsored|advertis)\b", re.I),
+]
+_RUMOR_PATTERNS = [
+    re.compile(r"\b(rumor|boato|segundo fontes|according to sources)\b", re.I),
+    re.compile(r"\b(leak|vazamento|não confirmado|unconfirmed)\b", re.I),
+    re.compile(r"\b(pode ser|might be|supostamente|allegedly)\b", re.I),
+]
+
+
+def _detect_quality_issues(item: KnowledgeItem) -> Optional[str]:
+    """REFACTORY_V2: deterministic detection of clickbait/promotion/rumor.
+
+    Returns a string describing the issue if detected, None otherwise.
+    This is a fast pre-check before the LLM scoring prompt.
+    """
+    text = f"{item.title} {item.content[:300]}"
+    for p in _CLICKBAIT_PATTERNS:
+        if p.search(text):
+            return "clickbait"
+    for p in _PROMOTION_PATTERNS:
+        if p.search(text):
+            return "promotion"
+    for p in _RUMOR_PATTERNS:
+        if p.search(text):
+            return "rumor"
+    return None
+
 
 def score_knowledge_item(item: KnowledgeItem, llm: LLMClient) -> float:
     """Score a KnowledgeItem for editorial potential (0-100).
@@ -155,8 +196,23 @@ def score_knowledge_item(item: KnowledgeItem, llm: LLMClient) -> float:
     surprise_potential, retention_potential, familiarity, insight_quality)
     adapted for external content.
 
+    REFACTORY_V2: applies deterministic quality gate first (clickbait,
+    promotion, rumor detection). If detected, assigns a penalty score
+    and marks the item as rejected — no LLM call needed.
+
     Returns the editorial_score (0-100).
     """
+    # REFACTORY_V2: deterministic quality gate (fast, no LLM)
+    quality_issue = _detect_quality_issues(item)
+    if quality_issue:
+        penalty_scores = {"clickbait": 15.0, "promotion": 10.0, "rumor": 20.0}
+        score = penalty_scores.get(quality_issue, 25.0)
+        item.editorial_score = score
+        item.status = KnowledgeItemStatus.rejected.value
+        item.rejection_reason = f"auto-rejected: {quality_issue} detected"
+        log.info(f"KnowledgeItem #{item.id} auto-rejected: {quality_issue} (score={score})")
+        return score
+
     prompt = _build_scoring_prompt(item)
 
     try:
@@ -194,7 +250,11 @@ def score_all_fresh(session: Session, llm: LLMClient, *, limit: int = 50) -> int
 
 
 def _build_scoring_prompt(item: KnowledgeItem) -> str:
-    """Build the LLM prompt for editorial scoring."""
+    """Build the LLM prompt for editorial scoring.
+
+    REFACTORY_V2: includes factual validation gate — clickbait, promotional
+    content, and unverified rumors receive a heavy penalty (score ≤ 20).
+    """
     return (
         "Você é um editor de conteúdo gaming. Avalie o potencial editorial "
         "desta ideia de conteúdo em uma escala de 0-100.\n\n"
@@ -208,6 +268,12 @@ def _build_scoring_prompt(item: KnowledgeItem) -> str:
         "- Retenção: O conteúdo consegue segurar a atenção até o final?\n"
         "- Familiaridade: O tema é reconhecível para o público gaming?\n"
         "- Insight: O conteúdo oferece uma perspectiva nova ou reveladora?\n\n"
+        "GATE DE QUALIDADE FACTUAL (REFACTORY_V2):\n"
+        "- CLICKBAIT: O título promete algo que o conteúdo não entrega? Se sim, score ≤ 15.\n"
+        "- PROMOÇÃO: O conteúdo é primariamente promocional/comercial? Se sim, score ≤ 10.\n"
+        "- RUMOR: O conteúdo apresenta informação não verificada como fato? Se sim, score ≤ 20.\n"
+        "- LEAK NÃO CONFIRMADO: Baseado em vazamentos não confirmados? Se sim, score ≤ 25.\n"
+        "- Se o conteúdo passa no gate factual, avalie normalmente (0-100).\n\n"
         "Responda APENAS com um número de 0 a 100, sem texto adicional."
     )
 

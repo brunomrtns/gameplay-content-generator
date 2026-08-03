@@ -206,6 +206,16 @@ class ContentPlanningService:
                 "reasoning": data.get("reasoning", ""),
                 # V2: track which knowledge item was used (if any)
                 "knowledge_item_id": knowledge_item_id,
+                # REFACTORY_V2: provenance chain — idea → source → facts → script
+                # Tracks the origin of the content idea for auditability.
+                "provenance": {
+                    "source_type": "knowledge_item" if knowledge_item_id else "fact",
+                    "source_id": knowledge_item_id or (fact_id if fact_id else None),
+                    "source_claim": fact.claim if fact else None,
+                    "source_document_id": fact.document_id if fact else None,
+                    "game_name": game.canonical_name,
+                    "planning_scope": scope,
+                },
             },
         )
         session.add(plan)
@@ -343,7 +353,19 @@ class ContentPlanningService:
             energy=max(0.0, min(1.0, float(data.get("energy", 0.7)))),
             music_mood=(data.get("music_mood") or "neutral").strip().lower(),
             visual_strategy=(data.get("visual_strategy") or "gameplay_compilation").strip().lower(),
-            metadata_json={"reasoning": data.get("reasoning", ""), "mode": "curiosity_short"},
+            metadata_json={
+                "reasoning": data.get("reasoning", ""),
+                "mode": "curiosity_short",
+                # REFACTORY_V2: provenance chain for curiosity shorts
+                "provenance": {
+                    "source_type": "fact",
+                    "source_id": chosen_fact_id,
+                    "source_claim": fact.claim if fact else None,
+                    "source_document_id": fact.document_id if fact else None,
+                    "background_game_id": background_game_id,
+                    "planning_scope": "general_curiosity",
+                },
+            },
         )
         session.add(plan)
         session.flush()

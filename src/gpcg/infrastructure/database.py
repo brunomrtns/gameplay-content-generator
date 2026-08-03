@@ -161,6 +161,8 @@ def init_db() -> None:
     _ensure_column(engine, "facts", "is_public", "BOOLEAN DEFAULT 0")
     _ensure_column(engine, "documents", "is_public", "BOOLEAN DEFAULT 0")
     _ensure_column(engine, "knowledge_items", "is_public", "BOOLEAN DEFAULT 0")
+    # REFACTORY_V2: rejection_reason for auto-rejected KIs (clickbait/rumor/promotion)
+    _ensure_column(engine, "knowledge_items", "rejection_reason", "VARCHAR(500)")
     # REFACTORY_V2: consumer_user_id on gameplay_clip_usage for per-consumer
     # usage history (public gameplay: A using a segment doesn't block B).
     _ensure_column(engine, "gameplay_clip_usage", "consumer_user_id", "INTEGER")

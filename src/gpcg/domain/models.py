@@ -1114,6 +1114,8 @@ class KnowledgeItem(Base):
     status: Mapped[str] = mapped_column(
         String(20), default=KnowledgeItemStatus.fresh.value, index=True
     )
+    # REFACTORY_V2: reason for rejection (auto-rejected by quality gate or user)
+    rejection_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Denormalized from Game for filter-without-JOIN (see §7.1)
     franchise: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, index=True)

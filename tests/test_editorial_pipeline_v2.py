@@ -44,13 +44,19 @@ def fresh_db(tmp_path, monkeypatch):
 
 
 def _make_fact(game_id, claim="Test fact claim", quality=0.8, novelty=0.7):
-    """Create a Fact for testing."""
+    """Create a Fact for testing.
+
+    REFACTORY_V2: curiosity_score is now enabled by default, so we set it
+    to a passing value (60.0 > default threshold 40.0) to ensure facts
+    are considered by content planning.
+    """
     return Fact(
         game_id=game_id,
         category="trivia",
         claim=claim,
         quality_score=quality,
         novelty_score=novelty,
+        curiosity_score=60.0,  # REFACTORY_V2: pass curiosity threshold
         used_count=0,
     )
 
