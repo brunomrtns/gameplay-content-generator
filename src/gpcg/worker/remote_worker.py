@@ -687,8 +687,13 @@ class RemoteWorker:
                     return
 
             try:
+                # REFACTORY_V2: pass `producible` (not `inventories`) to the
+                # LLM so it only chooses from games that have both gameplay
+                # AND knowledge. Previously it passed all inventories, causing
+                # the LLM to pick games with gameplay but no facts (which then
+                # fail at content_planning with "no scored facts").
                 decision = editorial._llm_decision_from_data(
-                    inventories, history, channel_context
+                    producible, history, channel_context
                 )
             except Exception as e:
                 log.warning(f"LLM editorial decision failed: {e}, using heuristic")
