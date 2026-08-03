@@ -281,6 +281,8 @@ class RemoteWorker:
             job["gameplay_source"] = data["gameplay_source"]
         if data.get("document"):
             job["document"] = data["document"]
+        if data.get("game"):
+            job["game"] = data["game"]
         return job
 
     # ── Job status update ────────────────────────────────────────────────────

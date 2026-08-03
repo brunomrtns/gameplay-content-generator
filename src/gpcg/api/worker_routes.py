@@ -530,6 +530,7 @@ def claim_job(
                 "job": _serialize_job(job),
                 "gameplay_source": _serialize_gameplay_source_for_job(job, db),
                 "document": _serialize_document_for_job(job, db),
+                "game": _serialize_game_for_job(job, db),
             }
 
     db.commit()
@@ -553,6 +554,23 @@ def _serialize_job(job: Job) -> dict:
         "artifacts": job.artifacts or {},
         "attempts": job.attempts,
         "max_attempts": job.max_attempts,
+    }
+
+
+def _serialize_game_for_job(job: Job, db: Session) -> Optional[dict]:
+    """Serialize game info if the job has a game_id (enrichment, generation jobs)."""
+    if not job.game_id:
+        return None
+    from gpcg.domain.models import Game
+    game = db.get(Game, job.game_id)
+    if not game:
+        return None
+    return {
+        "id": game.id,
+        "canonical_name": game.canonical_name,
+        "slug": game.slug or "",
+        "franchise": game.franchise,
+        "developer": game.developer,
     }
 
 
