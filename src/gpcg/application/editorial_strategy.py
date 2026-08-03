@@ -397,6 +397,17 @@ class EditorialStrategyService:
         """
         games_info = [g.to_prompt_dict() for g in inventory]
         recent_topics = history.get("recent_topics", [])[:10]
+        recent_game_ids = set(history.get("recent_game_ids", [])[:5])
+
+        # Build a list of recently used game names to explicitly tell the LLM
+        recent_game_names = []
+        for inv in inventory:
+            if inv.game_id in recent_game_ids:
+                recent_game_names.append(inv.game_name)
+
+        recent_games_str = (
+            ", ".join(recent_game_names) if recent_game_names else "Nenhum"
+        )
 
         prompt = (
             f"Você é o editor-chefe de um canal no YouTube. Seu trabalho é decidir "
@@ -406,12 +417,15 @@ class EditorialStrategyService:
             f"{json.dumps(games_info, indent=2, ensure_ascii=False)}\n\n"
             f"## Vídeos já produzidos recentemente (evite repetir)\n"
             f"{json.dumps(recent_topics, ensure_ascii=False) if recent_topics else 'Nenhum vídeo ainda'}\n\n"
+            f"## Jogos já usados recentemente (NÃO escolha estes)\n"
+            f"{recent_games_str}\n\n"
             f"## Sua decisão\n"
             f"Escolha UM jogo para o próximo vídeo. Priorize:\n"
             f"1. Jogos que têm gameplays E conhecimento (facts/chunks)\n"
-            f"2. Jogos com menos vídeos produzidos (para variar)\n"
-            f"3. Facts não utilizados (unused_facts > 0)\n"
-            f"4. Evite repetir temas dos vídeos recentes\n\n"
+            f"2. Jogos que NÃO estão na lista de jogos já usados recentemente\n"
+            f"3. Jogos com menos vídeos produzidos (para variar)\n"
+            f"4. Facts não utilizados (unused_facts > 0)\n"
+            f"5. Evite repetir temas dos vídeos recentes\n\n"
             f"Responda em JSON:\n"
             f'{{"game_name": "nome do jogo", "reason": "por que escolheu este jogo"}}\n'
         )

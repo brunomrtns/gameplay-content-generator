@@ -1417,15 +1417,20 @@ def sync_job_result(
         log.info(f"Sync job #{job_id}: merged {len(req.artifacts)} artifacts, keys={list(merged.keys())[:10]}")
 
     # Sync ContentPlan
+    # NOTE: The content_plan id from the remote worker is the LOCAL DB id,
+    # not the VPS DB id. So we always create a new ContentPlan in the VPS DB
+    # (unless we find one already linked to this job).
     if req.content_plan:
         plan_id = req.content_plan.get("id")
+        plan = None
         if plan_id:
             plan = db.query(ContentPlan).filter(ContentPlan.id == plan_id).first()
             if plan:
                 for k, v in req.content_plan.items():
                     if k != "id" and hasattr(plan, k):
                         setattr(plan, k, v)
-        else:
+        if not plan:
+            # Create new ContentPlan in VPS DB (local DB id is irrelevant)
             plan = ContentPlan(
                 user_id=job.user_id,
                 game_id=req.content_plan.get("game_id", job.game_id),
@@ -1446,15 +1451,17 @@ def sync_job_result(
             job.content_plan_id = plan.id
 
     # Sync Script
+    # NOTE: Same as ContentPlan — the script id is from the LOCAL DB.
     if req.script:
         script_id = req.script.get("id")
+        script = None
         if script_id:
             script = db.query(Script).filter(Script.id == script_id).first()
             if script:
                 for k, v in req.script.items():
                     if k != "id" and hasattr(script, k):
                         setattr(script, k, v)
-        elif job.content_plan_id:
+        if not script and job.content_plan_id:
             script = Script(
                 content_plan_id=job.content_plan_id,
                 draft=req.script.get("draft", ""),
@@ -1469,15 +1476,17 @@ def sync_job_result(
             db.add(script)
 
     # Sync Video
+    # NOTE: Same as ContentPlan — the video id is from the LOCAL DB.
     if req.video:
         video_id = req.video.get("id")
+        video = None
         if video_id:
             video = db.query(VideoModel).filter(VideoModel.id == video_id).first()
             if video:
                 for k, v in req.video.items():
                     if k != "id" and hasattr(video, k):
                         setattr(video, k, v)
-        else:
+        if not video:
             video = VideoModel(
                 user_id=job.user_id,
                 job_id=job.id,
