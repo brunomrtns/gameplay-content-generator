@@ -409,6 +409,23 @@ class RemoteWorker:
                 local_path.unlink()
             return False
 
+    def _verify_local_file(self, local_path: Path, expected_hash: str) -> bool:
+        """Verify that a local file matches the expected SHA256 hash."""
+        if not expected_hash or not local_path.exists():
+            return False
+        log.info(f"Verifying local file checksum for {local_path.name}...")
+        sha256 = hashlib.sha256()
+        with open(local_path, "rb") as f:
+            while chunk := f.read(1024 * 1024):
+                sha256.update(chunk)
+        actual_hash = sha256.hexdigest()
+        match = actual_hash.lower() == expected_hash.lower()
+        if match:
+            log.info(f"Checksum OK for {local_path.name}")
+        else:
+            log.warning(f"Checksum mismatch for {local_path.name}: expected {expected_hash[:16]}... got {actual_hash[:16]}...")
+        return match
+
     # ── Confirm download (checksum) ──────────────────────────────────────────
 
     def confirm_download(self, source: dict, local_path: Path) -> bool:
@@ -584,16 +601,44 @@ class RemoteWorker:
             self.submit_job_result(job_id, status="failed", error="No gameplay source in job")
             return
 
-        # Stage 1: Download
+        source_id = source["id"]
+        filename = source["filename"]
+        expected_hash = source.get("file_hash", "")
+        expected_size = source.get("file_size", 0)
+
+        # Local path: /ToshibaHD/gpcg/gameplays/{source_id}_{filename}
+        local_path = self.storage_root / "gameplays" / f"{source_id}_{filename}"
+
+        # Stage 1: Download (skip if file already exists locally with matching hash)
         self.update_job_status(job_id, status="running", stage="download", progress=0.05)
-        local_path = self.download_gameplay(source)
+
+        if local_path.exists() and local_path.stat().st_size > 0:
+            # File already exists locally — verify checksum before reusing
+            if self._verify_local_file(local_path, expected_hash):
+                log.info(f"Reusing existing local file for {filename} (checksum OK)")
+            else:
+                log.warning(f"Local file exists but checksum mismatch — re-downloading")
+                local_path.unlink()
+                local_path = self.download_gameplay(source)
+        else:
+            local_path = self.download_gameplay(source)
 
         # Stage 2: Confirm download (checksum) → VPS deletes temp file
+        # Skip if temp file was already deleted (re-processing a job)
         self.update_job_status(job_id, status="running", stage="confirm_download", progress=0.10)
-        confirmed = self.confirm_download(source, local_path)
-        if not confirmed:
-            self.submit_job_result(job_id, status="failed", error="Checksum mismatch")
-            return
+        try:
+            confirmed = self.confirm_download(source, local_path)
+            if not confirmed:
+                self.submit_job_result(job_id, status="failed", error="Checksum mismatch")
+                return
+        except Exception as e:
+            # Temp file may have been deleted already (re-processing after restart)
+            # If local file exists and hash is valid, continue with mapping
+            if local_path.exists() and self._verify_local_file(local_path, expected_hash):
+                log.warning(f"Confirm-download failed (temp already deleted?): {e} — continuing with local file")
+            else:
+                self.submit_job_result(job_id, status="failed", error=f"Download confirm failed: {e}")
+                return
 
         # Stage 3: Run GameplayAnalyzer locally
         self.update_job_status(job_id, status="running", stage="mapping", progress=0.15)
