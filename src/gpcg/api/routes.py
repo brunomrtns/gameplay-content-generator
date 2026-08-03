@@ -1015,7 +1015,7 @@ def publish_video(
         title=title,
         description=description,
         tags=tags,
-        user_id=settings.gpcg_youtube_user_id,
+        user_id=user.id,
         privacy=privacy,
         category_id=category_id,
     )

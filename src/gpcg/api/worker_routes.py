@@ -797,6 +797,8 @@ def _maybe_auto_publish(job_id: int) -> None:
             log.error(f"_maybe_auto_publish: job #{job_id} not found")
             return
 
+        job_user_id = job.user_id
+
         video = db.query(VideoModel).filter(VideoModel.job_id == job.id).first()
         if not video or not video.storage_key:
             log.info(f"_maybe_auto_publish: no video/storage_key for job #{job_id}")
@@ -856,7 +858,7 @@ def _maybe_auto_publish(job_id: int) -> None:
         title=title,
         description=description,
         tags=tags,
-        user_id=settings.gpcg_youtube_user_id,
+        user_id=job_user_id,
         privacy=privacy,
         category_id=category_id,
     )
