@@ -403,4 +403,34 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ query, game_id, top_k }),
     }),
+
+  // ── V2: Game Registry ──────────────────────────────────────────────────
+  enrichGame: (id: number) =>
+    request<any>(`/games/${id}/enrich`, { method: "POST" }),
+  getGameAliases: (id: number) => request<any>(`/games/${id}/aliases`),
+
+  // ── V2: Knowledge Items (Content Intelligence) ─────────────────────────
+  listKnowledgeItems: (params?: {
+    game_id?: number;
+    item_type?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+    min_score?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.game_id) qs.set("game_id", String(params.game_id));
+    if (params?.item_type) qs.set("item_type", params.item_type);
+    if (params?.status) qs.set("status", params.status);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.offset) qs.set("offset", String(params.offset));
+    if (params?.min_score) qs.set("min_score", String(params.min_score));
+    return request<any>(`/knowledge-items?${qs}`);
+  },
+  getKnowledgeItemStats: () => request<any>("/knowledge-items/stats"),
+  getKnowledgeItem: (id: number) => request<any>(`/knowledge-items/${id}`),
+  rejectKnowledgeItem: (id: number) =>
+    request<any>(`/knowledge-items/${id}/reject`, { method: "POST" }),
+  triggerContentCollection: () =>
+    request<any>("/knowledge-items/collect", { method: "POST" }),
 };

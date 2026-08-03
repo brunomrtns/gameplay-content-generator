@@ -8,6 +8,7 @@ import { ContentPage } from "@/pages/content";
 import { JobsPage } from "@/pages/jobs";
 import { AutomationPage } from "@/pages/automation";
 import { VideosPage } from "@/pages/videos";
+import { IdeasPage } from "@/pages/ideas";
 import { AdminPage } from "@/pages/admin";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -84,6 +85,7 @@ const router = createBrowserRouter(
             { path: "/jobs", element: <JobsPage /> },
             { path: "/automation", element: <AutomationPage /> },
             { path: "/videos", element: <VideosPage /> },
+            { path: "/ideas", element: <IdeasPage /> },
             { path: "/admin", element: <AdminRoute /> },
           ],
         },
