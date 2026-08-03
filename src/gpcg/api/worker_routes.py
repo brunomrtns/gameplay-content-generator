@@ -1331,9 +1331,13 @@ def get_job_data(
                 "rewrite_count": s.rewrite_count,
             } for s in scripts]
 
-    # Facts for the game
+    # Facts for the game — REFACTORY_V2: filter by visibility (own + shared + public)
     if job.game_id:
-        facts = db.query(Fact).filter(Fact.game_id == job.game_id).all()
+        from gpcg.domain.visibility import visible_to_user
+        fact_vis = visible_to_user(Fact.user_id, Fact.is_public, job.user_id)
+        facts = db.query(Fact).filter(
+            Fact.game_id == job.game_id, fact_vis
+        ).all()
         data["facts"] = [{
             "id": f.id, "game_id": f.game_id, "document_id": f.document_id,
             "category": f.category, "claim": f.claim,
@@ -1343,11 +1347,14 @@ def get_job_data(
         } for f in facts]
 
     # Knowledge items for the game (V2 content intelligence)
+    # REFACTORY_V2: filter by visibility (own + shared + public)
     if job.game_id:
         try:
             from gpcg.domain.models import KnowledgeItem
+            from gpcg.domain.visibility import visible_to_user as _ki_vis
+            ki_vis = _ki_vis(KnowledgeItem.user_id, KnowledgeItem.is_public, job.user_id)
             ki_list = db.query(KnowledgeItem).filter(
-                KnowledgeItem.game_id == job.game_id
+                KnowledgeItem.game_id == job.game_id, ki_vis
             ).limit(50).all()
             data["knowledge_items"] = [{
                 "id": ki.id, "user_id": ki.user_id, "game_id": ki.game_id,

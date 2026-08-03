@@ -672,6 +672,10 @@ class Document(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     game_id: Mapped[Optional[int]] = mapped_column(ForeignKey("games.id"), nullable=True, index=True)
+    # REFACTORY_V2: visibility for the hybrid content pool model.
+    # NULL user_id = system-collected (shared pool). user_id set + is_public=False
+    # = private to owner. user_id set + is_public=True = shared with other users.
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     filename: Mapped[str] = mapped_column(String(255))
     file_path: Mapped[str] = mapped_column(String(1024))
     file_type: Mapped[str] = mapped_column(String(20))  # pdf, txt, md, docx
@@ -704,6 +708,10 @@ class Fact(Base):
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     game_id: Mapped[Optional[int]] = mapped_column(ForeignKey("games.id"), nullable=True, index=True)
     document_id: Mapped[Optional[int]] = mapped_column(ForeignKey("documents.id"), nullable=True)
+    # REFACTORY_V2: visibility for the hybrid content pool model.
+    # NULL user_id = system-collected (shared pool). user_id set + is_public=False
+    # = private to owner. user_id set + is_public=True = shared with other users.
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     category: Mapped[str] = mapped_column(String(50), default="general")  # curiosity, easter_egg, trivia, dev, etc
     claim: Mapped[str] = mapped_column(Text)
@@ -1072,6 +1080,10 @@ class KnowledgeItem(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     game_id: Mapped[Optional[int]] = mapped_column(ForeignKey("games.id"), nullable=True, index=True)
+    # REFACTORY_V2: visibility for the hybrid content pool model.
+    # NULL user_id = system-collected (shared pool). user_id set + is_public=False
+    # = private to owner. user_id set + is_public=True = shared with other users.
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     # Identification
     title: Mapped[str] = mapped_column(String(500))

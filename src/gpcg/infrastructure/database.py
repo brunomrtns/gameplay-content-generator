@@ -155,6 +155,12 @@ def init_db() -> None:
     _ensure_column(engine, "videos", "knowledge_item_id", "INTEGER")
     # V2: GameplaySource.is_public — public gameplays available as fallback
     _ensure_column(engine, "gameplay_sources", "is_public", "BOOLEAN DEFAULT 0")
+    # REFACTORY_V2: is_public on content tables for hybrid pool model.
+    # NULL user_id = system-collected (shared). user_id set + is_public controls
+    # visibility to other users. See docs/REFACTORY_V2_DIAGNOSTIC.md §I.1.
+    _ensure_column(engine, "facts", "is_public", "BOOLEAN DEFAULT 0")
+    _ensure_column(engine, "documents", "is_public", "BOOLEAN DEFAULT 0")
+    _ensure_column(engine, "knowledge_items", "is_public", "BOOLEAN DEFAULT 0")
     # V2: gameplay_clip_usage table is created by create_all() above
     # V2: data migrations (slug generation, aliases JSON → game_aliases, user_id deprecation)
     _migrate_v2_game_registry(engine)

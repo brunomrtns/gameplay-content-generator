@@ -457,6 +457,7 @@ def upload_document(
     game_id: Optional[int] = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Upload a reference document (PDF/TXT/MD/DOCX).
 
@@ -488,6 +489,8 @@ def upload_document(
 
     doc = Document(
         game_id=game_id,  # None for general curiosity docs
+        user_id=user.id,  # REFACTORY_V2: owner-scoped document
+        is_public=False,  # REFACTORY_V2: private by default (user can toggle)
         filename=file.filename or dest.name,
         file_path=str(dest),
         file_type=ftype,
@@ -504,14 +507,20 @@ def list_documents(
     game_id: Optional[int] = Query(None),
     general: bool = Query(False),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """List documents. Either for a specific game, or general (general=true)."""
+    """List documents. Either for a specific game, or general (general=true).
+
+    REFACTORY_V2: filtered by visibility (own + shared pool + public of others).
+    """
+    from gpcg.domain.visibility import visible_to_user
+    doc_vis = visible_to_user(Document.user_id, Document.is_public, user.id)
     if general:
-        stmt = select(Document).where(Document.game_id.is_(None))
+        stmt = select(Document).where(Document.game_id.is_(None), doc_vis)
     elif game_id is not None:
-        stmt = select(Document).where(Document.game_id == game_id)
+        stmt = select(Document).where(Document.game_id == game_id, doc_vis)
     else:
-        stmt = select(Document)
+        stmt = select(Document).where(doc_vis)
     docs = db.execute(stmt.order_by(Document.created_at.desc())).scalars().all()
     return [
         {
@@ -552,14 +561,20 @@ def list_facts(
     general: bool = Query(False),
     category: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """List facts. Either for a specific game, or general (general=true)."""
+    """List facts. Either for a specific game, or general (general=true).
+
+    REFACTORY_V2: filtered by visibility (own + shared pool + public of others).
+    """
+    from gpcg.domain.visibility import visible_to_user
+    fact_vis = visible_to_user(Fact.user_id, Fact.is_public, user.id)
     if general:
-        stmt = select(Fact).where(Fact.game_id.is_(None))
+        stmt = select(Fact).where(Fact.game_id.is_(None), fact_vis)
     elif game_id is not None:
-        stmt = select(Fact).where(Fact.game_id == game_id)
+        stmt = select(Fact).where(Fact.game_id == game_id, fact_vis)
     else:
-        stmt = select(Fact)
+        stmt = select(Fact).where(fact_vis)
     stmt = stmt.order_by((Fact.quality_score * Fact.novelty_score).desc())
     if category:
         stmt = stmt.where(Fact.category == category)
@@ -584,8 +599,18 @@ def list_facts(
 
 
 @router.get("/content-plans")
-def list_plans(game_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
-    stmt = select(ContentPlan).order_by(ContentPlan.created_at.desc())
+def list_plans(
+    game_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    # REFACTORY_V2: ContentPlan is a derived entity (always owned by the user
+    # who created it). Filter by user_id — no shared pool for plans.
+    stmt = (
+        select(ContentPlan)
+        .where(ContentPlan.user_id == user.id)
+        .order_by(ContentPlan.created_at.desc())
+    )
     if game_id is not None:
         stmt = stmt.where(ContentPlan.game_id == game_id)
     plans = db.execute(stmt).scalars().all()
@@ -757,10 +782,15 @@ def create_generation_job(
         voice = auto_cfg.get("voice", "")
     voice_path = ""
     if voice:
-        vp = settings.voices_dir / voice
-        if not vp.exists():
+        # REFACTORY_V2: look in user's isolated directory first, then shared root
+        user_voice = settings.voices_dir / f"user_{user.id}" / voice
+        shared_voice = settings.voices_dir / voice
+        if user_voice.exists():
+            voice_path = str(user_voice)
+        elif shared_voice.exists():
+            voice_path = str(shared_voice)
+        else:
             raise HTTPException(404, f"voice '{voice}' not found — upload it first")
-        voice_path = str(vp)
 
     svc = GenerationService()
     job = svc.create_job(
@@ -860,10 +890,15 @@ def create_curiosity_job(
         voice = auto_cfg.get("voice", "")
     voice_path = ""
     if voice:
-        vp = settings.voices_dir / voice
-        if not vp.exists():
+        # REFACTORY_V2: look in user's isolated directory first, then shared root
+        user_voice = settings.voices_dir / f"user_{user.id}" / voice
+        shared_voice = settings.voices_dir / voice
+        if user_voice.exists():
+            voice_path = str(user_voice)
+        elif shared_voice.exists():
+            voice_path = str(shared_voice)
+        else:
             raise HTTPException(404, f"voice '{voice}' not found — upload it first")
-        voice_path = str(vp)
 
     svc = GenerationService()
     job = svc.create_curiosity_job(
@@ -1162,28 +1197,46 @@ def delete_video(
 
 
 @router.get("/voices")
-def list_voices():
-    """List available TTS voice reference files (uploaded via /voices/upload)."""
+def list_voices(user: User = Depends(get_current_user)):
+    """List available TTS voice reference files (uploaded via /voices/upload).
+
+    REFACTORY_V2: voices are isolated per user under data/voices/{user_id}/.
+    Falls back to the shared root for legacy voices (pre-refactory).
+    """
     settings = get_settings()
-    voices_dir = settings.voices_dir
+    user_dir = settings.voices_dir / f"user_{user.id}"
     voices = []
-    for p in sorted(voices_dir.glob("*")):
-        if p.suffix.lower() in (".wav", ".mp3", ".ogg", ".flac", ".m4a"):
+    # User's own voices (isolated directory)
+    if user_dir.exists():
+        for p in sorted(user_dir.glob("*")):
+            if p.suffix.lower() in (".wav", ".mp3", ".ogg", ".flac", ".m4a"):
+                voices.append({
+                    "filename": p.name,
+                    "file_size": p.stat().st_size,
+                    "file_size_kb": round(p.stat().st_size / 1024, 1),
+                    "owner": "self",
+                })
+    # Legacy shared voices (root directory) — read-only for backward compat
+    for p in sorted(settings.voices_dir.glob("*")):
+        if p.is_file() and p.suffix.lower() in (".wav", ".mp3", ".ogg", ".flac", ".m4a"):
             voices.append({
                 "filename": p.name,
                 "file_size": p.stat().st_size,
                 "file_size_kb": round(p.stat().st_size / 1024, 1),
+                "owner": "shared",
             })
     return voices
 
 
 @router.post("/voices/upload")
-def upload_voice(file: UploadFile = File(...)):
+def upload_voice(file: UploadFile = File(...), user: User = Depends(get_current_user)):
     """Upload a TTS voice reference file (.wav or .mp3).
 
-    The file is saved to data/voices/ and can be selected when creating a job
-    via the 'voice' parameter. video-generate's XTTS uses this as the
-    speaker_wav reference to clone the voice.
+    The file is saved to data/voices/{user_id}/ and can be selected when
+    creating a job via the 'voice' parameter. video-generate's XTTS uses
+    this as the speaker_wav reference to clone the voice.
+
+    REFACTORY_V2: voices are isolated per user under data/voices/{user_id}/.
     """
     settings = get_settings()
     if not file.filename:
@@ -1191,10 +1244,12 @@ def upload_voice(file: UploadFile = File(...)):
     suffix = Path(file.filename).suffix.lower()
     if suffix not in (".wav", ".mp3", ".ogg", ".flac", ".m4a"):
         raise HTTPException(400, f"unsupported voice format '{suffix}' — use .wav or .mp3")
-    dest = settings.voices_dir / file.filename
+    user_dir = settings.voices_dir / f"user_{user.id}"
+    user_dir.mkdir(parents=True, exist_ok=True)
+    dest = user_dir / file.filename
     if dest.exists():
         # Don't overwrite — add suffix
-        dest = settings.voices_dir / f"{Path(file.filename).stem}_{int(time.time())}{suffix}"
+        dest = user_dir / f"{Path(file.filename).stem}_{int(time.time())}{suffix}"
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
     return {
@@ -1206,14 +1261,19 @@ def upload_voice(file: UploadFile = File(...)):
 
 
 @router.delete("/voices/{filename}")
-def delete_voice(filename: str):
-    """Delete an uploaded voice file."""
+def delete_voice(filename: str, user: User = Depends(get_current_user)):
+    """Delete an uploaded voice file.
+
+    REFACTORY_V2: only deletes from the user's own directory. Legacy shared
+    voices cannot be deleted by non-admin users.
+    """
     settings = get_settings()
     # Prevent path traversal
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(400, "invalid filename")
-    p = settings.voices_dir / filename
+    user_dir = settings.voices_dir / f"user_{user.id}"
+    p = user_dir / filename
     if not p.exists():
-        raise HTTPException(404, "voice not found")
+        raise HTTPException(404, "voice not found in your directory")
     p.unlink()
     return {"deleted": filename}

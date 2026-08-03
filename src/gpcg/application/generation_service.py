@@ -369,7 +369,8 @@ class GenerationService:
                         JobStage.content_planning.value,
                     )
                 plan = planner.plan_for_general_curiosity(
-                    session, bg_game_id, fact_id=general_fact_id
+                    session, bg_game_id, fact_id=general_fact_id,
+                    user_id=job.user_id,
                 )
                 if plan is None:
                     raise GenerationError(
@@ -393,6 +394,7 @@ class GenerationService:
                     session, job.game_id,
                     fact_id=editorial_fact_id,
                     avoid_topics=recent_topics,
+                    user_id=job.user_id,
                 )
                 if plan is None:
                     raise GenerationError(
@@ -496,6 +498,7 @@ class GenerationService:
                 story_concept=story_concept,
                 channel_context=channel_context,
                 knowledge_context=knowledge_context,
+                user_id=job.user_id,
             )
             if script is None:
                 raise GenerationError("script generation failed", JobStage.script.value)
@@ -685,8 +688,10 @@ class GenerationService:
             request_data["musica_fundo"] = music_path_str
             # Pass transition overrides as top-level request_data fields
             # (resolve_video_profile in video-generate applies these as overrides)
-            trans_type = self._get_artifact(job_id, "transition_type")
-            trans_dur = self._get_artifact(job_id, "transition_duration")
+            # REFACTORY_V2: fall back to config defaults if not in artifacts
+            # (previously video-generate applied its own internal defaults).
+            trans_type = self._get_artifact(job_id, "transition_type") or self.settings.gpcg_transition_type
+            trans_dur = self._get_artifact(job_id, "transition_duration") or self.settings.gpcg_transition_duration
             if trans_type:
                 request_data["transition_type"] = trans_type
             if trans_dur:
@@ -1124,6 +1129,7 @@ class GenerationService:
                     creative_plan=creative_plan,
                     critic_feedback=review.feedback,
                     previous_script=current_script.final,
+                    user_id=job.user_id,
                 )
                 if revised is None:
                     log.error(f"script revision failed for job #{job_id}")

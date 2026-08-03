@@ -63,6 +63,7 @@ class ContentPlanningService:
         avoid_topics: Optional[list[str]] = None,
         *,
         scope: str = ContentScope.game.value,
+        user_id: Optional[int] = None,
     ) -> Optional[ContentPlan]:
         """Pick the best unused fact/item and create a ContentPlan.
 
@@ -73,10 +74,17 @@ class ContentPlanningService:
             avoid_topics: Recent topics to avoid repeating (editorial memory)
             scope: V2 content scope — "game", "franchise", or "developer".
                     Only used when GPCG_CONTENT_INTELLIGENCE_ENABLED is on.
+            user_id: REFACTORY_V2 — consumer user for content visibility filter.
+                     When provided, only facts/KIs visible to this user are
+                     considered (own + shared pool + public of others).
         """
         game = session.get(Game, game_id)
         if game is None:
             raise ValueError(f"game #{game_id} not found")
+
+        # REFACTORY_V2: visibility filter for hybrid content pool
+        from gpcg.domain.visibility import visible_to_user
+        fact_vis = visible_to_user(Fact.user_id, Fact.is_public, user_id)
 
         # If a specific fact_id is provided (editorial decision), try it first
         preselected_fact = None
@@ -93,6 +101,7 @@ class ContentPlanningService:
                 .where(Fact.game_id == game_id)
                 .where(Fact.quality_score > 0)
                 .where(Fact.curiosity_score >= self.settings.gpcg_curiosity_min_threshold)
+                .where(fact_vis)
                 .order_by(
                     (Fact.curiosity_score * 0.5 + Fact.quality_score * 0.3 + Fact.novelty_score * 0.2).desc(),
                     Fact.used_count.asc(),
@@ -103,13 +112,14 @@ class ContentPlanningService:
                 select(Fact)
                 .where(Fact.game_id == game_id)
                 .where(Fact.quality_score > 0)
+                .where(fact_vis)
                 .order_by((Fact.quality_score * Fact.novelty_score).desc(), Fact.used_count.asc())
             ).scalars().all()
 
         # V2: collect KnowledgeItems if content intelligence is enabled
         knowledge_items: list[KnowledgeItem] = []
         if self.settings.gpcg_content_intelligence_enabled:
-            knowledge_items = self._get_knowledge_items(session, game_id, scope)
+            knowledge_items = self._get_knowledge_items(session, game_id, scope, user_id=user_id)
 
         if not facts and preselected_fact is None and not knowledge_items:
             log.warning(f"no scored facts or knowledge items for game '{game.canonical_name}'")
@@ -183,6 +193,7 @@ class ContentPlanningService:
         plan = ContentPlan(
             game_id=game_id,
             fact_id=fact_id,
+            user_id=user_id,
             format=self.settings.gpcg_default_format,
             target_duration=self.settings.gpcg_default_target_duration,
             topic=(data.get("topic") or "").strip(),
@@ -220,16 +231,23 @@ class ContentPlanningService:
         session: Session,
         background_game_id: int,
         fact_id: Optional[int] = None,
+        *,
+        user_id: Optional[int] = None,
     ) -> Optional[ContentPlan]:
         """Create a ContentPlan for a general curiosity (not game-specific).
 
         The fact comes from the general pool (game_id=NULL).
         The background_game_id is the game whose gameplay will run in the background.
         If fact_id is provided, use that specific fact; otherwise auto-pick the best.
+
+        REFACTORY_V2: applies visibility filter (own + shared pool + public).
         """
         bg_game = session.get(Game, background_game_id)
         if bg_game is None:
             raise ValueError(f"background game #{background_game_id} not found")
+
+        from gpcg.domain.visibility import visible_to_user
+        fact_vis = visible_to_user(Fact.user_id, Fact.is_public, user_id)
 
         # Get scored general facts (game_id IS NULL)
         if fact_id is not None:
@@ -242,6 +260,7 @@ class ContentPlanningService:
                 .where(Fact.game_id.is_(None))
                 .where(Fact.quality_score > 0)
                 .where(Fact.curiosity_score >= self.settings.gpcg_curiosity_min_threshold)
+                .where(fact_vis)
                 .order_by(
                     (Fact.curiosity_score * 0.5 + Fact.quality_score * 0.3 + Fact.novelty_score * 0.2).desc(),
                     Fact.used_count.asc(),
@@ -252,6 +271,7 @@ class ContentPlanningService:
                 select(Fact)
                 .where(Fact.game_id.is_(None))
                 .where(Fact.quality_score > 0)
+                .where(fact_vis)
                 .order_by((Fact.quality_score * Fact.novelty_score).desc(), Fact.used_count.asc())
             ).scalars().all()
 
@@ -314,6 +334,7 @@ class ContentPlanningService:
             game_id=None,  # general curiosity — not about a game
             background_game_id=background_game_id,
             fact_id=chosen_fact_id,
+            user_id=user_id,
             format=self.settings.gpcg_default_format,
             target_duration=self.settings.gpcg_default_target_duration,
             topic=(data.get("topic") or "").strip(),
@@ -343,21 +364,29 @@ class ContentPlanningService:
         session: Session,
         game_id: int,
         scope: str,
+        *,
+        user_id: Optional[int] = None,
     ) -> list[KnowledgeItem]:
         """V2: Get fresh KnowledgeItems for a game, filtered by scope.
 
         scope="game": items with game_id == this game
         scope="franchise": items from games with the same franchise
         scope="developer": items from games with the same developer
+
+        REFACTORY_V2: applies visibility filter (own + shared pool + public).
         """
         game = session.get(Game, game_id)
         if not game:
             return []
 
+        from gpcg.domain.visibility import visible_to_user
+        ki_vis = visible_to_user(KnowledgeItem.user_id, KnowledgeItem.is_public, user_id)
+
         stmt = (
             select(KnowledgeItem)
             .where(KnowledgeItem.status == KnowledgeItemStatus.fresh.value)
             .where(KnowledgeItem.editorial_score >= self.settings.gpcg_content_min_editorial_score)
+            .where(ki_vis)
             .order_by(KnowledgeItem.editorial_score.desc())
             .limit(10)
         )

@@ -264,6 +264,7 @@ class ScriptService:
         knowledge_context: str = "",
         critic_feedback: Optional[str] = None,
         previous_script: Optional[str] = None,
+        user_id: Optional[int] = None,
     ) -> Optional[Script]:
         """Generate draft → optimize → final script for a content plan.
 
@@ -351,7 +352,7 @@ class ScriptService:
                 final = revised
                 char_count = len(final)
                 # Still run originality check
-                source_texts, fact_claims = self._collect_sources(session, plan)
+                source_texts, fact_claims = self._collect_sources(session, plan, user_id=user_id)
                 all_sources = list(source_texts)
                 if fact_claims:
                     all_sources.append(("extracted_facts", " ".join(fact_claims)))
@@ -453,7 +454,7 @@ class ScriptService:
         # ── Anti-plagiarism: originality check + automatic rewrite ─────────
         # Compare the final script against source documents + fact claims.
         # If too similar, rewrite via LLM and re-check (up to max_rewrites).
-        source_texts, fact_claims = self._collect_sources(session, plan)
+        source_texts, fact_claims = self._collect_sources(session, plan, user_id=user_id)
         ngram_n = s.gpcg_originality_ngram_size
         threshold = s.gpcg_originality_threshold
         rewrite_count = 0
@@ -714,31 +715,37 @@ class ScriptService:
         return "\n".join(parts)
 
     def _collect_sources(
-        self, session: Session, plan: ContentPlan
+        self, session: Session, plan: ContentPlan, *, user_id: Optional[int] = None
     ) -> tuple[list[tuple[str, str]], list[str]]:
         """Collect source texts (documents) and fact claims for originality checking.
 
         For game-specific plans: loads docs/facts for that game.
         For general curiosity plans (game_id=None): loads general docs/facts (game_id IS NULL).
+
+        REFACTORY_V2: applies visibility filter (own + shared pool + public).
         """
         from gpcg.domain.models import Document, Fact
+        from gpcg.domain.visibility import visible_to_user
         from sqlalchemy import select
+
+        doc_vis = visible_to_user(Document.user_id, Document.is_public, user_id)
+        fact_vis = visible_to_user(Fact.user_id, Fact.is_public, user_id)
 
         # Load documents — game-specific or general (game_id IS NULL)
         if plan.game_id is not None:
             docs = session.execute(
-                select(Document).where(Document.game_id == plan.game_id)
+                select(Document).where(Document.game_id == plan.game_id, doc_vis)
             ).scalars().all()
             facts = session.execute(
-                select(Fact).where(Fact.game_id == plan.game_id)
+                select(Fact).where(Fact.game_id == plan.game_id, fact_vis)
             ).scalars().all()
         else:
             # General curiosity — load general docs/facts (game_id IS NULL)
             docs = session.execute(
-                select(Document).where(Document.game_id.is_(None))
+                select(Document).where(Document.game_id.is_(None), doc_vis)
             ).scalars().all()
             facts = session.execute(
-                select(Fact).where(Fact.game_id.is_(None))
+                select(Fact).where(Fact.game_id.is_(None), fact_vis)
             ).scalars().all()
 
         source_texts: list[tuple[str, str]] = []

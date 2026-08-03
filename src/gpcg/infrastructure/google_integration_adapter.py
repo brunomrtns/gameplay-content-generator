@@ -83,7 +83,16 @@ class GoogleIntegrationAdapter:
         else:
             remote_path = video_path_str
 
-        uid = user_id or self.settings.gpcg_youtube_user_id
+        # REFACTORY_V2: user_id is mandatory — never fall back to a global default.
+        # The global gpcg_youtube_user_id was a single-user-era fallback that
+        # could cause cross-user publication if a caller forgot to pass user_id.
+        # Now we fail explicitly instead of silently publishing to the wrong channel.
+        if user_id is None:
+            raise ValueError(
+                "upload_to_youtube requires user_id — global fallback removed "
+                "for multi-user safety (REFACTORY_V2)"
+            )
+        uid = user_id
         priv = privacy or self.settings.gpcg_youtube_privacy
         cat = str(category_id or self.settings.gpcg_youtube_category_id)
         all_tags = list(dict.fromkeys((tags or []) + self._default_tags()))

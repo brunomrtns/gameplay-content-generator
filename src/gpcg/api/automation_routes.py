@@ -405,36 +405,43 @@ def create_job_from_decision(
     config = auto.config or {}
 
     from gpcg.application.generation_service import GenerationService
+    from gpcg.config import get_settings
 
     service = GenerationService()
+    settings = get_settings()
 
+    # REFACTORY_V2: use settings defaults instead of hardcoded 0/"" so that
+    # jobs created from automation decisions respect the same defaults as
+    # the main POST /api/jobs/generate endpoint.
     subtitle_kwargs = dict(
-        scene_duration=config.get("scene_duration", 0),
-        video_format=config.get("video_format", ""),
-        subtitle_font=config.get("subtitle_font", ""),
-        subtitle_font_size=config.get("subtitle_font_size", 0),
-        subtitle_color=config.get("subtitle_color", ""),
-        subtitle_outline_color=config.get("subtitle_outline_color", ""),
-        subtitle_position=config.get("subtitle_position", ""),
-        subtitle_case=config.get("subtitle_case", ""),
+        scene_duration=config.get("scene_duration", settings.gpcg_scene_duration),
+        video_format=config.get("video_format", settings.gpcg_video_format),
+        subtitle_font=config.get("subtitle_font", settings.gpcg_subtitle_font),
+        subtitle_font_size=config.get("subtitle_font_size", settings.gpcg_subtitle_font_size),
+        subtitle_color=config.get("subtitle_color", settings.gpcg_subtitle_color),
+        subtitle_outline_color=config.get("subtitle_outline_color", settings.gpcg_subtitle_outline_color),
+        subtitle_position=config.get("subtitle_position", settings.gpcg_subtitle_position),
+        subtitle_case=config.get("subtitle_case", settings.gpcg_subtitle_case),
         subtitle_box_enabled=config.get("subtitle_box_enabled"),
         subtitle_box_color=config.get("subtitle_box_color", ""),
         subtitle_box_padding=config.get("subtitle_box_padding", 0),
         subtitle_stroke_color=config.get("subtitle_stroke_color", ""),
         subtitle_stroke_width=config.get("subtitle_stroke_width", 0),
         subtitle_rounded_box=config.get("subtitle_rounded_box"),
-        transition_type=config.get("transition_type", ""),
-        transition_duration=config.get("transition_duration", 0),
-        creative_style=config.get("creative_style", ""),
+        transition_type=config.get("transition_type", settings.gpcg_transition_type),
+        transition_duration=config.get("transition_duration", settings.gpcg_transition_duration),
+        creative_style=config.get("creative_style", settings.gpcg_creative_engine_style),
     )
     voice_name = config.get("voice", "")
     voice_path = ""
     if voice_name:
-        from gpcg.config import get_settings
-        settings = get_settings()
-        vp = settings.voices_dir / voice_name
-        if vp.exists():
-            voice_path = str(vp)
+        # REFACTORY_V2: look in user's isolated directory first, then shared root
+        user_voice = settings.voices_dir / f"user_{req.user_id}" / voice_name
+        shared_voice = settings.voices_dir / voice_name
+        if user_voice.exists():
+            voice_path = str(user_voice)
+        elif shared_voice.exists():
+            voice_path = str(shared_voice)
     subtitle_kwargs["voice_path"] = voice_path
 
     if req.job_type == "generate_short" and req.game_id:

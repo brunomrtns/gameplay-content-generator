@@ -144,6 +144,8 @@ def extract_facts_from_document(
             fact = Fact(
                 game_id=document.game_id,
                 document_id=document.id,
+                user_id=document.user_id,  # REFACTORY_V2: inherit owner from source document
+                is_public=document.is_public,  # REFACTORY_V2: inherit visibility from source document
                 category=category,
                 claim=claim,
                 source_ref=source_ref,

@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     gpcg_subtitle_outline_color: str = ""  # e.g. "black"
     gpcg_subtitle_position: str = ""  # "top", "middle", "bottom"
     gpcg_subtitle_case: str = ""  # "upper", "lower", "none"
+    # REFACTORY_V2: transition defaults (previously missing — video-generate
+    # applied its own internal defaults when artifacts didn't include them).
+    gpcg_transition_type: str = "fade"  # FFmpeg xfade name
+    gpcg_transition_duration: float = 0.5  # seconds
 
     # ── Anti-plagiarism ──────────────────────────────────────────────────────
     # Max automatic rewrites when originality score < 70 (n-gram overlap check)
@@ -129,16 +133,9 @@ class Settings(BaseSettings):
     gpcg_creative_engine_beat_oriented: bool = False
 
     # ── Humanization (V2 — break AI patterns, ensure orality) ────────────────
-    # Master switch for the humanization pass (between script and script_review).
-    # Hybrid: regex detects AI patterns, LLM corrects them.
-    # See docs/EDITORIAL_REFACTOR_PLAN_V2.md §4.3, Fase 4.
-    gpcg_humanization_enabled: bool = False
-    # LLM model for the humanization pass (null = default text model).
-    gpcg_humanization_model: str = ""
-    # Temperature for humanization (lower = more conservative corrections).
-    gpcg_humanization_temperature: float = 0.4
-    # Max tokens for the humanization LLM response.
-    gpcg_humanization_max_tokens: int = 2048
+    # NOTE: full config block is defined below (search for "Humanization (V2
+    # editorial architecture)"). This section was a duplicate that caused
+    # conflicting defaults. Removed in REFACTORY_V2.
 
     # ── Gameplay Understanding (semantic analysis) ──────────────────────────
     # Master switch for automatic gameplay analysis on ingestion.

@@ -102,6 +102,15 @@ class RenderPlanBuilder:
 
         # Resolve subtitle config
         if subtitle_config is None:
+            # REFACTORY_V2: this path means the caller didn't pass per-job
+            # subtitle config. Log a warning so it's visible if artifacts are
+            # missing. GenerationService should always pass a non-None config
+            # constructed from job.artifacts["subtitle_config"].
+            log.warning(
+                "RenderPlanBuilder.build: subtitle_config is None — "
+                "falling back to global config defaults. This may indicate "
+                "missing subtitle_config in job artifacts."
+            )
             subtitle_config = SubtitleConfig(
                 font=self.settings.gpcg_subtitle_font,
                 font_size=self.settings.gpcg_subtitle_font_size,
