@@ -1251,18 +1251,51 @@ A validação de duração no `QAService` ocorre APÓS o render e é permissiva 
 
 Isso é tarde demais e permissivo demais.
 
-## Duração curta pode ser correta
+## Duração curta pode ser correta (mas só depois de provar que está completa)
 
 NÃO transforme a regra anti-padding no extremo oposto.
 
-Um vídeo de 25–30 segundos pode ser excelente se:
+Um vídeo de 25–30 segundos pode ser excelente se a história realmente termina ali.
 
-* a história realmente termina ali;
-* possui descoberta;
-* possui progressão suficiente;
-* possui payoff;
-* não está truncado;
-* não existe informação relevante adicional necessária.
+MAS aceitar uma duração curta NÃO pode virar um atalho operacional para o pipeline.
+
+Antes de concluir que um vídeo curto é editorialmente adequado, o sistema deve ter evidência de que:
+
+* a história está completa;
+* existe descoberta;
+* existe progressão suficiente;
+* existe payoff;
+* não há contexto factual relevante faltando;
+* não há fonte complementar razoável que mudaria materialmente a compreensão;
+* o roteiro não está curto por falha de pesquisa;
+* o roteiro não está curto porque o Story Finder ou Editorial Planner gerou um conceito pobre;
+* o roteiro não está curto porque o ScriptService resumiu demais;
+* o `target_duration` não foi perdido no fluxo;
+* não houve truncamento ou outro problema técnico.
+
+### Curto porque a história é naturalmente curta
+
+Isso pode ser válido.
+
+### Curto porque o pipeline não desenvolveu a história suficientemente
+
+Isso NÃO deve ser aceito automaticamente.
+
+Antes de aprovar uma duração muito abaixo do target, o pipeline deve verificar se houve oportunidade legítima de:
+
+* aprofundar contexto;
+* buscar consequência;
+* buscar impacto;
+* conectar histórico relevante;
+* buscar fonte complementar;
+* melhorar o ângulo;
+* selecionar outra ideia mais adequada ao formato.
+
+Se nada disso adicionar valor real e a história estiver completa, a duração menor pode ser aceita.
+
+A regra deve ser:
+
+**duração curta é resultado editorial possível, não fallback preguiçoso.**
 
 O problema NÃO é "vídeo curto".
 
@@ -1272,6 +1305,10 @@ O problema é:
 * ou vídeo longo artificialmente porque uma ideia pequena foi esticada.
 
 O objetivo é encontrar a duração coerente com a história.
+
+**Vídeo curto pode ser excelente, mas só depois de provar que está completo.**
+
+**Vídeo longo só é válido se a duração vier acompanhada de substância real.**
 
 ## Regra de decisão editorial
 
@@ -2191,6 +2228,34 @@ Casos de regressão obrigatórios para a seção 7:
 3. Reconhece incompatibilidade com o target de ~60s.
 4. NÃO pede ao LLM para simplesmente "expandir".
 
+### Vídeo curto legítimo
+
+1. Uma história sustenta naturalmente ~28 segundos.
+2. Há descoberta, progressão e payoff.
+3. Não existe contexto adicional relevante.
+4. Fontes complementares não acrescentariam substância real.
+5. O sistema aceita a duração menor sem tentar inflar o roteiro.
+
+### Vídeo curto por subdesenvolvimento
+
+1. Uma história sai com ~25 segundos.
+2. Existem contexto, consequência e impacto relevantes ainda não usados.
+3. O sistema NÃO aprova a duração curta imediatamente.
+4. O pipeline tenta enriquecer ou escolhe outra ideia.
+
+### Compressão editorial
+
+1. Um roteiro possui 60 segundos.
+2. Aproximadamente 20% pode ser removido sem perda de informação, progressão, emoção ou payoff.
+3. O roteiro é considerado suspeito de padding.
+4. O mecanismo editorial revisa ou rejeita antes do render.
+
+### Roteiro denso
+
+1. Um roteiro possui 45 segundos.
+2. Remover qualquer parte relevante prejudica descoberta, contexto, progressão ou payoff.
+3. O roteiro NÃO é penalizado apenas por estar abaixo de 60 segundos.
+
 ## Matéria-prima de fontes online
 
 Casos de regressão obrigatórios para a seção "Notícias, artigos e fontes":
@@ -2404,6 +2469,12 @@ Para cada vídeo, registre pelo menos:
 * se houve enriquecimento;
 * quais informações novas foram adicionadas no enriquecimento;
 * se houve sinais de padding;
+* se a duração curta foi considerada natural ou consequência de subdesenvolvimento;
+* quais tentativas de enriquecimento legítimo foram possíveis;
+* por que não havia contexto adicional relevante (quando aplicável);
+* se o roteiro passou no teste de compressão;
+* quais trechos foram identificados como dispensáveis, se houver;
+* se houve sinais de padding residual;
 * motivo de aprovação/rejeição.
 
 ### Critério qualitativo: "Por que este vídeo merece existir?"
@@ -2428,6 +2499,36 @@ NÃO transforme isso obrigatoriamente em score numérico.
 Pode ser um critério qualitativo de homologação/editorial review.
 
 Se a duração maior foi obtida apenas repetindo conteúdo, o vídeo NÃO deve ser considerado aprovado editorialmente.
+
+### Teste de compressão editorial (padding residual)
+
+Na homologação editorial, adicione uma pergunta de controle:
+
+> "Se eu remover aproximadamente 20% deste roteiro, a história perde informação, descoberta, contexto, progressão, emoção ou payoff relevante?"
+
+A intenção NÃO é transformar "20%" em uma regra matemática rígida.
+
+É um teste editorial de compressão.
+
+Se uma parte significativa do roteiro puder ser removida sem perda real de valor, isso é um forte indício de:
+
+* padding;
+* repetição semântica;
+* contexto dispensável;
+* transições vazias;
+* suspense artificial;
+* conclusão redundante;
+* baixa densidade por beat.
+
+Esse critério complementa a regra já existente:
+
+> "Se eu remover este trecho, a história perde alguma informação, progressão, emoção ou compreensão relevante?"
+
+A diferença é que agora se avalia também o roteiro **como conjunto**, não apenas beat por beat.
+
+Se o roteiro puder perder uma parte relevante do texto sem perder valor editorial, ele deve voltar para revisão.
+
+Se o vídeo estiver muito abaixo do target e não houver justificativa clara de que a história realmente termina naquela duração, ele NÃO deve ser aprovado automaticamente.
 
 NÃO transforme tudo em métricas artificiais.
 
@@ -2455,12 +2556,13 @@ Considere concluída quando for possível demonstrar que:
 * `target_duration` é respeitado como constraint com tolerância, não como número rígido e não como incentivo ao padding;
 * scripts não forem esticados apenas para atingir `min_chars`;
 * duração maior vier acompanhada de maior substância (não de padding);
-* duração menor puder ser aceita quando a história estiver completa;
+* duração menor puder ser aceita quando a história estiver completa, mas só depois de provar que não há subdesenvolvimento;
 * ideias incompatíveis com o target possam ser rejeitadas;
 * expansão adicione informação/progressão real, não apenas caracteres;
 * cada beat tenha função narrativa/editorial;
 * fontes inválidas sejam filtradas antes do Story Finder;
 * seja possível justificar qualitativamente por que cada vídeo aprovado merece existir;
+* o teste de compressão editorial (padding residual) seja aplicado na homologação;
 * um roteiro que falha repetidamente no `ScriptCritic` não prossegue para render silenciosamente;
 * componentes editoriais inativos são auditados e ativados (ou justificadamente mantidos inativos);
 * fontes online são tratadas como matéria-prima (não roteiro), validadas antes do uso, e não copiadas/traduzidas;
