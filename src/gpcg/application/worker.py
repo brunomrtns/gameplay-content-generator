@@ -61,6 +61,9 @@ def run_worker() -> None:
                     log.info(f"inbox: {discovered} new recording(s) ingested")
                 last_inbox_scan = now
 
+            # Re-queue stale jobs (running with no worker, or worker gone offline)
+            _requeue_stale_jobs()
+
             # Process one pending job
             job_id = _claim_next_job()
             if job_id is not None:
@@ -77,23 +80,76 @@ def run_worker() -> None:
             time.sleep(settings.gpcg_worker_poll_interval)
 
 
+def _requeue_stale_jobs() -> None:
+    """Re-queue jobs that are stuck in 'running' with no active worker.
+
+    A job is considered stale if:
+    - status='running' AND worker_id IS NULL (never claimed via API)
+    - status='running' AND worker_id is set but worker is offline
+    - status='running' AND updated_at > 10 minutes ago (timeout)
+
+    This prevents jobs from being stuck forever if a worker crashes
+    mid-job or if a job was claimed by the VPS worker but never processed.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    stale_timeout = timedelta(minutes=10)
+    now = datetime.now(timezone.utc)
+
+    with session_scope() as session:
+        # Find stale jobs
+        stale = session.execute(
+            select(Job)
+            .where(Job.status == JobStatus.running.value)
+            .where(
+                (Job.worker_id.is_(None))
+                | (Job.updated_at < (now - stale_timeout))
+            )
+        ).scalars().all()
+
+        for job in stale:
+            # Don't re-queue jobs that the VPS worker is actively processing
+            # (VPS worker jobs have worker_id=NULL but updated_at is recent)
+            if job.worker_id is None and job.updated_at and (now - job.updated_at) < stale_timeout:
+                continue
+
+            log.warning(
+                f"Re-queuing stale job #{job.id} (type={job.type}, "
+                f"worker_id={job.worker_id}, updated_at={job.updated_at})"
+            )
+            job.status = JobStatus.queued.value
+            job.worker_id = None
+            job.started_at = None
+            if job.attempts < job.max_attempts:
+                job.attempts += 1
+            session.flush()
+
+
 def _claim_next_job() -> Optional[int]:
     """Atomically claim the next queued/retrying job. Returns job_id or None.
 
-    Claims two categories of jobs:
-    1. Jobs WITHOUT required_capabilities — legacy generation jobs (GPU).
-    2. Jobs with VPS-side capabilities (enrichment, content_intelligence) —
-       these run on the VPS (Control Plane), not on the GPU worker.
+    V2: The VPS worker only claims jobs that DON'T need GPU/LLM.
+    Specifically, it skips:
+    - generate_short / curiosity_short: need GPU (Ollama, video-generate)
+    - mapping: needs GPU (VLM, ASR)
+    - game_enrich: needs Ollama + Wikidata/Wikipedia (blocked on VPS IPs)
+    - content_collect: needs Ollama for scoring
 
-    Jobs with GPU capabilities (mapping, generation, knowledge_index) are
-    processed by the RemoteWorker via the /api/jobs/claim endpoint.
-
-    V2: game_enrich and content_collect jobs are now also processed by the
-    RemoteWorker (local PC), not the VPS worker, because they need Ollama
-    (LLM) and Wikidata/Wikipedia access (VPS IPs get blocked/rate-limited).
+    All these job types are processed by the RemoteWorker (local PC) via
+    the /api/jobs/claim endpoint. The VPS worker only handles jobs that
+    are purely DB/API operations.
     """
+    # Job types that the VPS worker should NOT claim (handled by remote worker)
+    remote_only_types = {
+        JobType.generate_short.value,
+        JobType.curiosity_short.value,
+        JobType.mapping.value,
+        JobType.game_enrich.value,
+        JobType.content_collect.value,
+    }
+
     with session_scope() as session:
-        # Legacy: claim jobs without required_capabilities (generation jobs)
+        # Claim jobs without required_capabilities, EXCLUDING remote-only types
         job = session.execute(
             select(Job)
             .where(Job.status.in_([JobStatus.queued.value, JobStatus.retrying.value]))
@@ -102,6 +158,7 @@ def _claim_next_job() -> Optional[int]:
                 | (Job.required_capabilities == "[]")
                 | (Job.required_capabilities == "")
             )
+            .where(~Job.type.in_(remote_only_types))
             .order_by(Job.created_at.asc())
             .limit(1)
         ).scalar_one_or_none()
@@ -216,30 +273,18 @@ def _strip_artifacts_after(artifacts: dict, stage: str) -> dict:
 
 
 def _check_running_automations() -> None:
-    """Verifica se há automações ativas que precisam de novos jobs.
+    """V2: Automation check is now handled by the remote worker.
 
-    Para cada automação com status='running', se não houver job em andamento
-    para aquele usuário, cria um novo job automaticamente.
-    Isso implementa o loop contínuo de produção de vídeos.
+    The remote worker calls POST /api/automation/check on each poll cycle.
+    The VPS endpoint returns pending automations, and the remote worker
+    makes the editorial decision locally (with LLM/Ollama) and creates
+    the job via POST /api/automation/create-job.
+
+    This function is kept for backward compatibility but does nothing —
+    the VPS worker no longer creates automation jobs because the editorial
+    decision requires the LLM, which is only available on the local PC.
     """
-    try:
-        from gpcg.api.automation_routes import create_job_from_automation
-        from gpcg.domain.models import Automation
-
-        with session_scope() as session:
-            running = session.query(Automation).filter(
-                Automation.status == "running"
-            ).all()
-
-        for auto in running:
-            job_id = create_job_from_automation(auto.user_id)
-            if job_id:
-                log.info(
-                    f"automação #{auto.id} (user={auto.user_id}): "
-                    f"criado job #{job_id} para produção contínua"
-                )
-    except Exception as e:
-        log.debug(f"automation check skipped: {e}")
+    pass  # V2: handled by remote worker via /api/automation/check
 
 
 # ── V2: VPS-side job processors (no GPU needed) ──────────────────────────────
