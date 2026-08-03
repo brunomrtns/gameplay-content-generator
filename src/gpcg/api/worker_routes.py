@@ -42,6 +42,7 @@ from gpcg.domain.models import (
     GameplayEvent,
     GameplayProcessingStatus,
     GameplaySource,
+    IngestionStatus,
     Job,
     JobPriority,
     JobStage,
@@ -749,6 +750,7 @@ def submit_job_result(
         if source:
             if req.status == JobStatus.completed.value:
                 source.processing_status = GameplayProcessingStatus.ready.value
+                source.ingestion_status = IngestionStatus.ready.value
             elif req.status == JobStatus.failed.value:
                 source.processing_status = GameplayProcessingStatus.failed.value
 
