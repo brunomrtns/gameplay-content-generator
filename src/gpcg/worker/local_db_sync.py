@@ -93,6 +93,9 @@ def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Pat
 
 def _create_temp_db(db_path: Path) -> sessionmaker:
     """Create a temporary SQLite DB with all GPCG tables."""
+    # Import ALL models so Base.metadata knows about every table
+    import gpcg.domain.models  # noqa: F401 — side effect: registers all tables
+
     db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(
         f"sqlite:///{db_path}",
