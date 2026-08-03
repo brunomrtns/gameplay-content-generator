@@ -698,7 +698,24 @@ Nunca acessar gameplay privada de terceiros.
 
 #### Fallback dentro do pool (reutilização)
 
-Independentemente da opção acima, se mesmo dentro do pool elegível (próprio ou público) não existir material totalmente novo, o sistema pode — de forma explícita, configurável e testável — adotar uma política de reutilização:
+**Precedência do fallback = stop:**
+
+Se `fallback = stop`, o sistema **para**.
+
+NÃO:
+
+* reutiliza gameplay;
+* reseta histórico;
+* busca pública;
+* aplica fallback interno de reciclagem.
+
+Qualquer política de reutilização só pode acontecer quando uma configuração explícita permitir reutilização.
+
+`stop` NÃO cai em outra política secundária.
+
+**Quando fallback != stop:**
+
+Se mesmo dentro do pool elegível (próprio ou público) não existir material totalmente novo, o sistema pode — de forma explícita, configurável e testável — adotar uma política de reutilização:
 
 * permitir reutilização com penalização progressiva (trechos menos utilizados primeiro);
 * reiniciar o histórico de utilização daquela gameplay **para aquele usuário consumidor** de forma controlada e registrada (não globalmente por arquivo);
@@ -737,8 +754,10 @@ A seleção deve funcionar conceitualmente assim:
     sobre o pool público.
 11. Rankear e selecionar.
 12. Reservar o intervalo de forma segura (escopada por consumidor).
-13. Após render válido:
+13. Após persistência válida do Video no GPCG
+    (pendente de aprovação ou posterior):
     registrar uso efetivo.
+    Render temporário/artefato intermediário NÃO consome segmento.
 ```
 
 ## Objetivo verificável
@@ -2916,6 +2935,550 @@ Ao terminar, apresente:
 13. riscos restantes;
 14. dívida técnica ainda relevante;
 15. próximos passos recomendados.
+
+# Disciplina de execução
+
+Esta seção NÃO altera os requisitos funcionais do `REFACTORY_V2`.
+
+Ela define **COMO** o plano deve ser executado.
+
+## Não implemente a partir de suposições
+
+Para qualquer requisito importante, classifique o estado encontrado como:
+
+* `CONFIRMED_IN_CODE` — comportamento comprovado diretamente no código;
+* `CONFIRMED_IN_DB/MODEL` — comprovado nos modelos/persistência;
+* `CONFIRMED_IN_TEST` — comprovado por teste existente;
+* `DOCUMENTED_ONLY` — aparece na documentação, mas não foi confirmado no código;
+* `PARTIALLY_IMPLEMENTED` — existe parcialmente;
+* `NOT_IMPLEMENTED`;
+* `AMBIGUOUS`;
+* `CONFLICTING_IMPLEMENTATIONS` — existem dois caminhos diferentes fazendo a mesma responsabilidade.
+
+Nunca transforme `DOCUMENTED_ONLY` ou `AMBIGUOUS` em fato.
+
+Quando houver diferença entre documentação e código:
+
+**o código atual define o comportamento existente; o `REFACTORY_V2` define o comportamento desejado.**
+
+Registre explicitamente a diferença.
+
+## Evidence-first
+
+Toda afirmação relevante no diagnóstico deve apontar para evidência concreta.
+
+Não diga:
+
+> "A configuração está sendo perdida no worker."
+
+Diga algo equivalente a:
+
+> `UserVideoSettings.subtitle_position` é persistido em X, serializado por Y, mas o payload criado por Z não inclui esse campo; em seguida `RenderPlanBuilder` aplica default W.
+
+Sempre que possível, indique:
+
+* arquivo;
+* classe/função;
+* campo;
+* endpoint;
+* model;
+* teste;
+* fluxo envolvido.
+
+NÃO invente nomes que não existem.
+
+## Matriz AS-IS → TO-BE antes de alterar código
+
+Para cada domínio crítico, documente:
+
+| Área | AS-IS comprovado | TO-BE exigido | Gap | Mudança mínima |
+| ---- | ---------------- | ------------- | --- | -------------- |
+
+Inclua pelo menos:
+
+* contexto multiusuário;
+* configuração;
+* seleção de conteúdo;
+* fontes;
+* Story Finding;
+* pipeline editorial;
+* duração;
+* gameplay;
+* lifecycle dos segmentos;
+* visibilidade pública/privada;
+* publicação;
+* retry/idempotência;
+* worker;
+* QA.
+
+NÃO implemente até conseguir explicar claramente o gap de cada área que pretende alterar.
+
+## Invariantes antes da implementação
+
+Extraia do `REFACTORY_V2` invariantes que devem permanecer verdadeiros independentemente da implementação.
+
+### Multiusuário
+
+* Job de A nunca usa configuração privada de B.
+* Job de A nunca usa gameplay privada de B.
+* Job de A nunca publica no canal de B.
+* Credencial de publicação precisa pertencer ao mesmo contexto do job.
+
+### Gameplay
+
+* `selected != used`.
+* Reserva é escopada pelo consumidor.
+* Usuários diferentes podem consumir o mesmo intervalo de gameplay pública.
+* Dois jobs do mesmo consumidor não podem reservar o mesmo intervalo simultaneamente.
+* STOP/falha/cancelamento antes de vídeo persistido libera reserva.
+* Segmento só vira usado quando existe vídeo persistido no GPCG.
+* Exclusão de vídeo pendente libera automaticamente seus segmentos.
+* Vídeo publicado mantém segmentos usados segundo a política definida.
+* Gameplay privada nunca entra no pool público.
+* Gameplay própria tem prioridade sobre pública.
+
+### Editorial
+
+* factualidade > completude > densidade > `target_duration` > comprimento textual;
+* `min_chars` não pode gerar padding;
+* `target_duration` não pode gerar padding;
+* fonte online não vira roteiro diretamente;
+* Story Finder só recebe matéria-prima editorial válida;
+* roteiro reprovado persistentemente não chega silenciosamente ao render.
+
+Transforme essas invariantes em testes sempre que forem deterministicamente verificáveis.
+
+## State machines explícitas
+
+Antes de codificar lifecycle complexo, desenhe as máquinas de estado reais.
+
+### Job
+
+Mapeie os estados existentes no código e as transições permitidas.
+
+### Video
+
+Mapeie:
+
+* inexistente;
+* gerado;
+* pendente;
+* aprovado;
+* aguardando publicação;
+* publicado;
+* excluído;
+
+somente usando os estados reais existentes ou propondo mudança justificada.
+
+### Gameplay interval
+
+Conceitualmente:
+
+```text
+AVAILABLE
+→ RESERVED
+→ USED
+```
+
+Com retornos apropriados:
+
+```text
+RESERVED
+→ AVAILABLE
+```
+
+em:
+
+* failure;
+* STOP;
+* cancel;
+* timeout;
+* abandoned worker.
+
+E:
+
+```text
+USED
+→ AVAILABLE
+```
+
+quando vídeo pendente é excluído.
+
+NÃO crie esses enums literalmente se a arquitetura não precisar deles.
+
+O importante é tornar as transições explícitas e testáveis.
+
+## Contratos entre Control Plane e Worker
+
+Mapeie o payload real enviado ao worker.
+
+Crie uma tabela com:
+
+| Campo | Origem | Owner | Obrigatório | Default permitido? | Consumidor |
+| ----- | ------ | ----- | ----------- | ------------------ | ---------- |
+
+Inclua pelo menos:
+
+* `user_id`;
+* `job_id`;
+* `config`/version;
+* gameplay;
+* voice;
+* `target_duration`;
+* channel/publish target;
+* content/fact/source;
+* editorial artifacts;
+* render settings.
+
+Para qualquer dado crítico multiusuário:
+
+**NÃO aceite inferência tardia no worker quando ele puder ser enviado explicitamente pelo Control Plane.**
+
+Evite padrões conceituais como:
+
+* "current user";
+* "default channel";
+* "first available channel";
+* "last loaded voice";
+* configuração global residual.
+
+## Source of truth para cada conceito
+
+Antes de implementar, documente qual entidade é autoridade para cada informação.
+
+```text
+user ownership → ?
+job context → ?
+video settings → ?
+voice → ?
+channel → ?
+gameplay visibility → ?
+gameplay usage history → ?
+selected source/fact → ?
+publication state → ?
+```
+
+NÃO permita dois lugares independentes representando o mesmo estado sem uma regra explícita de precedência.
+
+Se existirem duplicações atuais, determine qual deve ser a autoridade e como manter backward compatibility.
+
+## NÃO introduza shadow architecture
+
+Se encontrar um mecanismo parcialmente funcional:
+
+primeiro tente fortalecê-lo.
+
+NÃO crie:
+
+* novo Story Finder paralelo;
+* novo banco de ideias;
+* novo sistema de configuração paralelo;
+* novo gameplay analyzer;
+* novo lifecycle de vídeo separado;
+* nova persistência editorial duplicada;
+
+sem demonstrar por que a estrutura existente é incapaz de atender ao requisito.
+
+## Implementação em fases coerentes
+
+NÃO faça dezenas de mudanças misturadas e só teste no final.
+
+Organize a implementação em fases dependentes.
+
+### Fase 1 — integridade e contratos
+
+* ownership;
+* user context;
+* config propagation;
+* Control Plane ↔ Worker;
+* publish target;
+* invariantes.
+
+### Fase 2 — lifecycle de gameplay
+
+* persistência;
+* reservas;
+* concorrência;
+* STOP/failure/retry;
+* pública/privada;
+* fallback.
+
+### Fase 3 — conteúdo/fontes
+
+* pool real;
+* source validation;
+* provenance;
+* conexão com Story Finder.
+
+### Fase 4 — editorial
+
+* feature flags;
+* Story Finder;
+* enrichment;
+* ScriptCritic;
+* duration;
+* anti-padding;
+* gate.
+
+### Fase 5 — homologação end-to-end
+
+Adapte as fases ao dependency graph real encontrado no código.
+
+NÃO siga esta ordem cegamente se o repositório demonstrar dependências diferentes.
+
+## Regressões após cada fase
+
+NÃO espere o final para descobrir que uma migration quebrou o pipeline.
+
+Para cada fase:
+
+1. implementar;
+2. testes unitários;
+3. testes de integração;
+4. regressões existentes;
+5. validar invariantes;
+6. somente então seguir.
+
+## Teste failure paths, não apenas happy path
+
+Especial atenção para:
+
+* worker morre depois de reservar gameplay;
+* worker morre depois do render;
+* persistência do Video falha;
+* usuário pressiona STOP;
+* retry ocorre após timeout;
+* publish retorna timeout depois de possível sucesso externo;
+* gameplay pública fica privada enquanto job está em execução;
+* dois jobs do mesmo usuário concorrem;
+* dois usuários usam o mesmo gameplay público;
+* config muda depois que job já foi criado;
+* vídeo pendente é excluído;
+* endpoint recebe ID pertencente a outro usuário.
+
+Esses casos devem ter comportamento explicitamente definido.
+
+## Teste propriedades negativas
+
+NÃO teste apenas que algo acontece.
+
+Teste também que coisas proibidas NÃO acontecem.
+
+```text
+A nunca publica em B.
+```
+
+```text
+Gameplay privada de A nunca entra no candidate pool de B.
+```
+
+```text
+STOP nunca deixa reservation órfã.
+```
+
+```text
+Retry nunca duplica publicação.
+```
+
+```text
+Video sem persistência nunca consome gameplay.
+```
+
+```text
+min_chars nunca força padding.
+```
+
+Esses testes são críticos.
+
+## Migrations e backward compatibility
+
+Antes de qualquer alteração de schema:
+
+* identifique dados existentes;
+* defina migration;
+* defina valores/defaults;
+* defina tratamento para registros legados;
+* teste upgrade sobre banco representativo;
+* evite perda silenciosa.
+
+Se novas relações forem necessárias para gameplay usage ou visibility, prove por que os campos atuais não são suficientes.
+
+## Observabilidade mínima
+
+O sistema precisa permitir reconstruir decisões importantes.
+
+Para cada job, quando relevante, registre de forma estruturada:
+
+* user;
+* job;
+* selected content;
+* source;
+* config snapshot ou referência estável;
+* gameplay source;
+* intervalos;
+* reservation IDs/estado equivalente;
+* worker;
+* publish target;
+* editorial verdict;
+* retry attempt;
+* reason for fallback;
+* reason for rejection.
+
+NÃO logue segredos ou tokens.
+
+## Config snapshot
+
+Investigue explicitamente se um job deve usar:
+
+* configuração atual do usuário durante cada etapa;
+* ou snapshot da configuração no momento de criação do job.
+
+NÃO deixe isso implícito.
+
+Para previsibilidade e retries, prefira uma semântica determinística baseada no desenho real do produto.
+
+Documente a decisão e teste:
+
+```text
+job criado com config A
+usuário muda para config B
+job antigo continua com qual?
+```
+
+Esse comportamento precisa ser intencional.
+
+## Idempotency keys e side effects
+
+Identifique todos os side effects externos ou permanentes:
+
+* criação de vídeo;
+* persistência de usage;
+* upload;
+* publicação YouTube;
+* exclusão;
+* liberação de segmento.
+
+Para cada um, determine:
+
+* pode repetir?
+* como detectar retry?
+* qual é a idempotency key?
+* qual é o efeito se a resposta externa se perder?
+
+NÃO confie em "o código normalmente não chama duas vezes".
+
+## NÃO esconda incerteza
+
+Se durante a implementação encontrar algo que o `REFACTORY_V2` não define claramente:
+
+NÃO invente silenciosamente.
+
+Classifique como:
+
+`UNRESOLVED_DECISION`
+
+Explique:
+
+* o que o código atual faz;
+* quais opções existem;
+* impacto de cada opção;
+* qual solução você escolheu, se houver uma opção claramente mais segura e reversível.
+
+Para decisões irreversíveis, juridicamente sensíveis ou que alterem comportamento de produto não especificado, NÃO invente política.
+
+## Change budget
+
+Prefira o menor conjunto de mudanças que produza invariantes fortes.
+
+Antes de criar um novo abstraction/service/model:
+
+responda:
+
+1. qual problema concreto ele resolve?
+2. por que a estrutura existente não resolve?
+3. qual duplicação ele elimina?
+4. como será testado?
+5. qual custo de migration/backward compatibility?
+
+## Revisão pós-implementação contra o documento
+
+Ao terminar a implementação, releia o `REFACTORY_V2` do início ao fim.
+
+Construa uma compliance matrix:
+
+| Requisito | Implementado? | Evidência | Teste | Observação |
+| --------- | ------------- | --------- | ----- | ---------- |
+
+Nenhum requisito deve ser considerado concluído apenas com descrição textual.
+
+Classifique:
+
+* `PASS`;
+* `PARTIAL`;
+* `NOT_IMPLEMENTED`;
+* `BLOCKED`;
+* `NOT_APPLICABLE` com justificativa.
+
+## Evidência end-to-end
+
+A tarefa NÃO termina com unit tests.
+
+Execute cenários reais/controlados cobrindo:
+
+* dois usuários;
+* configurações diferentes;
+* gameplays privadas;
+* gameplay pública;
+* fallback;
+* STOP;
+* retry;
+* vídeo pendente;
+* exclusão;
+* publicação;
+* fonte online;
+* conteúdo editorial rico;
+* vídeo naturalmente curto;
+* vídeo que precisaria de padding e deve ser rejeitado/enriquecido.
+
+Para cada cenário, mostre input → decisões → estado persistido → output.
+
+## Critério final de implementação
+
+NÃO diga "done" enquanto não conseguir responder, com evidência:
+
+* de quem é este job?
+* qual configuração ele usou?
+* de onde veio esta ideia?
+* por que esta fonte foi aceita?
+* por que este roteiro foi aprovado?
+* por que este vídeo merece existir?
+* qual duração natural foi considerada?
+* quais gameplays foram candidatas?
+* por que este trecho foi escolhido?
+* para qual usuário esse trecho está usado?
+* ele estava reservado ou utilizado?
+* o que acontece se o worker morrer agora?
+* para qual canal este vídeo pode ser publicado?
+* o retry é seguro?
+* como provar que outro usuário não pode receber esse output?
+
+Se uma dessas respostas depender de estado implícito, guessing ou comportamento não testado, a implementação ainda NÃO está pronta.
+
+## Princípio de execução
+
+Nesta tarefa:
+
+**NÃO adivinhe → descubra.**
+
+**NÃO duplique → integre.**
+
+**NÃO confie em descrição → prove no código.**
+
+**NÃO teste só sucesso → teste falhas.**
+
+**NÃO considere módulo isolado → prove o fluxo end-to-end.**
+
+**NÃO considere "funciona" → prove que funciona para o usuário correto, com a configuração correta, no estado correto, inclusive sob retry, STOP e concorrência.**
 
 # Princípio final
 
