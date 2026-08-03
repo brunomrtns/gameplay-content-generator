@@ -130,16 +130,23 @@ def list_games_registry(
     }
 
 
-@router.get("/games/{slug}")
+@router.get("/games/{slug_or_id}")
 def get_game_by_slug(
-    slug: str,
+    slug_or_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get detailed information about a game by its canonical slug."""
-    game = find_by_slug(db, slug)
+    """Get detailed information about a game by slug or numeric ID."""
+    # If it's a numeric ID, look up by ID
+    if slug_or_id.isdigit():
+        game = db.get(Game, int(slug_or_id))
+        if not game:
+            raise HTTPException(status_code=404, detail=f"Game #{slug_or_id} not found")
+        return _game_to_out(db, game)
+    # Otherwise treat as slug
+    game = find_by_slug(db, slug_or_id)
     if not game:
-        raise HTTPException(status_code=404, detail=f"Game with slug '{slug}' not found")
+        raise HTTPException(status_code=404, detail=f"Game with slug '{slug_or_id}' not found")
     return _game_to_out(db, game)
 
 

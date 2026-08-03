@@ -66,7 +66,26 @@ def list_games(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    games = db.query(Game).filter(Game.user_id == user.id).order_by(Game.canonical_name).all()
+    # V2: games are now global (user_id deprecated). Show games that the user
+    # has gameplay sources for, OR games still owned by this user (legacy).
+    user_game_ids = db.execute(
+        select(GameplaySource.game_id).where(
+            GameplaySource.user_id == user.id,
+            GameplaySource.game_id.is_not(None),
+        ).distinct()
+    ).scalars().all()
+    legacy_game_ids = db.execute(
+        select(Game.id).where(Game.user_id == user.id)
+    ).scalars().all()
+    visible_ids = set(user_game_ids) | set(legacy_game_ids)
+    if not visible_ids:
+        return []
+    games = (
+        db.query(Game)
+        .filter(Game.id.in_(visible_ids))
+        .order_by(Game.canonical_name)
+        .all()
+    )
     result = []
     for g in games:
         sources = db.execute(
@@ -91,10 +110,12 @@ def list_games(
             {
                 "id": g.id,
                 "canonical_name": g.canonical_name,
+                "slug": g.slug or "",
                 "aliases": g.aliases,
                 "platforms": g.platforms,
                 "capture_sources": g.capture_sources,
                 "counts": {"sources": sources, "assets": assets, "facts": facts, "videos": videos},
+                "enrichment_state": g.enrichment_state if hasattr(g, "enrichment_state") else "pending",
                 "created_at": g.created_at.isoformat() if g.created_at else None,
             }
         )
