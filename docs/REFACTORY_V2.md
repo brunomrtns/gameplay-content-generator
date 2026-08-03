@@ -467,26 +467,109 @@ Todo cálculo de disponibilidade deve considerar o usuário consumidor.
 O sistema deve distinguir corretamente os estados de um trecho:
 
 * **candidato** — trecho em consideração pela seleção;
-* **selecionado/reservado** para um job — ainda não utilizado, mas temporariamente indisponível para outros jobs concorrentes;
-* **efetivamente utilizado** em um vídeo gerado com sucesso;
-* **associado a um vídeo publicado**;
-* **liberado novamente** — volta a ser elegível (ex.: vídeo excluído com liberação explícita);
-* **descartado permanentemente** — quando aplicável (ex.: usuário opta por manter como utilizado ao excluir o vídeo).
+* **selecionado/reservado** para um job — ainda não utilizado, mas temporariamente indisponível para outros jobs concorrentes do mesmo usuário;
+* **efetivamente utilizado** — quando o vídeo correspondente está persistido no GPCG como vídeo gerado (pendente de aprovação, aprovado, aguardando publicação, publicado, ou estado equivalente que represente um output efetivamente gerado e preservado no sistema);
+* **liberado novamente** — volta a ser elegível (ex.: geração falhou, job cancelado, vídeo pendente excluído);
+* **associado a vídeo publicado no YouTube** — permanece utilizado; exclusão local NÃO libera automaticamente.
 
-Regra crítica: **não marque um trecho como efetivamente utilizado cedo demais.**
+Regra crítica: **selecionado ≠ utilizado.**
 
-A transição para "efetivamente utilizado" deve ocorrer somente quando o vídeo for de fato gerado com sucesso (render válido persistido), não no momento da seleção.
+Um trecho só passa a ser efetivamente utilizado quando existe um vídeo persistido no GPCG.
+
+Antes disso, está apenas reservado temporariamente.
+
+```text
+disponível
+→ reservado para job
+→ geração em andamento
+```
+
+Enquanto o vídeo ainda está sendo gerado, o trecho está apenas temporariamente reservado.
+
+Se a geração não chegar ao estado em que o vídeo fica disponível no GPCG, o trecho deve voltar automaticamente para disponível.
+
+### Quando o trecho passa a ser utilizado
+
+O trecho passa para estado efetivamente utilizado quando existe um vídeo persistido no GPCG e disponível como:
+
+* pendente de aprovação;
+* aprovado;
+* aguardando publicação;
+* publicado;
+* ou estado equivalente existente na arquitetura que represente um vídeo efetivamente gerado e preservado no sistema.
+
+NÃO dependa exclusivamente da publicação no YouTube.
+
+O simples fato de o vídeo já existir no GPCG como um output gerado e pendente de decisão do usuário já deve consumir aqueles trechos.
+
+Analise os estados reais do modelo `Video` e do fluxo de publicação e adapte a terminologia aos estados existentes.
+
+### Casos que DEVEM liberar o trecho (reservado → disponível)
+
+Os intervalos reservados devem voltar ao pool disponível quando ocorrer:
+
+* geração falhou antes de produzir vídeo válido;
+* worker falhou;
+* pipeline foi interrompido;
+* usuário clicou em STOP durante a geração;
+* job foi cancelado;
+* job expirou;
+* retry abandonou a tentativa anterior;
+* qualquer outro fluxo em que nenhum vídeo pendente de aprovação tenha sido produzido.
+
+Nesses casos:
+
+**o trecho não foi efetivamente consumido.**
+
+Portanto, deve voltar a ser elegível.
+
+### Resumo do ciclo de vida
+
+```text
+disponível
+→ reservado
+→ [falha / stop / cancelamento]
+→ disponível
+```
+
+ou:
+
+```text
+disponível
+→ reservado
+→ vídeo persistido no GPCG como pendente de aprovação
+→ utilizado
+```
+
+E:
+
+```text
+vídeo pendente excluído
+→ trecho volta a disponível
+```
+
+E:
+
+```text
+vídeo publicado no YouTube
+→ trecho permanece utilizado
+→ exclusão local NÃO libera automaticamente
+```
+
+Essa transição deve ser idempotente e auditável.
 
 ### Comportamento em falhas, retries e cancelamentos
 
 O controle de utilização deve interagir corretamente com o ciclo de vida do job:
 
 * **render falho antes de produzir vídeo** — o trecho reservado deve voltar a ser elegível. O sistema NÃO deve perder permanentemente aquele intervalo por causa de um job fracassado;
+* **STOP durante a geração** — se o usuário clicar em STOP antes de existir vídeo pendente persistido, o trecho reservado deve voltar a ser elegível;
 * **retry** — um retry não deve duplicar o registro de utilização nem consumir dois trechos distintos sem necessidade; o trecho reservado original deve ser reutilizado ou liberado de forma determinística;
 * **job cancelado** — trechos reservados devem ser liberados;
-* **vídeo gerado mas não publicado** — o trecho deve permanecer como "efetivamente utilizado" (o vídeo existe e pode ser publicado depois), a menos que o vídeo seja excluído;
-* **publicação concluída** — atualiza o estado para "associado a vídeo publicado", sem alterar a elegibilidade (continua utilizado);
-* **exclusão posterior do vídeo** — segue a seção 5b.
+* **job expirou** — trechos reservados devem ser liberados;
+* **vídeo gerado e persistido no GPCG (pendente de aprovação)** — o trecho passa a ser "efetivamente utilizado" (o vídeo existe no sistema e pode ser aprovado/publicado depois);
+* **vídeo pendente excluído pelo usuário** — os trechos voltam automaticamente a ficar disponíveis (ver seção 5b);
+* **publicação concluída no YouTube** — o trecho permanece utilizado; exclusão local NÃO libera automaticamente (ver seção 5b).
 
 Defina explicitamente em qual ponto do pipeline cada transição de estado acontece.
 
@@ -668,13 +751,55 @@ Uma gameplay longa deve poder alimentar muitas gerações diferentes antes de qu
 
 A regra de utilização de trechos deve ser integrada ao fluxo de exclusão de vídeos na interface.
 
+A regra de exclusão **diferencia** entre vídeo pendente de aprovação e vídeo já publicado no YouTube.
+
+Esses são ciclos de vida diferentes e devem ser tratados de forma diferente.
+
 Hoje não existe endpoint/UI de exclusão de vídeo. Implemente-o como parte desta fase, seguindo o padrão visual e textual existente da aplicação (dark theme, teal accent, glass effects, toasts).
+
+## Vídeo pendente de aprovação — liberação automática
+
+Se um vídeo **pendente de aprovação** for excluído pelo usuário:
+
+**os trechos utilizados naquele vídeo voltam automaticamente a ficar disponíveis.**
+
+Nesse caso NÃO pergunte se o usuário deseja manter os trechos como usados.
+
+O vídeo foi descartado antes de publicação/aprovação final e, portanto, seus segmentos devem voltar ao pool.
+
+```text
+vídeo pendente excluído
+→ trechos voltam a disponível automaticamente
+```
+
+## Vídeo já publicado no YouTube — comportamento diferente
+
+Para vídeos **já publicados no YouTube**:
+
+* os trechos permanecem utilizados;
+* excluir apenas o registro local NÃO deve automaticamente liberar os segmentos;
+* qualquer política de liberação nesse caso precisa ser explícita e coerente com o comportamento real do produto.
+
+NÃO misture:
+
+* descarte de vídeo ainda não publicado (liberação automática);
+* remoção de vídeo já publicado (trechos permanecem utilizados).
+
+São ciclos de vida diferentes.
 
 ## Fluxo de UX
 
 Quando o usuário clicar em excluir um vídeo, deve existir o popup normal de confirmação de exclusão.
 
-Nesse fluxo, ofereça também uma decisão relacionada aos trechos de gameplay utilizados naquele vídeo.
+### Vídeo pendente de aprovação
+
+Para vídeo pendente, a exclusão é simples: o vídeo é removido e os trechos voltam automaticamente ao pool.
+
+A interface pode informar isso ao usuário, mas NÃO precisa oferecer decisão sobre manter trechos.
+
+### Vídeo já publicado no YouTube
+
+Para vídeo já publicado, se a arquitetura permitir liberação opcional de trechos, a interface pode oferecer uma decisão relacionada aos trechos de gameplay utilizados naquele vídeo.
 
 A interface deve perguntar, em linguagem clara para um usuário comum, se os trechos de gameplay daquele vídeo podem voltar a ficar disponíveis para futuras gerações.
 
@@ -691,16 +816,18 @@ E oferecer duas decisões semanticamente claras:
 
 Escolha a melhor redação seguindo o padrão visual e textual existente da aplicação.
 
-## Semântica das duas decisões
+Se a arquitetura não permitir liberação de trechos de vídeo já publicado, apenas mantenha os trechos como utilizados e informe o usuário.
+
+## Semântica das duas decisões (vídeo publicado)
 
 Excluir o vídeo e liberar a gameplay são **decisões diferentes**.
 
-Se o usuário excluir o vídeo e optar por **liberar os trechos**:
+Se o usuário excluir o vídeo publicado e optar por **liberar os trechos**:
 
 * o vídeo é removido conforme a política atual de exclusão (arquivo, thumbnail, registro, referências em `Job`/`ContentPlan` quando aplicável);
 * os intervalos associados a ele voltam a ser elegíveis para futuras gerações **daquele usuário consumidor**.
 
-Se o usuário excluir o vídeo e optar por **NÃO liberar**:
+Se o usuário excluir o vídeo publicado e optar por **NÃO liberar**:
 
 * o vídeo é removido;
 * aqueles intervalos continuam registrados como utilizados;
@@ -726,7 +853,9 @@ Resultado:
 
 ## Requisitos de implementação
 
-* O endpoint de exclusão deve receber explicitamente a decisão do usuário sobre os trechos (ex.: `release_segments: bool`), não inferir automaticamente;
+* O endpoint de exclusão deve diferenciar vídeo pendente de aprovação de vídeo publicado no YouTube;
+* Para vídeo pendente: liberação automática de trechos, sem decisão do usuário;
+* Para vídeo publicado: se liberação opcional for suportada, o endpoint deve receber explicitamente a decisão do usuário sobre os trechos (ex.: `release_segments: bool`), não inferir automaticamente;
 * A associação vídeo ↔ intervalos (seção 5) é pré-requisito para esta funcionalidade — sem ela não é possível saber quais trechos liberar;
 * A exclusão deve respeitar o isolamento multiusuário (somente o dono do vídeo pode excluí-lo);
 * A liberação deve ser idempotente: excluir novamente (ou chamar o endpoint duas vezes) não pode causar efeito colateral;
@@ -1222,30 +1351,67 @@ Nunca:
 
 ### Relação com `gpcg_narration_min_chars`
 
-Audite mecanismos baseados em comprimento mínimo.
+`gpcg_narration_min_chars` deve funcionar como:
 
-Um `min_chars` NÃO pode fazer o sistema concluir automaticamente:
+* guard técnico;
+* sinal de diagnóstico;
+* indicador de possível subdesenvolvimento;
+* gatilho para revisão.
 
-> roteiro curto = adicione palavras até atingir o mínimo.
+Mas NÃO como uma obrigação editorial absoluta.
 
-Se o roteiro estiver abaixo do mínimo, isso deve ser tratado como sinal de possível:
+Um roteiro abaixo de `min_chars` pode indicar:
 
 * pouca substância;
-* história incompleta;
-* seleção ruim;
-* necessidade de pesquisa;
-* necessidade de outro ângulo;
-* incompatibilidade com o target.
+* Story Finder fraco;
+* pesquisa insuficiente;
+* truncamento;
+* resumo excessivo;
+* problema de `target_duration`;
+* falha de geração.
 
-Somente depois de encontrar material adicional legítimo o roteiro deve crescer.
+Nesses casos, o sistema deve investigar.
 
-`min_chars` deve funcionar como sinal/constraint técnica, **não como incentivo ao padding**.
+Porém, se o pipeline conseguir demonstrar que:
+
+* a história está completa;
+* existe descoberta;
+* existe progressão;
+* existe payoff;
+* não há contexto relevante faltando;
+* não há padding;
+* a duração menor é natural;
+
+então o roteiro pode ser aceito mesmo abaixo de `gpcg_narration_min_chars`.
+
+Portanto:
+
+**`min_chars` é uma constraint técnica contextual, não uma regra editorial absoluta.**
+
+NÃO permitir que o sistema faça:
+
+```text
+script curto
+→ adicionar palavras até atingir min_chars
+```
+
+O comportamento correto é:
+
+```text
+script curto
+→ diagnosticar
+→ enriquecer legitimamente se houver substância
+OU
+→ aceitar duração natural
+OU
+→ rejeitar a ideia
+```
 
 O `ScriptService` já possui bounds de caracteres (`gpcg_narration_min_chars`, `gpcg_narration_max_chars`) e instrui o LLM a expandir se curto.
 
 MAS se o LLM ignorar e retornar um script curto, não há gate que impeça o prosseguimento.
 
-Esse gap precisa ser corrigido: o bound de caracteres deve ser uma constraint, não apenas uma sugestão.
+Esse gap precisa ser corrigido: o bound de caracteres deve ser um sinal de diagnóstico, não uma sugestão de padding.
 
 A validação de duração no `QAService` ocorre APÓS o render e é permissiva (um vídeo de 22s com target 60s passa com score 85).
 
@@ -1309,6 +1475,67 @@ O objetivo é encontrar a duração coerente com a história.
 **Vídeo curto pode ser excelente, mas só depois de provar que está completo.**
 
 **Vídeo longo só é válido se a duração vier acompanhada de substância real.**
+
+## Hierarquia de decisão editorial
+
+Inclua no pipeline uma regra clara de precedência editorial para resolver conflitos entre factualidade, duração e densidade:
+
+**Factualidade > completude da história > densidade editorial > duração desejada > comprimento textual**
+
+### Factualidade
+
+Nunca inventar, exagerar ou distorcer informação para:
+
+* aumentar retenção;
+* preencher duração;
+* enriquecer roteiro;
+* atingir target;
+* atingir `min_chars`.
+
+### Completude da história
+
+A história precisa estar completa.
+
+NÃO cortar contexto essencial apenas para manter o vídeo curto.
+
+### Densidade editorial
+
+Cada parte do roteiro precisa acrescentar valor real.
+
+NÃO adicionar conteúdo apenas para aumentar tempo.
+
+### Duração desejada
+
+`target_duration` é uma preferência/constraint de produto com tolerância.
+
+Ela orienta o formato, mas NÃO supera a qualidade da história.
+
+### Comprimento textual
+
+`min_chars` e `max_chars` são mecanismos técnicos de apoio.
+
+Eles são os últimos da hierarquia.
+
+NÃO podem obrigar o sistema a:
+
+* inventar conteúdo;
+* repetir ideias;
+* produzir padding;
+* destruir uma história naturalmente curta e completa.
+
+### Resumo
+
+```text
+Factualidade
+> completude da história
+> densidade editorial
+> duração desejada
+> comprimento textual
+```
+
+**`target_duration` orienta.
+`min_chars` diagnostica.
+A história decide.**
 
 ## Regra de decisão editorial
 
@@ -2256,6 +2483,54 @@ Casos de regressão obrigatórios para a seção 7:
 2. Remover qualquer parte relevante prejudica descoberta, contexto, progressão ou payoff.
 3. O roteiro NÃO é penalizado apenas por estar abaixo de 60 segundos.
 
+### `min_chars` abaixo do mínimo, mas história completa
+
+1. Roteiro fica abaixo de `gpcg_narration_min_chars`.
+2. História está completa, densa e sem padding.
+3. Duração curta é editorialmente natural.
+4. O sistema pode aceitar o roteiro.
+
+### `min_chars` abaixo do mínimo por subdesenvolvimento
+
+1. Roteiro fica abaixo do mínimo.
+2. Existem contexto e substância relevantes ainda não utilizados.
+3. O sistema NÃO aceita automaticamente.
+4. Tenta enriquecer ou rejeita.
+
+### Hierarquia editorial — factualidade vs target
+
+1. Uma ideia precisa de distorção factual para atingir `target_duration`.
+2. O sistema NÃO sacrifica factualidade para atingir o target.
+3. A ideia é rejeitada ou enriquecida legitimamente.
+
+### Hierarquia editorial — target não gera padding
+
+1. `target_duration` = 60s.
+2. História sustenta apenas 30s sem contexto adicional legítimo.
+3. O sistema NÃO gera 60s de padding.
+4. Aceita 30s ou seleciona outra ideia.
+
+### Hierarquia editorial — min_chars não força repetição
+
+1. Roteiro está abaixo de `min_chars`.
+2. Não existe substância adicional legítima.
+3. O sistema NÃO adiciona repetição para atingir `min_chars`.
+4. Aceita duração natural ou rejeita.
+
+### Hierarquia editorial — roteiro completo pode ser menor que target
+
+1. Roteiro completo, denso, sem padding.
+2. Duração natural é 35s.
+3. `target_duration` = 60s.
+4. O sistema aceita o roteiro sem forçar expansão.
+
+### Hierarquia editorial — roteiro longo sem densidade é rejeitado
+
+1. Roteiro possui 60s.
+2. Mas ~20% pode ser removido sem perda de valor.
+3. O sistema identifica padding.
+4. O roteiro é revisado ou rejeitado.
+
 ## Matéria-prima de fontes online
 
 Casos de regressão obrigatórios para a seção "Notícias, artigos e fontes":
@@ -2322,16 +2597,23 @@ Casos de regressão obrigatórios para a seção 5 / 5b:
 2. Um novo candidato `13:27 → 13:45` é considerado.
 3. O sistema trata como reutilização parcial (bloqueia ou penaliza conforme a política definida), não como trecho novo.
 
-### Liberação ao excluir vídeo
+### Liberação ao excluir vídeo pendente
 
-1. Um vídeo utiliza determinados segmentos.
-2. O usuário exclui o vídeo escolhendo **liberar os trechos**.
-3. Esses intervalos voltam a poder participar da seleção em gerações futuras.
+1. Um vídeo **pendente de aprovação** utiliza determinados segmentos.
+2. O usuário exclui o vídeo.
+3. Os trechos voltam **automaticamente** a ficar disponíveis — sem perguntar ao usuário.
 
-### Manutenção ao excluir vídeo
+### Liberação ao excluir vídeo publicado
 
-1. Um vídeo utiliza determinados segmentos.
-2. O usuário exclui o vídeo escolhendo **manter os trechos como utilizados**.
+1. Um vídeo **já publicado no YouTube** utiliza determinados segmentos.
+2. O usuário exclui o registro local.
+3. Os trechos **permanecem utilizados** — exclusão local NÃO libera automaticamente.
+4. Se a arquitetura permitir liberação opcional, o usuário pode escolher explicitamente liberar.
+
+### Manutenção ao excluir vídeo publicado
+
+1. Um vídeo publicado utiliza determinados segmentos.
+2. O usuário exclui o vídeo publicado e escolhe **manter os trechos como utilizados**.
 3. O vídeo é removido, mas os intervalos continuam indisponíveis/penalizados conforme a política definida.
 
 ### Reserva versus falha
@@ -2339,6 +2621,44 @@ Casos de regressão obrigatórios para a seção 5 / 5b:
 1. Um job reserva determinado intervalo.
 2. O render falha antes de produzir o vídeo.
 3. O sistema NÃO deve perder permanentemente aquele intervalo por causa de um job fracassado — ele volta a ser elegível.
+
+### Stop durante geração
+
+1. Job reserva `13:22 → 13:40`.
+2. Usuário clica em STOP antes de existir vídeo pendente.
+3. O job encerra.
+4. O intervalo volta a ficar disponível.
+
+### Falha de geração
+
+1. Job reserva um trecho.
+2. O pipeline falha antes de persistir vídeo válido.
+3. O trecho volta ao pool.
+
+### Vídeo pendente
+
+1. Job gera vídeo com sucesso.
+2. Vídeo é persistido no GPCG como pendente de aprovação.
+3. Os trechos passam a ser considerados utilizados.
+
+### Exclusão de pendente
+
+1. Vídeo pendente utiliza determinados trechos.
+2. Usuário exclui o vídeo.
+3. Os intervalos voltam automaticamente a ficar disponíveis.
+
+### Vídeo publicado
+
+1. Vídeo foi publicado no YouTube.
+2. Seus trechos permanecem utilizados.
+3. Exclusão local não libera automaticamente esses trechos.
+
+### Retry
+
+1. Job reserva intervalo.
+2. A tentativa falha.
+3. Retry ocorre.
+4. Não há consumo duplicado nem reserva órfã.
 
 ### Concorrência
 
@@ -2552,14 +2872,20 @@ Considere concluída quando for possível demonstrar que:
 * o histórico de trechos é escopado por usuário consumidor (uso por A não bloqueia B);
 * a biblioteca própria do usuário é sempre priorizada sobre gameplays públicas;
 * o fallback configurável pelo usuário (stop / allow_public) é respeitado;
+* trechos reservados voltam a disponível quando geração falha, é cancelada, ou usuário clica em STOP antes de existir vídeo pendente;
+* trechos só passam a "efetivamente utilizados" quando o vídeo está persistido no GPCG (pendente de aprovação ou publicado);
+* vídeo pendente excluído libera trechos automaticamente (sem perguntar ao usuário);
+* vídeo publicado no YouTube mantém trechos utilizados (exclusão local não libera automaticamente);
 * vídeos editorialmente subdesenvolvidos (rasos, curtos demais, sem progressão, sem payoff) NÃO chegam ao render;
 * `target_duration` é respeitado como constraint com tolerância, não como número rígido e não como incentivo ao padding;
+* `min_chars` funciona como constraint técnica contextual (sinal de diagnóstico), não como regra editorial absoluta;
 * scripts não forem esticados apenas para atingir `min_chars`;
 * duração maior vier acompanhada de maior substância (não de padding);
 * duração menor puder ser aceita quando a história estiver completa, mas só depois de provar que não há subdesenvolvimento;
 * ideias incompatíveis com o target possam ser rejeitadas;
 * expansão adicione informação/progressão real, não apenas caracteres;
 * cada beat tenha função narrativa/editorial;
+* a hierarquia editorial (factualidade > completude > densidade > duração > comprimento) seja respeitada;
 * fontes inválidas sejam filtradas antes do Story Finder;
 * seja possível justificar qualitativamente por que cada vídeo aprovado merece existir;
 * o teste de compressão editorial (padding residual) seja aplicado na homologação;
