@@ -1206,11 +1206,28 @@ def delete_video(
     if should_release:
         clips_released = release_clip_usage(db, video_id)
 
+    # V2: Release KnowledgeItem (revert status from "used" to "fresh")
+    # so the idea can be reused in a future video.
+    ki_released = False
+    if should_release and v.job_id:
+        from gpcg.domain.models import Job, ContentPlan, KnowledgeItem, KnowledgeItemStatus
+        job = db.get(Job, v.job_id)
+        if job and job.content_plan_id:
+            plan = db.get(ContentPlan, job.content_plan_id)
+            # ContentPlan stores the KI reference in metadata_json
+            if plan and plan.metadata_json:
+                ki_id = plan.metadata_json.get("knowledge_item_id")
+                if ki_id:
+                    ki = db.get(KnowledgeItem, ki_id)
+                    if ki and ki.status == KnowledgeItemStatus.used.value:
+                        ki.status = KnowledgeItemStatus.fresh.value
+                        ki_released = True
+
     # Delete the video record
     db.delete(v)
     db.commit()
 
-    log.info(f"deleted video #{video_id} (release_clips={release_clips}, clips_released={clips_released})")
+    log.info(f"deleted video #{video_id} (release_clips={release_clips}, clips_released={clips_released}, ki_released={ki_released})")
     return {
         "success": True,
         "video_id": video_id,
