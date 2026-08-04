@@ -354,6 +354,7 @@ class GameplayRetriever:
         clips: list[SelectedClip] = []
         total = 0.0
         scene_idx = 0
+        scene_accum = 0.0  # accumulated duration within current scene
 
         for src, ev in all_events:
             if total >= target_duration:
@@ -368,10 +369,11 @@ class GameplayRetriever:
             if event_duration <= 0:
                 continue
 
-            # If scene_duration > 0, cap clip at scene_duration
+            # If scene_duration > 0, cap clip at remaining scene budget
             clip_duration = event_duration
             if scene_duration > 0:
-                clip_duration = min(event_duration, scene_duration)
+                scene_remaining = scene_duration - scene_accum
+                clip_duration = min(event_duration, scene_remaining)
 
             # Don't exceed remaining target
             remaining = target_duration - total
@@ -418,9 +420,12 @@ class GameplayRetriever:
             # Track the used range to avoid overlapping clips
             used_ranges.append((ev.start_time, ev.start_time + clip_duration, src.id))
 
-            # Advance scene index if using scene_duration
-            if scene_duration > 0 and clip_duration >= scene_duration - 0.1:
-                scene_idx += 1
+            # Advance scene index when the scene is filled
+            if scene_duration > 0:
+                scene_accum += clip_duration
+                if scene_accum >= scene_duration - 0.1:
+                    scene_idx += 1
+                    scene_accum = 0.0
             elif scene_duration == 0:
                 scene_idx += 1
 
