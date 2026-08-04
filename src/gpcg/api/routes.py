@@ -20,8 +20,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -985,7 +985,11 @@ def list_videos(
 
 
 @router.get("/videos/{video_id}/file")
-def serve_video(video_id: int, db: Session = Depends(get_db)):
+def serve_video(
+    video_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     v = db.get(Video, video_id)
     if v is None:
         raise HTTPException(404, "video not found")
@@ -995,12 +999,73 @@ def serve_video(video_id: int, db: Session = Depends(get_db)):
     if v.storage_key:
         p = settings.videos_dir / v.storage_key
         if p.exists():
-            return FileResponse(str(p), media_type="video/mp4")
+            return _stream_video(p, request)
     # Fallback to file_path
     p = Path(v.file_path) if v.file_path else None
     if p and p.exists():
-        return FileResponse(str(p), media_type="video/mp4")
+        return _stream_video(p, request)
     raise HTTPException(404, "video file missing")
+
+
+def _stream_video(path: Path, request: Request) -> StreamingResponse:
+    """Stream a video file with HTTP Range support for fast seeking.
+
+    This allows the browser to request only the bytes it needs (e.g. for
+    seeking), making video loading much faster — especially for large files.
+    """
+    file_size = path.stat().st_size
+    range_header = request.headers.get("range")
+
+    if range_header:
+        # Parse "bytes=start-end"
+        import re
+        match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        if match:
+            start = int(match.group(1))
+            end = int(match.group(2)) if match.group(2) else file_size - 1
+            chunk_size = end - start + 1
+
+            def chunk_generator():
+                with open(path, "rb") as f:
+                    f.seek(start)
+                    remaining = chunk_size
+                    while remaining > 0:
+                        data = f.read(min(1024 * 1024, remaining))
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+
+            return StreamingResponse(
+                chunk_generator(),
+                media_type="video/mp4",
+                status_code=206,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(chunk_size),
+                    "Cache-Control": "public, max-age=3600",
+                },
+            )
+
+    # No range request — return full file with streaming
+    def full_generator():
+        with open(path, "rb") as f:
+            while True:
+                data = f.read(1024 * 1024)
+                if not data:
+                    break
+                yield data
+
+    return StreamingResponse(
+        full_generator(),
+        media_type="video/mp4",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
 
 
 @router.get("/videos/{video_id}/thumbnail")

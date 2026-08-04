@@ -188,23 +188,26 @@ fi
 
 # ── Step 2: Build das imagens ────────────────────────────────────────────────
 if [[ "$NO_BUILD" -eq 0 ]]; then
-  log "Step 2/7: Buildando imagens Docker na VPS (docker compose build --no-cache)..."
+  log "Step 2/7: Buildando imagens Docker na VPS (docker compose build)..."
 
   # Ensure the bi-net external network exists (for BI Identity Service communication)
   vps "docker network inspect bi-net >/dev/null 2>&1 || docker network create bi-net"
 
   BUILD_LOG=$(mktemp)
   BUILD_EXIT=0
-  vps "cd $VPS_PATH && docker compose -f docker-compose.prod.yml build --no-cache 2>&1; echo \"EXIT_CODE=\$?\"" > "$BUILD_LOG" 2>&1 || BUILD_EXIT=$?
+  vps "cd $VPS_PATH && docker compose -f docker-compose.prod.yml build 2>&1; echo \"EXIT_CODE=\$?\"" > "$BUILD_LOG" 2>&1 || BUILD_EXIT=$?
   BUILD_REMOTE_EXIT=$(grep -oP 'EXIT_CODE=\K[0-9]+' "$BUILD_LOG" | tail -1)
   tail -20 "$BUILD_LOG"
   rm -f "$BUILD_LOG"
   if [[ "$BUILD_EXIT" -ne 0 || "$BUILD_REMOTE_EXIT" != "0" ]]; then
     err "docker compose build FALHOU (exit: ${BUILD_REMOTE_EXIT:-$BUILD_EXIT})"
     err "Rode manualmente para ver o log completo:"
-    err "  my-vps \"cd $VPS_PATH && docker compose -f docker-compose.prod.yml build --no-cache\""
+    err "  my-vps \"cd $VPS_PATH && docker compose -f docker-compose.prod.yml build\""
     exit 1
   fi
+  # Clean build cache after successful build — we don't reuse it and it
+  # can accumulate hundreds of GB over time. Free the space for video storage.
+  vps "docker builder prune -af 2>/dev/null" || true
   ok "Imagens buildadas (gpcg-api:latest, gpcg-worker:latest)"
 else
   log "Step 2/7: Build pulado (--no-build)"
@@ -247,6 +250,38 @@ if "upstream gpcg_api" not in content:
 # ── Replace (or add) the /gpcg/ location block ───────────────────────────
 # Always rewrite the full block so config stays consistent across deploys.
 location_block = """    # ── GPCG (Gameplay Content Generator) ────────────────────────────────
+    # Video files — cached at nginx level for fast repeated loads
+    location ~ ^/gpcg/api/videos/[0-9]+/file$ {
+        limit_req zone=api_limit burst=30 nodelay;
+        rewrite ^/gpcg/(.*)$ /$1 break;
+        proxy_pass         http://gpcg_api;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_buffering    on;
+        proxy_cache_valid  200 206 1h;
+        proxy_read_timeout 1200s;
+        proxy_send_timeout 1200s;
+        client_max_body_size 1024m;
+    }
+    # Thumbnails — cached longer (rarely change)
+    location ~ ^/gpcg/api/videos/[0-9]+/thumbnail$ {
+        limit_req zone=api_limit burst=30 nodelay;
+        rewrite ^/gpcg/(.*)$ /$1 break;
+        proxy_pass         http://gpcg_api;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_buffering    on;
+        proxy_cache_valid  200 24h;
+    }
+    # All other GPCG API routes
     location /gpcg/ {
         limit_req zone=api_limit burst=30 nodelay;
         rewrite ^/gpcg/(.*)$ /$1 break;
@@ -264,16 +299,21 @@ location_block = """    # ── GPCG (Gameplay Content Generator) ────�
     }
 """
 
-# Try to replace existing block (from "# ── GPCG" comment to the closing "}")
+# Try to replace existing block (from "# ── GPCG" comment to the last "}")
+# The block now contains multiple location blocks, so we match until the
+# "# ── BI Identity" comment or the next non-GPCG section.
 pattern = re.compile(
-    r"    # ── GPCG \(Gameplay Content Generator\).*?    \}\n",
+    r"    # ── GPCG \(Gameplay Content Generator\).*?(?=\n    # ── |\n    location /id/|\n    # ── Default|\Z)",
     re.DOTALL,
 )
 if pattern.search(content):
-    content = pattern.sub(location_block, content, count=1)
+    content = pattern.sub(location_block.rstrip(), content, count=1)
 elif "location /gpcg/" in content:
-    # Fallback: replace from "location /gpcg/" to the first closing "}"
-    pattern2 = re.compile(r"    location /gpcg/.*?    \}\n", re.DOTALL)
+    # Fallback: replace from "location /gpcg/" — match all consecutive GPCG blocks
+    pattern2 = re.compile(
+        r"    (?:# ── GPCG.*?|location /gpcg/.*?|location ~ \^/gpcg/.*?)+    \}\n",
+        re.DOTALL,
+    )
     content = pattern2.sub(location_block, content, count=1)
 else:
     # Add before the default location block

@@ -95,7 +95,7 @@ PROFILES = {
         "base_scale_factor": 1.5,
         "fps": 30,
         "crf": 21,
-        "preset": "medium",
+        "preset": "slow",
         "transition_type": "smoothleft",
         "transition_duration": 0.5,
         "subtitle": {
@@ -191,7 +191,7 @@ PROFILES = {
         "base_scale_factor": 1.5,
         "fps": 30,
         "crf": 21,
-        "preset": "medium",
+        "preset": "slow",
         "transition_type": "smoothleft",
         "transition_duration": 0.5,
         "subtitle": {
@@ -239,7 +239,7 @@ PROFILES = {
         "base_scale_factor": 1.5,
         "fps": 30,
         "crf": 21,
-        "preset": "medium",
+        "preset": "slow",
         "transition_type": "smoothleft",
         "transition_duration": 0.5,
         "subtitle": {
