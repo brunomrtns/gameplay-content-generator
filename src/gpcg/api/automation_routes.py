@@ -615,10 +615,153 @@ def create_job_from_automation(user_id: int) -> int | None:
         if active_jobs > 0:
             return None
 
+        # ── Idea queue: user-curated queue takes priority ───────────────
+        # If the user has queued KnowledgeItems, consume the first one (FIFO)
+        # instead of running the autonomous editorial decision.
+        auto = session.query(Automation).filter(Automation.user_id == user_id).first()
+        config = auto.config or {} if auto else {}
+        idea_queue: list[int] = config.get("idea_queue", [])
+
+    if idea_queue:
+        # Consume the first idea in the queue
+        ki_id = idea_queue[0]
+        from gpcg.application.generation_service import GenerationService
+        from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
+        from gpcg.infrastructure.llm import get_llm
+
+        with session_scope() as session:
+            ki = session.get(KnowledgeItem, ki_id)
+            if ki is None or ki.status != KnowledgeItemStatus.fresh.value:
+                # KI no longer available — remove from queue and skip
+                log.info(f"automation: queued KI #{ki_id} no longer fresh, removing from queue")
+                auto = session.query(Automation).filter(Automation.user_id == user_id).first()
+                cfg = auto.config or {}
+                q = cfg.get("idea_queue", [])
+                if ki_id in q:
+                    q.remove(ki_id)
+                    cfg["idea_queue"] = q
+                    auto.config = cfg
+                    session.commit()
+                return None
+
+            # Pick a background game (least recently used with gameplay ready)
+            bg_game = session.query(Game).join(
+                GameplaySource, GameplaySource.game_id == Game.id
+            ).filter(
+                GameplaySource.user_id == user_id,
+                GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            ).order_by(Game.id).first()
+
+            if not bg_game:
+                log.warning("automation: idea queue has items but no gameplay available")
+                return None
+
+            # Build subtitle kwargs from automation config
+            auto = session.query(Automation).filter(Automation.user_id == user_id).first()
+            cfg = auto.config or {}
+            subtitle_kwargs = dict(
+                scene_duration=cfg.get("scene_duration") or 0,
+                video_format=cfg.get("video_format") or "",
+                subtitle_font=cfg.get("subtitle_font") or "",
+                subtitle_font_size=cfg.get("subtitle_font_size") or 0,
+                subtitle_color=cfg.get("subtitle_color") or "",
+                subtitle_outline_color=cfg.get("subtitle_outline_color") or "",
+                subtitle_position=cfg.get("subtitle_position") or "",
+                subtitle_case=cfg.get("subtitle_case") or "",
+                subtitle_box_enabled=cfg.get("subtitle_box_enabled"),
+                subtitle_box_color=cfg.get("subtitle_box_color") or "",
+                subtitle_box_padding=cfg.get("subtitle_box_padding") or 0,
+                subtitle_stroke_color=cfg.get("subtitle_stroke_color") or "",
+                subtitle_stroke_width=cfg.get("subtitle_stroke_width") or 0,
+                subtitle_rounded_box=cfg.get("subtitle_rounded_box"),
+                transition_type=cfg.get("transition_type") or "",
+                transition_duration=cfg.get("transition_duration") or 0,
+                creative_style=cfg.get("creative_style") or "",
+            )
+            voice_name = cfg.get("voice", "")
+            voice_path = ""
+            if voice_name:
+                from gpcg.config import get_settings
+                settings = get_settings()
+                vp = settings.voices_dir / voice_name
+                if vp.exists():
+                    voice_path = str(vp)
+            subtitle_kwargs["voice_path"] = voice_path
+
+            service = GenerationService(llm=get_llm())
+
+            # If KI has a game_id, create a game-specific short;
+            # otherwise, create a curiosity_short with background gameplay.
+            if ki.game_id:
+                game = session.get(Game, ki.game_id)
+                if game:
+                    job = service.create_job(
+                        game.id,
+                        user_id=user_id,
+                        **subtitle_kwargs,
+                    )
+                    # Store the KI reference for the content planner
+                    with session_scope() as s2:
+                        j = s2.get(Job, job.id)
+                        j.artifacts = {
+                            **j.artifacts,
+                            "queued_knowledge_item_id": ki_id,
+                            "idea_source": "user_queue",
+                        }
+                        s2.flush()
+                    log.info(f"automation: created generate_short job #{job.id} from queued KI #{ki_id} (game={game.canonical_name})")
+                else:
+                    log.warning(f"automation: queued KI #{ki_id} references missing game {ki.game_id}")
+                    # Remove from queue
+                    q = cfg.get("idea_queue", [])
+                    if ki_id in q:
+                        q.remove(ki_id)
+                        cfg["idea_queue"] = q
+                        auto.config = cfg
+                        session.commit()
+                    return None
+            else:
+                # General idea → curiosity_short with background gameplay
+                job = service.create_curiosity_job(
+                    background_game_id=bg_game.id,
+                    fact_id=None,
+                    user_id=user_id,
+                    **subtitle_kwargs,
+                )
+                with session_scope() as s2:
+                    j = s2.get(Job, job.id)
+                    j.artifacts = {
+                        **j.artifacts,
+                        "queued_knowledge_item_id": ki_id,
+                        "idea_source": "user_queue",
+                    }
+                    s2.flush()
+                log.info(f"automation: created curiosity_short job #{job.id} from queued KI #{ki_id} (bg={bg_game.canonical_name})")
+
+            # Remove the consumed KI from the queue
+            with session_scope() as session2:
+                auto2 = session2.query(Automation).filter(Automation.user_id == user_id).first()
+                cfg2 = auto2.config or {}
+                q2 = cfg2.get("idea_queue", [])
+                if ki_id in q2:
+                    q2.remove(ki_id)
+                    cfg2["idea_queue"] = q2
+                    auto2.config = cfg2
+                    session2.commit()
+                log.info(f"automation: removed KI #{ki_id} from idea queue (remaining: {len(q2)})")
+
+            # Update last_run_at
+            from datetime import datetime, timezone
+            with session_scope() as session3:
+                auto3 = session3.query(Automation).filter(Automation.user_id == user_id).first()
+                auto3.last_run_at = datetime.now(timezone.utc)
+                session3.flush()
+
+            return job.id
+
     # ── Editorial decision: decide what to produce ──────────────────────
-    # The system autonomously picks a game + topic based on available
-    # gameplays, knowledge, and production history. The user does NOT
-    # specify a topic — the AI acts as the channel's editor.
+    # No items in the idea queue — the system autonomously picks a game
+    # + topic based on available gameplays, knowledge, and production history.
     from gpcg.application.editorial_strategy import EditorialStrategyService
     from gpcg.infrastructure.llm import get_llm
 

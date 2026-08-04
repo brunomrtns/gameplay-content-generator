@@ -355,6 +355,9 @@ class GenerationService:
             # Editorial decision may specify a fact_id for generate_short
             editorial_fact_id = job.artifacts.get("fact_id") if not is_curiosity else None
             editorial_decision = job.artifacts.get("editorial_decision", {})
+            # User idea queue: if the job was created from a queued KnowledgeItem,
+            # force the content planner to use that specific KI.
+            queued_ki_id = job.artifacts.get("queued_knowledge_item_id")
 
         # ── Stage: content_planning ─────────────────────────────────────────
         self._set_stage(job_id, JobStage.content_planning)
@@ -368,10 +371,18 @@ class GenerationService:
                         f"background game #{bg_game_id} not found",
                         JobStage.content_planning.value,
                     )
-                plan = planner.plan_for_general_curiosity(
-                    session, bg_game_id, fact_id=general_fact_id,
-                    user_id=job.user_id,
-                )
+                # If the job came from the idea queue, force the KI
+                if queued_ki_id:
+                    plan = planner.plan_for_knowledge_item(
+                        session, queued_ki_id,
+                        background_game_id=bg_game_id,
+                        user_id=job.user_id,
+                    )
+                else:
+                    plan = planner.plan_for_general_curiosity(
+                        session, bg_game_id, fact_id=general_fact_id,
+                        user_id=job.user_id,
+                    )
                 if plan is None:
                     raise GenerationError(
                         f"no content plan could be created for curiosity short "
@@ -380,22 +391,31 @@ class GenerationService:
                     )
             else:
                 game = session.get(Game, job.game_id)
-                # Pass editorial fact_id if the editorial strategy picked one,
-                # and recent topics to avoid repetition
-                recent_topics = [
-                    r[0] for r in session.execute(
-                        select(ContentPlan.topic)
-                        .where(ContentPlan.user_id == job.user_id)
-                        .order_by(ContentPlan.created_at.desc())
-                        .limit(10)
-                    ).scalars().all() if r
-                ]
-                plan = planner.plan_for_game(
-                    session, job.game_id,
-                    fact_id=editorial_fact_id,
-                    avoid_topics=recent_topics,
-                    user_id=job.user_id,
-                )
+                # If the job came from the idea queue with a game-specific KI,
+                # force the content planner to use that KI.
+                if queued_ki_id:
+                    plan = planner.plan_for_knowledge_item(
+                        session, queued_ki_id,
+                        background_game_id=None,
+                        user_id=job.user_id,
+                    )
+                else:
+                    # Pass editorial fact_id if the editorial strategy picked one,
+                    # and recent topics to avoid repetition
+                    recent_topics = [
+                        r[0] for r in session.execute(
+                            select(ContentPlan.topic)
+                            .where(ContentPlan.user_id == job.user_id)
+                            .order_by(ContentPlan.created_at.desc())
+                            .limit(10)
+                        ).scalars().all() if r
+                    ]
+                    plan = planner.plan_for_game(
+                        session, job.game_id,
+                        fact_id=editorial_fact_id,
+                        avoid_topics=recent_topics,
+                        user_id=job.user_id,
+                    )
                 if plan is None:
                     raise GenerationError(
                         f"no content plan could be created for '{game.canonical_name}' "

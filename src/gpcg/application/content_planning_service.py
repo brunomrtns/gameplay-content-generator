@@ -241,6 +241,79 @@ class ContentPlanningService:
         )
         return plan
 
+    def plan_for_knowledge_item(
+        self,
+        session: Session,
+        knowledge_item_id: int,
+        background_game_id: Optional[int] = None,
+        *,
+        user_id: Optional[int] = None,
+    ) -> Optional[ContentPlan]:
+        """Create a ContentPlan from a specific KnowledgeItem.
+
+        This is used when the user has queued a specific idea (KI) for
+        production. The KI's content is used directly as the basis for the
+        video — no LLM selection is needed.
+
+        If background_game_id is provided, the plan is a curiosity_short
+        (general idea with background gameplay). Otherwise, it's a
+        generate_short for the KI's game (if it has one).
+        """
+        ki = session.get(KnowledgeItem, knowledge_item_id)
+        if ki is None:
+            raise ValueError(f"KnowledgeItem #{knowledge_item_id} not found")
+        if ki.status != KnowledgeItemStatus.fresh.value:
+            log.warning(f"KI #{knowledge_item_id} is not fresh (status={ki.status})")
+            # Still allow it — the user explicitly queued it
+
+        # Determine the game context
+        game_id = ki.game_id if ki.game_id else None
+        bg_game = None
+        if background_game_id:
+            bg_game = session.get(Game, background_game_id)
+
+        # Build the plan directly from the KI
+        topic = ki.title[:200] if ki.title else "Untitled"
+        plan = ContentPlan(
+            game_id=game_id,
+            background_game_id=background_game_id,
+            topic=topic,
+            tone="curious",
+            mood="energetic",
+            fact_id=None,
+            user_id=user_id,
+            scope=ContentScope.general.value if not game_id else ContentScope.game.value,
+            format=self.settings.gpcg_default_format,
+            target_duration=self.settings.gpcg_default_target_duration,
+            metadata_json={
+                "mode": "curiosity_short" if background_game_id else "generate_short",
+                "knowledge_item_id": ki.id,
+                "source_type": "knowledge_item",
+                "source_id": ki.id,
+                "idea_source": "user_queue",
+                "provenance": {
+                    "idea": ki.title,
+                    "source": ki.source_type or "rss",
+                    "source_url": ki.source_url,
+                    "facts": [],
+                    "script": None,
+                    "game_name": bg_game.canonical_name if bg_game else None,
+                },
+                "background_game_id": background_game_id,
+                "planning_scope": "user_queued",
+            },
+        )
+        session.add(plan)
+        session.flush()
+
+        # Mark KI as used
+        ki.status = KnowledgeItemStatus.used.value
+        log.info(
+            f"content plan #{plan.id} [user-queued KI #{ki.id}]: "
+            f"topic='{topic[:50]}' game_id={game_id} bg={bg_game.canonical_name if bg_game else 'None'}"
+        )
+        return plan
+
     def plan_for_general_curiosity(
         self,
         session: Session,

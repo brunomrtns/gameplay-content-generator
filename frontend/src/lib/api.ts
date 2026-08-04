@@ -437,4 +437,22 @@ export const api = {
     request<any>(`/knowledge-items/${id}/reject`, { method: "POST" }),
   triggerContentCollection: () =>
     request<any>("/knowledge-items/collect", { method: "POST" }),
+
+  // ── Idea Queue (user-curated playlist) ────────────────────────────────
+  getIdeaQueue: () => request<{ queue: number[]; items: any[] }>("/idea-queue"),
+  addToIdeaQueue: (knowledgeItemId: number) =>
+    request<{ queue: number[]; message: string }>("/idea-queue/add", {
+      method: "POST",
+      body: JSON.stringify({ knowledge_item_id: knowledgeItemId }),
+    }),
+  removeFromIdeaQueue: (knowledgeItemId: number) =>
+    request<{ queue: number[]; message: string }>("/idea-queue/remove", {
+      method: "POST",
+      body: JSON.stringify({ knowledge_item_id: knowledgeItemId }),
+    }),
+  reorderIdeaQueue: (newOrder: number[]) =>
+    request<{ queue: number[]; message: string }>("/idea-queue/reorder", {
+      method: "POST",
+      body: JSON.stringify(newOrder),
+    }),
 };

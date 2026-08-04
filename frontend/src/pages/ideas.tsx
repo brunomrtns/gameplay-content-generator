@@ -57,26 +57,31 @@ const STATUS_COLORS: Record<string, string> = {
 export function IdeasPage() {
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [queue, setQueue] = useState<KnowledgeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState<string>("");
-  const [filterStatus, setFilterStatus] = useState<string>("");
+  const [filterStatus, setFilterStatus] = useState<string>("fresh");
   const [collecting, setCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [queueIds, setQueueIds] = useState<Set<number>>(new Set());
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [itemsRes, statsRes] = await Promise.all([
+      const [itemsRes, statsRes, queueRes] = await Promise.all([
         api.listKnowledgeItems({
           item_type: filterType || undefined,
           status: filterStatus || undefined,
           limit: 100,
         }),
         api.getKnowledgeItemStats(),
+        api.getIdeaQueue(),
       ]);
       setItems(itemsRes.items || []);
       setStats(statsRes);
+      setQueue(queueRes.items || []);
+      setQueueIds(new Set(queueRes.queue || []));
     } catch (e: any) {
       setError(e.message || "Failed to load content ideas");
     } finally {
@@ -92,6 +97,12 @@ export function IdeasPage() {
     try {
       await api.rejectKnowledgeItem(id);
       setItems((prev) => prev.filter((i) => i.id !== id));
+      setQueueIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setQueue((prev) => prev.filter((i) => i.id !== id));
     } catch (e: any) {
       setError(e.message);
     }
@@ -102,12 +113,51 @@ export function IdeasPage() {
     setError(null);
     try {
       await api.triggerContentCollection();
-      // Reload after a delay to let the job process
       setTimeout(() => loadData(), 3000);
     } catch (e: any) {
       setError(e.message);
     } finally {
       setCollecting(false);
+    }
+  };
+
+  const handleAddToQueue = async (id: number) => {
+    try {
+      await api.addToIdeaQueue(id);
+      setQueueIds((prev) => new Set(prev).add(id));
+      // Update queue display
+      const item = items.find((i) => i.id === id);
+      if (item) setQueue((prev) => [...prev, item]);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const handleRemoveFromQueue = async (id: number) => {
+    try {
+      await api.removeFromIdeaQueue(id);
+      setQueueIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setQueue((prev) => prev.filter((i) => i.id !== id));
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const handleMoveQueueItem = async (index: number, direction: "up" | "down") => {
+    const newQueue = [...queue];
+    const swapIndex = direction === "up" ? index - 1 : index + 1;
+    if (swapIndex < 0 || swapIndex >= newQueue.length) return;
+    [newQueue[index], newQueue[swapIndex]] = [newQueue[swapIndex], newQueue[index]];
+    setQueue(newQueue);
+    try {
+      await api.reorderIdeaQueue(newQueue.map((i) => i.id));
+    } catch (e: any) {
+      setError(e.message);
+      loadData(); // Revert on error
     }
   };
 
@@ -147,14 +197,14 @@ export function IdeasPage() {
             accent="blue"
           />
           <StatCard
+            label="Na Fila"
+            value={queue.length}
+            accent="purple"
+          />
+          <StatCard
             label="Notícias"
             value={stats.by_type?.news || 0}
             accent="blue"
-          />
-          <StatCard
-            label="Curiosidades"
-            value={stats.by_type?.curiosity || 0}
-            accent="purple"
           />
         </div>
       )}
@@ -162,6 +212,85 @@ export function IdeasPage() {
       {error && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
           {error}
+        </div>
+      )}
+
+      {/* Idea Queue Section */}
+      {queue.length > 0 && (
+        <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <svg className="h-5 w-5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            </svg>
+            <h2 className="text-lg font-semibold text-text">Fila de Produção</h2>
+            <span className="text-sm text-text-muted">
+              {queue.length} {queue.length === 1 ? "ideia" : "ideias"} — consumidas em ordem
+            </span>
+          </div>
+          <div className="space-y-2">
+            {queue.map((item, index) => (
+              <div
+                key={item.id}
+                className="flex items-center gap-3 rounded-lg border border-border bg-bg-card p-3"
+              >
+                <div className="flex flex-col gap-0.5">
+                  <button
+                    onClick={() => handleMoveQueueItem(index, "up")}
+                    disabled={index === 0}
+                    className="text-text-muted hover:text-text disabled:opacity-20"
+                    title="Mover para cima"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => handleMoveQueueItem(index, "down")}
+                    disabled={index === queue.length - 1}
+                    className="text-text-muted hover:text-text disabled:opacity-20"
+                    title="Mover para baixo"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </div>
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-purple-500/20 text-xs font-bold text-purple-300">
+                  {index + 1}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+                        TYPE_COLORS[item.item_type] || "bg-gray-500/20 text-gray-300 border-gray-500/30"
+                      }`}
+                    >
+                      {TYPE_LABELS[item.item_type] || item.item_type}
+                    </span>
+                    {item.game_id && (
+                      <span className="text-xs text-text-muted">
+                        jogo-specific
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-text line-clamp-1">{item.title}</p>
+                </div>
+                <button
+                  onClick={() => handleRemoveFromQueue(item.id)}
+                  className="rounded-lg border border-border px-2 py-1 text-xs text-text-muted hover:border-red-500/30 hover:text-red-300"
+                  title="Remover da fila"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-text-muted">
+            A automação consome estas ideias em ordem (primeiro = próximo vídeo).
+            Quando a fila esvazia, o sistema volta a decidir automaticamente.
+          </p>
         </div>
       )}
 
@@ -203,7 +332,11 @@ export function IdeasPage() {
           {items.map((item) => (
             <div
               key={item.id}
-              className="rounded-lg border border-border bg-bg-card p-4 hover:border-teal-500/30 transition-colors"
+              className={`rounded-lg border bg-bg-card p-4 transition-colors ${
+                queueIds.has(item.id)
+                  ? "border-purple-500/40 bg-purple-500/5"
+                  : "border-border hover:border-teal-500/30"
+              }`}
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
@@ -242,14 +375,34 @@ export function IdeasPage() {
                     </a>
                   )}
                 </div>
-                {item.status === "fresh" && (
-                  <button
-                    onClick={() => handleReject(item.id)}
-                    className="rounded-lg border border-border px-3 py-1.5 text-xs text-text-muted hover:border-red-500/30 hover:text-red-300"
-                  >
-                    Rejeitar
-                  </button>
-                )}
+                <div className="flex flex-col gap-2 shrink-0">
+                  {item.status === "fresh" && !queueIds.has(item.id) && (
+                    <button
+                      onClick={() => handleAddToQueue(item.id)}
+                      className="rounded-lg bg-purple-600/80 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500"
+                      title="Adicionar à fila de produção"
+                    >
+                      + Fila
+                    </button>
+                  )}
+                  {queueIds.has(item.id) && (
+                    <button
+                      onClick={() => handleRemoveFromQueue(item.id)}
+                      className="rounded-lg border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 text-xs font-medium text-purple-300 hover:bg-purple-500/20"
+                      title="Remover da fila"
+                    >
+                      Na Fila ✓
+                    </button>
+                  )}
+                  {item.status === "fresh" && (
+                    <button
+                      onClick={() => handleReject(item.id)}
+                      className="rounded-lg border border-border px-3 py-1.5 text-xs text-text-muted hover:border-red-500/30 hover:text-red-300"
+                    >
+                      Rejeitar
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}

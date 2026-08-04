@@ -1,7 +1,7 @@
 """Knowledge Item API routes (V2).
 
 Endpoints for the content intelligence idea bank: list, detail,
-reject, manual collect trigger, and stats.
+reject, manual collect trigger, stats, and idea queue management.
 
 See ARCHITECTURE_V2.md §11.1.
 """
@@ -194,3 +194,101 @@ def trigger_content_collection(
         "job_id": job.id,
         "job_uuid": job.job_uuid,
     }
+
+
+# ── Idea Queue (user-curated playlist of KnowledgeItems) ─────────────────────
+
+
+class IdeaQueueUpdate(BaseModel):
+    """Add or remove a KnowledgeItem from the user's idea queue."""
+    knowledge_item_id: int
+
+
+@router.get("/idea-queue")
+def get_idea_queue(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get the user's idea queue (ordered list of KnowledgeItem IDs).
+
+    The automation consumes this queue first (FIFO) before falling back
+    to autonomous editorial selection. When a video is generated from a
+    queued idea, it's removed from the queue.
+    """
+    from gpcg.domain.models import Automation, KnowledgeItem
+    auto = db.query(Automation).filter(Automation.user_id == user.id).first()
+    if not auto:
+        return {"queue": [], "items": []}
+    queue_ids: list[int] = (auto.config or {}).get("idea_queue", [])
+    # Fetch the actual items (preserve order)
+    items = []
+    for ki_id in queue_ids:
+        ki = db.get(KnowledgeItem, ki_id)
+        if ki:
+            items.append(_item_to_out(ki))
+    return {"queue": queue_ids, "items": items}
+
+
+@router.post("/idea-queue/add")
+def add_to_idea_queue(
+    req: IdeaQueueUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Add a KnowledgeItem to the end of the user's idea queue."""
+    from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
+    ki = db.get(KnowledgeItem, req.knowledge_item_id)
+    if not ki:
+        raise HTTPException(404, "KnowledgeItem not found")
+    if ki.status != KnowledgeItemStatus.fresh.value:
+        raise HTTPException(400, f"KnowledgeItem is not fresh (status={ki.status})")
+    auto = db.query(Automation).filter(Automation.user_id == user.id).first()
+    if not auto:
+        raise HTTPException(404, "Automation not found")
+    config = auto.config or {}
+    queue: list = config.get("idea_queue", [])
+    if req.knowledge_item_id not in queue:
+        queue.append(req.knowledge_item_id)
+        config["idea_queue"] = queue
+        auto.config = config
+        db.commit()
+    return {"queue": queue, "message": "Added to queue"}
+
+
+@router.post("/idea-queue/remove")
+def remove_from_idea_queue(
+    req: IdeaQueueUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Remove a KnowledgeItem from the user's idea queue."""
+    from gpcg.domain.models import Automation
+    auto = db.query(Automation).filter(Automation.user_id == user.id).first()
+    if not auto:
+        raise HTTPException(404, "Automation not found")
+    config = auto.config or {}
+    queue: list = config.get("idea_queue", [])
+    if req.knowledge_item_id in queue:
+        queue.remove(req.knowledge_item_id)
+        config["idea_queue"] = queue
+        auto.config = config
+        db.commit()
+    return {"queue": queue, "message": "Removed from queue"}
+
+
+@router.post("/idea-queue/reorder")
+def reorder_idea_queue(
+    new_order: list[int],
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Reorder the user's idea queue. Receives the full ordered list of IDs."""
+    from gpcg.domain.models import Automation
+    auto = db.query(Automation).filter(Automation.user_id == user.id).first()
+    if not auto:
+        raise HTTPException(404, "Automation not found")
+    config = auto.config or {}
+    config["idea_queue"] = new_order
+    auto.config = config
+    db.commit()
+    return {"queue": new_order, "message": "Queue reordered"}
