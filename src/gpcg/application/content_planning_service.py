@@ -279,7 +279,7 @@ class ContentPlanningService:
             background_game_id=background_game_id,
             topic=topic,
             tone="curious",
-            mood="energetic",
+            music_mood="energetic",
             fact_id=None,
             user_id=user_id,
             scope="general" if not game_id else ContentScope.game.value,
