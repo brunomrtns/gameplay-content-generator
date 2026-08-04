@@ -331,8 +331,13 @@ class EditorialStrategyService:
         user_id: int,
     ) -> EditorialDecision:
         """Use LLM to make an editorial decision."""
-        # Build the prompt
-        games_info = [g.to_prompt_dict() for g in inventory]
+        # Only show games that have gameplay available — the LLM cannot
+        # produce a video for a game without gameplay assets.
+        playable = [g for g in inventory if g.has_gameplay]
+        if not playable:
+            return self._heuristic_decision(inventory, history)
+
+        games_info = [g.to_prompt_dict() for g in playable]
         recent_topics = history["recent_topics"][:10]
 
         # Load channel profile for context
@@ -426,13 +431,19 @@ class EditorialStrategyService:
         between a game-specific video (generate_short) or a general curiosity
         video (curiosity_short) with any of the user's gameplays as background.
         """
-        games_info = [g.to_prompt_dict() for g in inventory]
+        # Only show games that have gameplay available — the LLM cannot
+        # produce a video for a game without gameplay assets.
+        playable = [g for g in inventory if g.has_gameplay]
+        if not playable:
+            return self._heuristic_decision(inventory, history)
+
+        games_info = [g.to_prompt_dict() for g in playable]
         recent_topics = history.get("recent_topics", [])[:10]
         recent_game_ids = set(history.get("recent_game_ids", [])[:5])
 
         # Build a list of recently used game names to explicitly tell the LLM
         recent_game_names = []
-        for inv in inventory:
+        for inv in playable:
             if inv.game_id in recent_game_ids:
                 recent_game_names.append(inv.game_name)
 
@@ -455,8 +466,8 @@ class EditorialStrategyService:
                 f"{json.dumps(ideas_json, indent=2, ensure_ascii=False)}\n\n"
             )
 
-        # Games available for background gameplay
-        gameplay_games = [g for g in inventory if g.has_gameplay]
+        # Games available for background gameplay (same as playable)
+        gameplay_games = playable
         gameplay_names = [g.game_name for g in gameplay_games]
 
         prompt = (
