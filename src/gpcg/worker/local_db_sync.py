@@ -46,6 +46,9 @@ def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Pat
     """Resolve a VPS gameplay file path to a local file path.
 
     The VPS stores gameplay at /app/data/gameplays/{filename} (container path).
+    The VPS may add a hash prefix (e.g. "2ee37e60_") to the filename for
+    deduplication. Locally, the original filename (without prefix) is used.
+
     Locally, gameplay files may be in:
     - {storage_root}/data/gameplays/{filename}
     - {storage_root}/data/inbox/{filename}
@@ -61,6 +64,14 @@ def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Pat
     if vps_path and Path(vps_path).exists():
         return vps_path
 
+    # The VPS may prepend a hash prefix like "2ee37e60_" to the filename.
+    # Try both the original filename and the stripped version.
+    import re
+    stripped = re.sub(r'^[0-9a-f]{8}_', '', filename)
+    candidates = [filename]
+    if stripped != filename:
+        candidates.append(stripped)
+
     # Search common locations
     search_dirs = [
         storage_root / "data" / "gameplays",
@@ -72,21 +83,24 @@ def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Pat
     ]
 
     for d in search_dirs:
-        candidate = d / filename
-        if candidate.exists():
-            return str(candidate)
+        for name in candidates:
+            candidate = d / name
+            if candidate.exists():
+                return str(candidate)
 
     # Last resort: find by filename under /media/bruno/ToshibaHD
+    # Try both original and stripped filename
     import subprocess
-    try:
-        result = subprocess.run(
-            ["find", "/media/bruno/ToshibaHD", "-name", filename, "-type", "f"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip().split("\n")[0]
-    except Exception:
-        pass
+    for name in candidates:
+        try:
+            result = subprocess.run(
+                ["find", "/media/bruno/ToshibaHD", "-name", name, "-type", "f"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip().split("\n")[0]
+        except Exception:
+            pass
 
     return None
 
