@@ -1232,6 +1232,7 @@ def delete_video(
         "success": True,
         "video_id": video_id,
         "clips_released": clips_released,
+        "ki_released": ki_released,
     }
 
 

@@ -364,7 +364,7 @@ export function VideosPage() {
         </div>
       )}
 
-      {/* Delete confirmation modal — step 2: release clips? */}
+      {/* Delete confirmation modal — step 2: release clips + idea? */}
       {confirmRelease !== null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in"
@@ -378,11 +378,11 @@ export function VideosPage() {
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-accent">
                 <Film className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold">Liberar trechos de gameplay?</h3>
+              <h3 className="text-lg font-semibold">Liberar trechos e ideia?</h3>
             </div>
             <p className="text-sm text-text-secondary">
-              Os trechos de gameplay usados neste vídeo podem ser liberados para
-              uso em vídeos futuros. Deseja liberá-los?
+              Os trechos de gameplay e a ideia de conteúdo usados neste vídeo
+              podem ser liberados para uso em vídeos futuros. Deseja liberá-los?
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -401,7 +401,7 @@ export function VideosPage() {
                 onClick={() => handleDelete(confirmRelease, true)}
                 className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 transition-colors"
               >
-                Sim, liberar trechos
+                Sim, liberar trechos e ideia
               </button>
             </div>
           </div>
