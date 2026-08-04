@@ -627,9 +627,29 @@ class RemoteWorker:
 
             for item in pending:
                 user_id = item["user_id"]
-                self._make_editorial_decision(user_id)
+                idea_queue = item.get("idea_queue", [])
+                if idea_queue:
+                    # User has curated ideas in queue — consume directly (no LLM needed)
+                    self._consume_idea_queue(user_id)
+                else:
+                    self._make_editorial_decision(user_id)
         except Exception as e:
             log.warning(f"Automation check failed: {e}")
+
+    def _consume_idea_queue(self, user_id: int) -> None:
+        """Create a job from the user's idea queue (no LLM editorial decision needed)."""
+        try:
+            resp = self.client.post("/api/automation/consume-queue", json={"user_id": user_id})
+            if resp.status_code == 200:
+                job_data = resp.json()
+                log.info(f"Idea queue: created job #{job_data.get('job_id')} for user {user_id}")
+            elif resp.status_code == 409:
+                # Queue empty or active job exists — not an error
+                pass
+            else:
+                log.warning(f"Consume idea queue failed for user {user_id}: {resp.status_code} {resp.text}")
+        except Exception as e:
+            log.warning(f"Consume idea queue for user {user_id} failed: {e}")
 
     def _make_editorial_decision(self, user_id: int) -> None:
         """Fetch editorial data from VPS, decide locally with LLM, create job."""

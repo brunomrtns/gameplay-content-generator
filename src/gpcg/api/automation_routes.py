@@ -216,9 +216,28 @@ def check_automation(
             "user_id": auto.user_id,
             "automation_id": auto.id,
             "config": auto.config or {},
+            "idea_queue": (auto.config or {}).get("idea_queue", []),
         })
 
     return {"pending": pending}
+
+
+@router.post("/automation/consume-queue")
+def consume_idea_queue(
+    req: ConsumeQueueRequest,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Create a job from the first KnowledgeItem in the user's idea queue.
+
+    Called by the remote worker when /automation/check returns a non-empty
+    idea_queue. This bypasses the editorial decision (LLM) and uses the
+    user-curated idea directly.
+    """
+    job_id = create_job_from_automation(req.user_id)
+    if job_id is None:
+        raise HTTPException(status_code=409, detail="No job created (queue empty or active job exists)")
+    return {"job_id": job_id, "source": "idea_queue"}
 
 
 @router.get("/automation/editorial-data/{user_id}")
@@ -450,6 +469,11 @@ class CreateJobRequest(BaseModel):
     background_game_id: Optional[int] = None
     topic_hint: str = ""
     reason: str = ""
+
+
+class ConsumeQueueRequest(BaseModel):
+    """Request to consume the first item from the user's idea queue."""
+    user_id: int
 
 
 @router.post("/automation/create-job")
