@@ -282,7 +282,6 @@ class ContentPlanningService:
             music_mood="energetic",
             fact_id=None,
             user_id=user_id,
-            scope="general" if not game_id else ContentScope.game.value,
             format=self.settings.gpcg_default_format,
             target_duration=self.settings.gpcg_default_target_duration,
             metadata_json={
