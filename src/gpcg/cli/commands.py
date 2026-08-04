@@ -391,3 +391,17 @@ def set_camera_type(
             console.print("[dim]Pipeline: legacy full-frame VLM analysis[/dim]")
         else:
             console.print(f"[dim]Pipeline: YOLO + crop + upscale (same as third_person)[/dim]")
+
+
+def panel() -> None:
+    """Launch the GPCG Worker Panel — a TUI for managing the local worker.
+
+    Shows worker status, job queue, recent videos, live logs, and provides
+    controls for start/stop worker, pause/resume automation, and collect ideas.
+
+    Reads config from the same env vars as `gpcg remote-worker`:
+      GPCG_VPS_URL, GPCG_WORKER_ID, GPCG_WORKER_API_KEY
+    """
+    from gpcg.cli.worker_panel import run_worker_panel
+
+    run_worker_panel()

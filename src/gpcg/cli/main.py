@@ -23,6 +23,7 @@ from gpcg.cli.commands import (
     dev,
     generate,
     inbox_scan,
+    panel,
     remote_worker,
     serve,
     set_camera_type,
@@ -41,6 +42,7 @@ app.command()(creative_test)
 app.command()(dev)
 app.command()(generate)
 app.command()(inbox_scan)
+app.command()(panel)
 app.command()(remote_worker)
 app.command()(serve)
 app.command()(set_camera_type)
