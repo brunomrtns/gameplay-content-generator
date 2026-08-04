@@ -799,6 +799,32 @@ def submit_job_result(
             elif req.status == JobStatus.failed.value:
                 source.processing_status = GameplayProcessingStatus.failed.value
 
+    # Rollback: re-queue the KnowledgeItem if this job consumed one from
+    # the idea queue and failed. The KI stays fresh (not marked used) until
+    # a Video is persisted, so we just put it back at the top of the queue.
+    if req.status == JobStatus.failed.value:
+        queued_ki_id = (_ensure_dict(job.artifacts) or {}).get("queued_knowledge_item_id")
+        if queued_ki_id:
+            try:
+                from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
+                from sqlalchemy.orm.attributes import flag_modified
+                ki = db.get(KnowledgeItem, queued_ki_id)
+                if ki and ki.status == KnowledgeItemStatus.fresh.value:
+                    auto = db.query(Automation).filter(
+                        Automation.user_id == job.user_id
+                    ).first()
+                    if auto:
+                        cfg = dict(auto.config or {})
+                        q = list(cfg.get("idea_queue", []))
+                        if queued_ki_id not in q:
+                            q.insert(0, queued_ki_id)
+                            cfg["idea_queue"] = q
+                            auto.config = cfg
+                            flag_modified(auto, "config")
+                            log.info(f"job #{job_id} failed: re-queued KI #{queued_ki_id} at top of idea queue")
+            except Exception as e:
+                log.warning(f"job #{job_id} failed: could not re-queue KI #{queued_ki_id}: {e}")
+
     db.commit()
     log.info(f"Job #{job.id} result: {req.status}")
 
