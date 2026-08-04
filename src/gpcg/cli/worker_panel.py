@@ -44,11 +44,34 @@ from textual.widgets import (
 # ── Config ───────────────────────────────────────────────────────────────────
 
 def _get_config():
-    """Read worker config from env vars."""
+    """Read worker config from env vars, falling back to systemd service file."""
+    vps_url = os.environ.get("GPCG_VPS_URL", "")
+    worker_id = os.environ.get("GPCG_WORKER_ID", "home-pc")
+    api_key = os.environ.get("GPCG_WORKER_API_KEY", "")
+
+    # If not in env, try reading from systemd service file
+    if not vps_url or not api_key:
+        try:
+            import subprocess as sp
+            r = sp.run(
+                ["systemctl", "--user", "cat", "gpcg-worker"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in r.stdout.splitlines():
+                line = line.strip()
+                if line.startswith("Environment=GPCG_VPS_URL="):
+                    vps_url = line.split("=", 2)[2]
+                elif line.startswith("Environment=GPCG_WORKER_ID="):
+                    worker_id = line.split("=", 2)[2]
+                elif line.startswith("Environment=GPCG_WORKER_API_KEY="):
+                    api_key = line.split("=", 2)[2]
+        except Exception:
+            pass
+
     return {
-        "vps_url": os.environ.get("GPCG_VPS_URL", ""),
-        "worker_id": os.environ.get("GPCG_WORKER_ID", "home-pc"),
-        "api_key": os.environ.get("GPCG_WORKER_API_KEY", ""),
+        "vps_url": vps_url,
+        "worker_id": worker_id,
+        "api_key": api_key,
     }
 
 
@@ -327,26 +350,30 @@ class WorkerPanelApp(App):
             # GPU
             cards[1].update_value(_get_gpu_info(), "cyan")
 
-            # Current job + automation
-            worker_info = _api_get(self.cfg, "/workers/home-pc/status")
-            if worker_info:
-                activity = worker_info.get("current_activity", "Idle")
-                current_job = worker_info.get("current_job_id")
-                cards[2].update_value(
-                    f"{activity}" + (f" (#{current_job})" if current_job else ""),
-                    "yellow" if current_job else "dim",
-                )
+            # Current job — from workers list
+            workers_data = _api_get(self.cfg, "/workers")
+            current_job = None
+            activity = "Idle"
+            if workers_data and isinstance(workers_data, dict):
+                for w in workers_data.get("workers", []):
+                    if w.get("worker_id") == self.cfg["worker_id"]:
+                        activity = w.get("current_activity", "Idle")
+                        current_job = w.get("current_job_id")
+                        break
+            cards[2].update_value(
+                f"{activity}" + (f" (#{current_job})" if current_job else ""),
+                "yellow" if current_job else "dim",
+            )
 
             # Automation status
-            # We need to get it from dashboard or a dedicated endpoint
-            auto_data = _api_get(self.cfg, "/automation")
+            auto_data = _api_get(self.cfg, "/panel/automation")
             if auto_data and isinstance(auto_data, dict):
                 auto_status = auto_data.get("status", "—")
                 color = "green" if auto_status == "running" else "red"
                 cards[3].update_value(auto_status.upper(), color)
 
         # Jobs table
-        jobs = _api_get(self.cfg, "/jobs?limit=20")
+        jobs = _api_get(self.cfg, "/panel/jobs?limit=30")
         jobs_table = self.query_one("#jobs-table", DataTable)
         jobs_table.clear()
         if jobs and isinstance(jobs, list):
@@ -362,7 +389,7 @@ class WorkerPanelApp(App):
                 )
 
         # Videos table
-        videos = _api_get(self.cfg, "/videos?limit=20")
+        videos = _api_get(self.cfg, "/panel/videos?limit=30")
         videos_table = self.query_one("#videos-table", DataTable)
         videos_table.clear()
         if videos and isinstance(videos, list):
@@ -378,12 +405,11 @@ class WorkerPanelApp(App):
                 )
 
         # Ideas table
-        ideas = _api_get(self.cfg, "/knowledge-items?limit=30&status=")
+        ideas = _api_get(self.cfg, "/panel/ideas?limit=30")
         ideas_table = self.query_one("#ideas-table", DataTable)
         ideas_table.clear()
-        if ideas and isinstance(ideas, dict):
-            items = ideas.get("items", [])
-            for ki in items:
+        if ideas and isinstance(ideas, list):
+            for ki in ideas:
                 score = ki.get("editorial_score", 0)
                 ideas_table.add_row(
                     str(ki.get("id", "")),
@@ -409,17 +435,17 @@ class WorkerPanelApp(App):
         self.notify(f"Worker: {result}", timeout=2)
 
     def action_pause_automation(self):
-        r = _api_post(self.cfg, "/automation/pause")
+        r = _api_post(self.cfg, "/panel/automation/pause")
         self.notify(f"Automation: {r}" if r else "Failed", timeout=2)
         self.do_refresh()
 
     def action_resume_automation(self):
-        r = _api_post(self.cfg, "/automation/resume")
+        r = _api_post(self.cfg, "/panel/automation/resume")
         self.notify(f"Automation: {r}" if r else "Failed", timeout=2)
         self.do_refresh()
 
     def action_collect_ideas(self):
-        r = _api_post(self.cfg, "/knowledge-items/collect")
+        r = _api_post(self.cfg, "/panel/collect-ideas")
         self.notify(f"Collection: {r}" if r else "Failed", timeout=2)
 
     def action_focus_logs(self):
