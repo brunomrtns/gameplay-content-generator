@@ -167,6 +167,24 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
             ))
             session.flush()
 
+        # Background game (for curiosity_short — gameplay runs in background)
+        bg_game = job_data.get("background_game")
+        if bg_game:
+            # Only add if not already added (same game as main game)
+            existing = session.get(Game, bg_game["id"])
+            if existing is None:
+                session.add(Game(
+                    id=bg_game["id"],
+                    user_id=user_id,
+                    canonical_name=bg_game["canonical_name"],
+                    aliases=bg_game.get("aliases", []),
+                    platforms=bg_game.get("platforms", []),
+                    capture_sources=bg_game.get("capture_sources", []),
+                    camera_type=bg_game.get("camera_type", "unknown"),
+                    metadata_json=bg_game.get("metadata_json", {}),
+                ))
+                session.flush()
+
         # Facts
         for fact_data in job_data.get("facts", []):
             session.add(Fact(

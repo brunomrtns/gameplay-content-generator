@@ -1309,6 +1309,18 @@ def get_job_data(
                 "metadata_json": game.metadata_json,
             }
 
+    # Background game (for curiosity_short — the game whose gameplay runs in background)
+    bg_game_id = job.artifacts.get("background_game_id") if job.artifacts else None
+    if bg_game_id and bg_game_id != job.game_id:
+        bg_game = db.query(Game).filter(Game.id == bg_game_id).first()
+        if bg_game:
+            data["background_game"] = {
+                "id": bg_game.id, "canonical_name": bg_game.canonical_name,
+                "aliases": bg_game.aliases, "camera_type": bg_game.camera_type,
+                "platforms": bg_game.platforms, "capture_sources": bg_game.capture_sources,
+                "metadata_json": bg_game.metadata_json,
+            }
+
     # Content plan (if exists)
     if job.content_plan_id:
         plan = db.query(ContentPlan).filter(ContentPlan.id == job.content_plan_id).first()
