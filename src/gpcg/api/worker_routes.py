@@ -1516,6 +1516,15 @@ def sync_job_result(
                 for k, v in req.content_plan.items():
                     if k != "id" and hasattr(plan, k):
                         setattr(plan, k, v)
+                # V2: Mark KnowledgeItem as used if the plan was based on one
+                plan_meta = req.content_plan.get("metadata_json", {}) or {}
+                ki_id = plan_meta.get("knowledge_item_id")
+                if ki_id:
+                    from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
+                    ki = db.query(KnowledgeItem).filter(KnowledgeItem.id == int(ki_id)).first()
+                    if ki and ki.status == KnowledgeItemStatus.fresh.value:
+                        ki.status = KnowledgeItemStatus.used.value
+                        log.info(f"Marked KI #{ki.id} as used (job #{job_id}, existing plan)")
         if not plan:
             print(f"[SYNC] job #{job_id}: creating new ContentPlan in VPS DB (local id={req.content_plan.get('id')}, topic={req.content_plan.get('topic','')})", flush=True)
             # Create new ContentPlan in VPS DB (local DB id is irrelevant)
@@ -1537,6 +1546,15 @@ def sync_job_result(
             db.add(plan)
             db.flush()
             job.content_plan_id = plan.id
+            # V2: Mark KnowledgeItem as used if the plan was based on one
+            plan_meta = req.content_plan.get("metadata_json", {}) or {}
+            ki_id = plan_meta.get("knowledge_item_id")
+            if ki_id:
+                from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
+                ki = db.query(KnowledgeItem).filter(KnowledgeItem.id == int(ki_id)).first()
+                if ki and ki.status == KnowledgeItemStatus.fresh.value:
+                    ki.status = KnowledgeItemStatus.used.value
+                    log.info(f"Marked KI #{ki.id} as used (job #{job_id})")
 
     # Sync Script
     # NOTE: Same as ContentPlan — the script id is from the LOCAL DB.
