@@ -48,12 +48,18 @@ const STATUS_LABELS: Record<string, string> = {
   rejected: "Rejeitado",
 };
 
+const STATUS_COLORS: Record<string, string> = {
+  fresh: "bg-green-500/20 text-green-300 border-green-500/30",
+  used: "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  rejected: "bg-red-500/20 text-red-300 border-red-500/30",
+};
+
 export function IdeasPage() {
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState<string>("");
-  const [filterStatus, setFilterStatus] = useState<string>("fresh");
+  const [filterStatus, setFilterStatus] = useState<string>("");
   const [collecting, setCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -132,9 +138,14 @@ export function IdeasPage() {
 
       {/* Stats Cards */}
       {stats && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
           <StatCard label="Total" value={stats.total} />
           <StatCard label="Disponíveis" value={stats.fresh} accent="green" />
+          <StatCard
+            label="Usados"
+            value={stats.by_status?.used || 0}
+            accent="blue"
+          />
           <StatCard
             label="Notícias"
             value={stats.by_type?.news || 0}
@@ -203,6 +214,13 @@ export function IdeasPage() {
                       }`}
                     >
                       {TYPE_LABELS[item.item_type] || item.item_type}
+                    </span>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+                        STATUS_COLORS[item.status] || "bg-gray-500/20 text-gray-300 border-gray-500/30"
+                      }`}
+                    >
+                      {STATUS_LABELS[item.status] || item.status}
                     </span>
                     <span className={`text-sm font-bold ${scoreColor(item.editorial_score)}`}>
                       Score: {item.editorial_score.toFixed(0)}
