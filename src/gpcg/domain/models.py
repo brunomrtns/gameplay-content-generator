@@ -223,10 +223,12 @@ class ContentScope(str, enum.Enum):
     - game: only the specific game
     - franchise: games in the same franchise (Game.franchise match)
     - developer: games by the same developer (Game.developer match)
+    - general: general curiosity (not tied to a specific game)
     """
     game = "game"
     franchise = "franchise"
     developer = "developer"
+    general = "general"
 
 
 class GameplayProcessingStatus(str, enum.Enum):
