@@ -142,6 +142,7 @@ class RenderPlanBuilder:
             # Calculate total scene duration
             scene_dur = sum(c.duration for c in scene_clips_list)
 
+            extraction_ok = False
             if len(scene_clips_list) == 1:
                 # Single clip — extract directly
                 clip = scene_clips_list[0]
@@ -154,15 +155,32 @@ class RenderPlanBuilder:
                         width=w,
                         height=h,
                     )
+                    extraction_ok = True
                 except Exception as e:
                     log.error(f"failed to extract scene {scene_num} from {clip.source_path}: {e}")
-                    continue
             else:
                 # Multiple clips — extract each then concatenate
                 try:
                     self._extract_and_concatenate(scene_clips_list, scene_file, w, h)
+                    extraction_ok = True
                 except Exception as e:
                     log.error(f"failed to build scene {scene_num} (concat): {e}")
+
+            # Fallback: if extraction failed, reuse the last successful scene
+            # to avoid cutting the video short (narration continues but visual
+            # would end early). This ensures video duration ≈ narration duration.
+            if not extraction_ok:
+                last_scene_file = scene_dir / f"scene_{scene_num - 1:03d}.mp4"
+                if last_scene_file.exists():
+                    import shutil as _shutil
+                    _shutil.copy2(last_scene_file, scene_file)
+                    log.warning(
+                        f"scene {scene_num} extraction failed — reusing scene {scene_num - 1} "
+                        f"as fallback to preserve video duration"
+                    )
+                    extraction_ok = True
+                else:
+                    log.error(f"scene {scene_num} extraction failed and no fallback available — skipping")
                     continue
 
             scene_timeline.append(
