@@ -634,13 +634,15 @@ def create_job_from_automation(user_id: int) -> int | None:
             if ki is None or ki.status != KnowledgeItemStatus.fresh.value:
                 # KI no longer available — remove from queue and skip
                 log.info(f"automation: queued KI #{ki_id} no longer fresh, removing from queue")
+                from sqlalchemy.orm.attributes import flag_modified
                 auto = session.query(Automation).filter(Automation.user_id == user_id).first()
-                cfg = auto.config or {}
-                q = cfg.get("idea_queue", [])
+                cfg = dict(auto.config or {})
+                q = list(cfg.get("idea_queue", []))
                 if ki_id in q:
                     q.remove(ki_id)
                     cfg["idea_queue"] = q
                     auto.config = cfg
+                    flag_modified(auto, "config")
                     session.commit()
                 return None
 
@@ -713,11 +715,13 @@ def create_job_from_automation(user_id: int) -> int | None:
                 else:
                     log.warning(f"automation: queued KI #{ki_id} references missing game {ki.game_id}")
                     # Remove from queue
-                    q = cfg.get("idea_queue", [])
+                    from sqlalchemy.orm.attributes import flag_modified
+                    q = list(cfg.get("idea_queue", []))
                     if ki_id in q:
                         q.remove(ki_id)
                         cfg["idea_queue"] = q
                         auto.config = cfg
+                        flag_modified(auto, "config")
                         session.commit()
                     return None
             else:
@@ -740,13 +744,15 @@ def create_job_from_automation(user_id: int) -> int | None:
 
             # Remove the consumed KI from the queue
             with session_scope() as session2:
+                from sqlalchemy.orm.attributes import flag_modified
                 auto2 = session2.query(Automation).filter(Automation.user_id == user_id).first()
-                cfg2 = auto2.config or {}
-                q2 = cfg2.get("idea_queue", [])
+                cfg2 = dict(auto2.config or {})
+                q2 = list(cfg2.get("idea_queue", []))
                 if ki_id in q2:
                     q2.remove(ki_id)
                     cfg2["idea_queue"] = q2
                     auto2.config = cfg2
+                    flag_modified(auto2, "config")
                     session2.commit()
                 log.info(f"automation: removed KI #{ki_id} from idea queue (remaining: {len(q2)})")
 
