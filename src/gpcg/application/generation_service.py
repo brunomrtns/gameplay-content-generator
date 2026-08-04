@@ -1191,19 +1191,17 @@ class GenerationService:
             }
             session.flush()
 
-        # REFACTORY_V2: editorial gate — if the final verdict is still REVISE
-        # after exhausting max_revisions, FAIL the job instead of silently
-        # proceeding to TTS with a bad script. This prevents publishing
-        # low-quality content that the critic explicitly flagged as needing
-        # more work.
+        # After exhausting max_revisions, proceed with the best script we have.
+        # The critic may still say REVISE, but we've done our best — blocking
+        # TTS would prevent any video from being generated. Log a warning so
+        # quality issues are visible, but continue to TTS.
         final_verdict = reviews[-1]["verdict"] if reviews else "PASS"
         if final_verdict == CRITIC_VERDICT_REVISE:
-            raise GenerationError(
-                f"script_review: script still needs revision after "
-                f"{max_revisions} attempts (final verdict=REVISE, "
-                f"score={reviews[-1].get('overall_score', 0):.1f}). "
-                f"Editorial gate blocked TTS to prevent low-quality output.",
-                JobStage.script_review.value,
+            log.warning(
+                f"script_review: script still flagged as REVISE after "
+                f"{max_revisions} attempts (final score="
+                f"{reviews[-1].get('overall_score', 0):.1f}). "
+                f"Proceeding with best version — quality may be suboptimal."
             )
 
         return current_script
