@@ -48,6 +48,7 @@ from gpcg.domain.models import (
     Script,
     User,
     Video,
+    VideoStatus,
 )
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db, session_scope
