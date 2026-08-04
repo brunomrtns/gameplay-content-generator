@@ -1,0 +1,7 @@
+#!/bin/bash
+# Pre-remove: nada especial a fazer
+set -e
+
+echo "Removing gpcg-panel..."
+
+exit 0

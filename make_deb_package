@@ -1,0 +1,84 @@
+#!/bin/bash
+
+set -e
+
+LOCAL_DIR=$(pwd)
+PACKAGE_VERSION="1.0.0"
+PACKAGE_NAME="gpcg-panel"
+
+VERSION_SUFIX="${REPOSITORY_PATH}.${PACKAGE_RELEASE}"
+
+echo "LOCAL_DIR: ${LOCAL_DIR}"
+echo "PACKAGE_VERSION: ${PACKAGE_VERSION}"
+echo "PACKAGE_NAME: ${PACKAGE_NAME}"
+
+###########################################################################
+## 	Montando o diretório de trabalho para o pacote deb
+
+echo "Creating DEB Packaging Workspace."
+rm -Rf ~/debbuild
+mkdir -p ~/debbuild/BUILDROOT/DEBIAN
+mkdir -p ~/debbuild/SOURCES
+
+cp -r "src/packaging" ~/debbuild/SOURCES
+
+###########################################################################
+## 	Instalando programa em ~/debbuild/BUILDROOT/
+
+echo "Installing program in ~/debbuild/BUILDROOT/."
+cd ~/debbuild/SOURCES/packaging
+
+mkdir -p ~/debbuild/BUILDROOT/usr/bin
+mkdir -p ~/debbuild/BUILDROOT/usr/lib/${PACKAGE_NAME}
+
+# Instalar o wrapper script
+install -m 0755 gpcg-panel.sh ~/debbuild/BUILDROOT/usr/lib/${PACKAGE_NAME}/gpcg-panel.sh
+
+# Symlink em /usr/bin
+cd ~/debbuild/BUILDROOT/usr/bin
+ln -s /usr/lib/${PACKAGE_NAME}/gpcg-panel.sh ${PACKAGE_NAME}
+cd ~/debbuild/SOURCES/packaging
+
+echo "Checking installed size."
+INSTALLED_SIZE=$(du -s ~/debbuild/BUILDROOT)
+INSTALLED_SIZE=${INSTALLED_SIZE%%[^0-9]*}
+
+# Instalar scripts de maintainer (postinst, prerm)
+install -m 0755 postinst ~/debbuild/BUILDROOT/DEBIAN/postinst 2>/dev/null || true
+install -m 0755 prerm ~/debbuild/BUILDROOT/DEBIAN/prerm 2>/dev/null || true
+
+###########################################################################
+## 	Criando arquivos de controle para o pacote deb.
+
+echo "Creating ~/debbuild/BUILDROOT/DEBIAN/control"
+echo \
+"Package:${PACKAGE_NAME}
+Version: ${PACKAGE_VERSION}-${VERSION_SUFIX}
+Section: contrib/misc
+Priority: optional
+Architecture: amd64
+Essential:
+Depends: python3
+Pre-depends:
+Suggests:
+Installed-Size: ${INSTALLED_SIZE}
+Maintainer: Bruno Martins <brunomartinsss@gmail.com>
+Conflicts:
+Replaces:
+Provides:
+Description: ${PACKAGE_NAME} — TUI panel for GPCG worker management
+" > ~/debbuild/BUILDROOT/DEBIAN/control
+
+echo "#################################"
+cat ~/debbuild/BUILDROOT/DEBIAN/control
+echo "#################################"
+
+###########################################################################
+## 	O comando "dpkg-deb -b" está sendo usado aqui para montar o pacote deb
+
+echo "Creating .deb package."
+tree -a ~/debbuild 2>/dev/null || find ~/debbuild -type f
+mkdir -p "${LOCAL_DIR}/artifacts/$REPOSITORY_PATH/$TARGET_DISTRO/$TARGET_DISTRO_VERSION"
+dpkg-deb -b ~/debbuild/BUILDROOT "${LOCAL_DIR}/artifacts/$REPOSITORY_PATH/$TARGET_DISTRO/$TARGET_DISTRO_VERSION"
+
+echo "Done!"

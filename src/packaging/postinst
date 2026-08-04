@@ -1,0 +1,31 @@
+#!/bin/bash
+# Post-install: mensagem de boas-vindas
+set -e
+
+echo ""
+echo "========================================"
+echo " gpcg-panel instalado com sucesso!"
+echo "========================================"
+echo ""
+echo " Comando:"
+echo "   gpcg-panel          Abre o painel TUI do worker"
+echo ""
+echo " Atalhos dentro do painel:"
+echo "   q  Sair"
+echo "   r  Atualizar"
+echo "   s  Iniciar worker"
+echo "   x  Parar worker"
+echo "   p  Pausar automação"
+echo "   a  Resumir automação"
+echo "   c  Coletar ideias (RSS)"
+echo "   j  Aba Jobs"
+echo "   v  Aba Videos"
+echo "   l  Aba Logs"
+echo ""
+echo " Config:"
+echo "   GPCG_VPS_URL, GPCG_WORKER_ID, GPCG_WORKER_API_KEY"
+echo "   são lidos do systemd service do gpcg-worker automaticamente."
+echo ""
+echo "========================================"
+
+exit 0
