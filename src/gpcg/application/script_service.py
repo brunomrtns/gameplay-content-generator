@@ -361,6 +361,34 @@ class ScriptService:
                 # Skip optimize for revisions — the critic already reviewed
                 final = revised
                 char_count = len(final)
+
+                # Expand if still too short (same logic as initial generation)
+                max_expand = 3
+                expand_attempt = 0
+                while len(final) < s.gpcg_narration_min_chars and expand_attempt < max_expand:
+                    expand_attempt += 1
+                    shortfall = s.gpcg_narration_min_chars - len(final)
+                    expand_prompt = (
+                        f"Current script ({len(final)} chars):\n\n{final}\n\n"
+                        f"CRITICAL: This script is {shortfall} characters TOO SHORT. "
+                        f"It MUST be at least {s.gpcg_narration_min_chars} characters for "
+                        f"~{plan.target_duration}s of narration. "
+                        f"EXPAND the script by adding more detail, examples, and depth. "
+                        f"DO NOT repeat content — add NEW information, insights, and transitions. "
+                        f"Keep the same tone ({plan.tone}) and style. "
+                        f"Return the full expanded script (not just the additions)."
+                    )
+                    try:
+                        expand_data = llm.chat_json(OPTIMIZE_SYSTEM, expand_prompt, temperature=0.5, max_tokens=3000)
+                        expanded = (expand_data.get("script") or "").strip()
+                        if expanded and len(expanded) > len(final):
+                            final = expanded
+                            char_count = len(final)
+                            log.info(f"revision expanded (attempt {expand_attempt}): {char_count} chars")
+                        else:
+                            break
+                    except LLMError:
+                        break
                 # Still run originality check
                 source_texts, fact_claims = self._collect_sources(session, plan, user_id=user_id)
                 all_sources = list(source_texts)
@@ -460,6 +488,38 @@ class ScriptService:
             if s.gpcg_narration_min_chars <= len(draft) <= s.gpcg_narration_max_chars:
                 final = draft
                 char_count = len(final)
+
+        # ── Expand if still too short ───────────────────────────────────────
+        # The LLM often produces scripts well below the target. Force a
+        # dedicated expansion pass to reach at least gpcg_narration_min_chars.
+        max_expand_attempts = 3
+        expand_attempt = 0
+        while len(final) < s.gpcg_narration_min_chars and expand_attempt < max_expand_attempts:
+            expand_attempt += 1
+            shortfall = s.gpcg_narration_min_chars - len(final)
+            expand_prompt = (
+                f"Current script ({len(final)} chars):\n\n{final}\n\n"
+                f"CRITICAL: This script is {shortfall} characters TOO SHORT. "
+                f"It MUST be at least {s.gpcg_narration_min_chars} characters for "
+                f"~{plan.target_duration}s of narration. "
+                f"EXPAND the script by adding more detail, examples, and depth. "
+                f"DO NOT repeat content — add NEW information, insights, and transitions. "
+                f"Keep the same tone ({plan.tone}) and style. "
+                f"Return the full expanded script (not just the additions)."
+            )
+            try:
+                expand_data = llm.chat_json(OPTIMIZE_SYSTEM, expand_prompt, temperature=0.5, max_tokens=3000)
+                expanded = (expand_data.get("script") or "").strip()
+                if expanded and len(expanded) > len(final):
+                    final = expanded
+                    char_count = len(final)
+                    log.info(f"script expanded (attempt {expand_attempt}): {char_count} chars")
+                else:
+                    log.warning(f"script expansion attempt {expand_attempt} did not produce longer text")
+                    break
+            except LLMError as e:
+                log.warning(f"script expansion failed (attempt {expand_attempt}): {e}")
+                break
 
         # ── Anti-plagiarism: originality check + automatic rewrite ─────────
         # Compare the final script against source documents + fact claims.
