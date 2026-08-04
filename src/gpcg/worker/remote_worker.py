@@ -457,6 +457,76 @@ class RemoteWorker:
             log.warning(f"Checksum mismatch for {local_path.name}: expected {expected_hash[:16]}... got {actual_hash[:16]}...")
         return match
 
+    # ── Voice download ─────────────────────────────────────────────────────────
+
+    def _download_voice(self, filename: str, user_id: int, local_path: Path) -> None:
+        """Download a voice reference file from VPS to local voices_dir.
+
+        Saves to voices_dir/user_{user_id}/filename to preserve per-user
+        isolation. Tries SCP first (same as gameplay download), falls back
+        to HTTP via the worker-auth endpoint /api/voices/{filename}/download.
+        """
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Try SCP first (same approach as gameplay download)
+        if self._try_scp_voice(filename, user_id, local_path):
+            log.info(f"Downloaded voice {filename} via SCP → {local_path}")
+            return
+
+        # Fallback: HTTP download via worker-auth endpoint
+        log.info(f"SCP unavailable, downloading voice {filename} via HTTP")
+        resp = self.client.get(
+            f"/api/voices/{filename}/download",
+            params={"user_id": user_id},
+        )
+        resp.raise_for_status()
+        with open(local_path, "wb") as f:
+            f.write(resp.content)
+        log.info(f"Downloaded voice {filename} via HTTP → {local_path}")
+
+    def _try_scp_voice(self, filename: str, user_id: int, local_path: Path) -> bool:
+        """Try to download a voice file via SCP from VPS Docker volume."""
+        import shutil as _shutil
+        import urllib.parse
+
+        if _shutil.which("scp") is None:
+            return False
+
+        ssh_host = os.environ.get("GPCG_SSH_HOST", "")
+        if not ssh_host:
+            parsed = urllib.parse.urlparse(self.config.vps_url)
+            ssh_host = parsed.hostname or "10.0.0.1"
+
+        ssh_user = os.environ.get("GPCG_SSH_USER", "root")
+        volume_path = os.environ.get(
+            "GPCG_DOCKER_VOLUME",
+            "/var/lib/docker/volumes/gpcg_gpcg-data/_data",
+        )
+
+        # Voice files are in data/voices/{user_id_dir}/ or data/voices/
+        # Try user-specific dir first, then shared dir
+        candidates = [
+            f"{volume_path}/voices/user_{user_id}/{filename}",
+            f"{volume_path}/voices/{filename}",
+        ]
+
+        ssh_target = f"{ssh_user}@{ssh_host}"
+        for remote_path in candidates:
+            log.info(f"SCP voice: {ssh_target}:{remote_path} → {local_path}")
+            try:
+                result = subprocess.run(
+                    ["scp", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no",
+                     f"{ssh_target}:{remote_path}", str(local_path)],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if result.returncode == 0 and local_path.exists():
+                    return True
+                if local_path.exists():
+                    local_path.unlink()
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+        return False
+
     # ── Confirm download (checksum) ──────────────────────────────────────────
 
     def confirm_download(self, source: dict, local_path: Path) -> bool:
@@ -1343,6 +1413,35 @@ class RemoteWorker:
         resp = self.client.get(f"/api/jobs/{job_id}/data")
         resp.raise_for_status()
         job_data = resp.json()
+
+        # Download voice file from VPS if not present locally.
+        # The voice_path in job artifacts is an absolute path inside the VPS
+        # Docker container (e.g. /app/data/voices/bruno.wav). On the worker,
+        # that path doesn't exist. We download the voice file by filename and
+        # store it in the local voices_dir so GenerationService can find it.
+        artifacts = job_data.get("job", {}).get("artifacts", {})
+        if isinstance(artifacts, str):
+            try:
+                import json as _json
+                artifacts = _json.loads(artifacts)
+            except Exception:
+                artifacts = {}
+        voice_path_vps = artifacts.get("voice_path", "")
+        if voice_path_vps:
+            voice_filename = Path(voice_path_vps).name
+            user_id = job.get("user_id")
+            from gpcg.config import get_settings
+            local_settings = get_settings()
+            # Per-user isolation: save to voices_dir/user_{user_id}/filename
+            if user_id:
+                local_voice = local_settings.voices_dir / f"user_{user_id}" / voice_filename
+            else:
+                local_voice = local_settings.voices_dir / voice_filename
+            if not local_voice.exists():
+                try:
+                    self._download_voice(voice_filename, user_id, local_voice)
+                except Exception as e:
+                    log.warning(f"Could not download voice {voice_filename}: {e}")
 
         # Populate a local temp DB and run GenerationService
         from gpcg.worker.local_db_sync import populate_local_db, run_generation_locally

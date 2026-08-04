@@ -973,6 +973,55 @@ def download_gameplay(
     )
 
 
+# ── Voice download (worker) ──────────────────────────────────────────────────
+
+
+@router.get("/voices/{filename}/download")
+def download_voice_worker(
+    filename: str,
+    user_id: int,
+    _: None = Depends(worker_auth),
+):
+    """Stream a voice reference file from VPS to the worker.
+
+    Used by the remote worker to download the user's uploaded voice file
+    so that TTS (XTTS) can use it locally. The worker resolves the voice
+    path locally when processing generation jobs.
+    """
+    from gpcg.config import get_settings
+    # Prevent path traversal
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(400, "invalid filename")
+    settings = get_settings()
+    # Try user-specific dir first, then shared/legacy dir
+    user_dir = settings.voices_dir / f"user_{user_id}"
+    candidates = [
+        user_dir / filename,
+        settings.voices_dir / filename,
+    ]
+    for p in candidates:
+        if p.exists():
+            log.info(f"Worker downloading voice: {filename} (user {user_id})")
+
+            def _stream(path: Path, chunk_size: int = 1024 * 1024):
+                with open(path, "rb") as f:
+                    while True:
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        yield chunk
+
+            return StreamingResponse(
+                _stream(p),
+                media_type="audio/wav",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Length": str(p.stat().st_size),
+                },
+            )
+    raise HTTPException(404, "voice not found")
+
+
 # ── Confirm download (checksum verification + cleanup) ───────────────────────
 
 

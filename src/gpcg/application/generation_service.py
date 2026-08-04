@@ -548,7 +548,38 @@ class GenerationService:
         self._set_stage(job_id, JobStage.tts)
         script_id = self._get_artifact(job_id, "script_id")
         # Read voice override from job artifacts (absolute path to uploaded voice)
+        # NOTE: The voice_path sent by the VPS is an absolute path inside the
+        # VPS Docker container (e.g. /app/data/voices/user_2/bruno.wav). On the
+        # remote worker (local PC), that path does NOT exist. We resolve it
+        # locally by filename, checking the user's isolated dir first, then
+        # the shared dir, matching the VPS resolution logic.
         voice_path = self._get_artifact(job_id, "voice_path")
+        if voice_path and not Path(voice_path).exists():
+            voice_filename = Path(voice_path).name
+            # Get user_id from job artifacts (fallback to job.user_id)
+            _job_user_id = self._get_artifact(job_id, "user_id")
+            if not _job_user_id:
+                with session_scope() as session:
+                    _job_user_id = session.get(Job, job_id).user_id
+            resolved = None
+            if _job_user_id:
+                user_voice = self.settings.voices_dir / f"user_{_job_user_id}" / voice_filename
+                if user_voice.exists():
+                    resolved = user_voice
+            if not resolved:
+                shared_voice = self.settings.voices_dir / voice_filename
+                if shared_voice.exists():
+                    resolved = shared_voice
+            if resolved:
+                log.info(f"voice_path resolved locally: {voice_path} → {resolved}")
+                voice_path = str(resolved)
+            else:
+                log.warning(
+                    f"voice_path {voice_path} not found locally "
+                    f"(checked user_{_job_user_id}/ and shared). "
+                    f"TTS will use video-generate default."
+                )
+                voice_path = ""  # let synthesize_tts use its own fallback
         with session_scope() as session:
             job = session.get(Job, job_id)
             script = session.get(Script, script_id)
