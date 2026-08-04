@@ -388,25 +388,8 @@ export const api = {
   updateChannelProfile: (data: Record<string, any>) =>
     request<any>("/channel/profile", { method: "PUT", body: JSON.stringify(data) }),
 
-  // ── Knowledge Documents (RAG knowledge base) ───────────────────────────
-  uploadKnowledgeDocument: (file: File, game_id?: number | null) => {
-    const fd = new FormData();
-    fd.append("file", file);
-    if (game_id !== undefined && game_id !== null) {
-      fd.append("game_id", String(game_id));
-    }
-    return request<any>("/knowledge/upload", { method: "POST", body: fd });
-  },
-  listKnowledgeDocuments: () => request<any[]>("/knowledge/documents"),
-  processKnowledgeDocument: (doc_id: number) =>
-    request<any>(`/knowledge/documents/${doc_id}/process`, { method: "POST" }),
-  deleteKnowledgeDocument: (doc_id: number) =>
-    request<any>(`/knowledge/documents/${doc_id}`, { method: "DELETE" }),
-  queryKnowledge: (query: string, game_id?: number | null, top_k?: number) =>
-    request<any>("/knowledge/query", {
-      method: "POST",
-      body: JSON.stringify({ query, game_id, top_k }),
-    }),
+  // ── Knowledge Documents (RAG knowledge base — REMOVED) ────────────────
+  // File-upload knowledge base has been removed. Use manual ideas instead.
 
   // ── V2: Game Registry ──────────────────────────────────────────────────
   enrichGame: (id: number) =>
@@ -437,6 +420,11 @@ export const api = {
     request<any>(`/knowledge-items/${id}/reject`, { method: "POST" }),
   triggerContentCollection: () =>
     request<any>("/knowledge-items/collect", { method: "POST" }),
+  createManualIdea: (data: { title: string; content: string; game_id?: number }) =>
+    request<any>("/knowledge-items", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   // ── Idea Queue (user-curated playlist) ────────────────────────────────
   getIdeaQueue: () => request<{ queue: number[]; items: any[] }>("/idea-queue"),

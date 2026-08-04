@@ -163,6 +163,7 @@ class EditorialPlanner:
         job_type: str = "generate_short",
         background_game_id: Optional[int] = None,
         story_concept: Optional[StoryConcept] = None,
+        channel_context: str = "",
     ) -> VideoCreativePlan:
         """Analyze the content plan and produce a VideoCreativePlan.
 
@@ -197,7 +198,8 @@ class EditorialPlanner:
 
         # Build the user prompt (incorporates StoryConcept when available)
         user_prompt = self._build_user_prompt(
-            content_plan, video_type, context, story_concept=story_concept
+            content_plan, video_type, context, story_concept=story_concept,
+            channel_context=channel_context,
         )
 
         # Call the LLM
@@ -316,6 +318,7 @@ class EditorialPlanner:
         context: dict,
         *,
         story_concept: Optional[StoryConcept] = None,
+        channel_context: str = "",
     ) -> str:
         """Build the user prompt for the planner LLM call.
 
@@ -331,6 +334,11 @@ class EditorialPlanner:
             f"TONE (suggested): {plan.tone}",
             f"TARGET DURATION: {plan.target_duration}s",
         ]
+
+        # Channel context (stage-relevant fields only — niche, audience, tone, rules)
+        if channel_context:
+            parts.append(f"\nCHANNEL CONTEXT (align tone, audience, and rules to this):")
+            parts.append(channel_context)
 
         if context.get("game_name"):
             parts.append(f"GAME: {context['game_name']}")

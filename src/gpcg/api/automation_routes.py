@@ -655,9 +655,13 @@ def create_job_from_automation(user_id: int) -> int | None:
 
         with session_scope() as session:
             ki = session.get(KnowledgeItem, ki_id)
-            if ki is None or ki.status != KnowledgeItemStatus.fresh.value:
+            # Check eligibility: KI must be fresh AND not already used by this consumer
+            from gpcg.application.knowledge_item_service import is_used_by_consumer
+            already_used = is_used_by_consumer(session, ki_id, user_id) if ki else True
+            if ki is None or ki.status != KnowledgeItemStatus.fresh.value or already_used:
                 # KI no longer available — remove from queue and skip
-                log.info(f"automation: queued KI #{ki_id} no longer fresh, removing from queue")
+                reason = "not found" if ki is None else ("already used by consumer" if already_used else f"status={ki.status}")
+                log.info(f"automation: queued KI #{ki_id} no longer eligible ({reason}), removing from queue")
                 from sqlalchemy.orm.attributes import flag_modified
                 auto = session.query(Automation).filter(Automation.user_id == user_id).first()
                 cfg = dict(auto.config or {})

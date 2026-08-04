@@ -108,6 +108,12 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
+/* Select dropdown options in dark mode */
+select option {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
 /* Animations */
 @keyframes float {
   0%, 100% { transform: translateY(0); }

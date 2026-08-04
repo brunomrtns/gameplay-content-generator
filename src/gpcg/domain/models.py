@@ -207,6 +207,7 @@ class KnowledgeItemSource(str, enum.Enum):
     reddit = "reddit"  # future
     igdb = "igdb"  # future
     user_doc = "user_doc"
+    manual = "manual"  # user-curated idea entered manually via API
 
 
 class KnowledgeItemStatus(str, enum.Enum):
@@ -1017,6 +1018,43 @@ class ChannelProfile(Base):
             parts.append(f"Regras especiais: {self.special_rules}")
         return "\n".join(parts) if parts else ""
 
+    def to_stage_context(self, stage: str) -> str:
+        """Return channel context relevant to a specific pipeline stage.
+
+        Stages:
+        - content_planning: niche, content_goals, target_audience
+        - story_finding: tone_of_voice, narrative_style
+        - editorial_planning: niche, target_audience, tone_of_voice, special_rules
+        - script: full context (use to_prompt_context())
+        """
+        parts = []
+        if stage == "content_planning":
+            if self.niche:
+                parts.append(f"Nicho do canal: {self.niche}")
+            if self.content_goals:
+                parts.append(f"Objetivos de conteúdo: {self.content_goals}")
+            if self.target_audience:
+                parts.append(f"Público-alvo: {self.target_audience}")
+        elif stage == "story_finding":
+            if self.tone_of_voice:
+                parts.append(f"Tom de voz: {self.tone_of_voice}")
+            if self.narrative_style:
+                parts.append(f"Estilo narrativo: {self.narrative_style}")
+        elif stage == "editorial_planning":
+            if self.niche:
+                parts.append(f"Nicho do canal: {self.niche}")
+            if self.target_audience:
+                parts.append(f"Público-alvo: {self.target_audience}")
+            if self.tone_of_voice:
+                parts.append(f"Tom de voz: {self.tone_of_voice}")
+            if self.special_rules:
+                parts.append(f"Regras especiais: {self.special_rules}")
+        else:
+            # Full context for script and other stages
+            return self.to_prompt_context()
+
+        return "\n".join(parts) if parts else ""
+
 
 class KnowledgeChunk(Base):
     """A chunk of a knowledge document, with embedding vector for RAG retrieval.
@@ -1156,6 +1194,31 @@ class KnowledgeItemEmbedding(Base):
 
     def __repr__(self) -> str:
         return f"<KnowledgeItemEmbedding item={self.item_id} model={self.model}>"
+
+
+class KnowledgeItemUsage(Base):
+    """Tracks per-consumer usage of a KnowledgeItem.
+
+    For public/shared KnowledgeItems (user_id IS NULL, is_public=True),
+    the global `status` field cannot track per-user consumption. This table
+    records when a specific consumer used a specific KI, allowing:
+    - User A uses public KI X → recorded here, KI stays fresh globally
+    - User B sees KI X as still available (no usage record for B)
+    - User B uses KI X → second usage record
+
+    For private KIs (user_id set, is_public=False), the existing `status`
+    field on KnowledgeItem continues to work since only the owner consumes.
+    """
+    __tablename__ = "knowledge_item_usages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    knowledge_item_id: Mapped[int] = mapped_column(ForeignKey("knowledge_items.id"), nullable=False, index=True)
+    consumer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    video_id: Mapped[Optional[int]] = mapped_column(ForeignKey("videos.id"), nullable=True, index=True)
+    used_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    def __repr__(self) -> str:
+        return f"<KnowledgeItemUsage ki={self.knowledge_item_id} consumer={self.consumer_user_id}>"
 
 
 class GameplayEventEmbedding(Base):

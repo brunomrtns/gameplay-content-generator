@@ -12,7 +12,7 @@ import json
 import re
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, not_, select
 from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
@@ -23,6 +23,7 @@ from gpcg.domain.models import (
     KnowledgeItemSource,
     KnowledgeItemStatus,
     KnowledgeItemType,
+    KnowledgeItemUsage,
 )
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
@@ -48,8 +49,14 @@ def list_items(
     limit: int = 50,
     offset: int = 0,
     min_score: float = 0.0,
+    exclude_used_by_consumer: Optional[int] = None,
 ) -> list[KnowledgeItem]:
-    """List KnowledgeItems with optional filters."""
+    """List KnowledgeItems with optional filters.
+
+    When `exclude_used_by_consumer` is provided AND the status filter is
+    "fresh" (or None), public KnowledgeItems already used by that consumer
+    are excluded via a NOT EXISTS subquery against KnowledgeItemUsage.
+    """
     stmt = select(KnowledgeItem).order_by(KnowledgeItem.editorial_score.desc())
 
     if game_id is not None:
@@ -65,6 +72,15 @@ def list_items(
         )
     if min_score > 0:
         stmt = stmt.where(KnowledgeItem.editorial_score >= min_score)
+
+    # Exclude public KIs already used by this consumer (only meaningful when
+    # listing fresh/available items).
+    if exclude_used_by_consumer is not None and (status is None or status == KnowledgeItemStatus.fresh.value):
+        usage_exists = exists().where(
+            KnowledgeItemUsage.knowledge_item_id == KnowledgeItem.id,
+            KnowledgeItemUsage.consumer_user_id == exclude_used_by_consumer,
+        )
+        stmt = stmt.where(not_(usage_exists))
 
     stmt = stmt.offset(offset).limit(limit)
     return list(session.execute(stmt).scalars().all())
@@ -90,8 +106,68 @@ def mark_as_used(session: Session, item_id: int) -> bool:
     return True
 
 
-def get_stats(session: Session, *, user_id: Optional[int] = None) -> dict:
-    """Get statistics about the KnowledgeItem bank."""
+def is_used_by_consumer(session: Session, item_id: int, consumer_user_id: int) -> bool:
+    """Check if a KnowledgeItemUsage record exists for the given consumer.
+
+    Used to determine whether a public/shared KnowledgeItem has already been
+    consumed by a specific user (independent of the global `status` field).
+    """
+    found = session.execute(
+        select(KnowledgeItemUsage.id).where(
+            KnowledgeItemUsage.knowledge_item_id == item_id,
+            KnowledgeItemUsage.consumer_user_id == consumer_user_id,
+        ).limit(1)
+    ).first()
+    return found is not None
+
+
+def record_usage(
+    session: Session,
+    item_id: int,
+    consumer_user_id: int,
+    video_id: Optional[int] = None,
+) -> Optional[KnowledgeItemUsage]:
+    """Record per-consumer usage of a KnowledgeItem.
+
+    For private KIs (user_id is not None), also set the global
+    `ki.status = KnowledgeItemStatus.used.value` as before (only the owner
+    consumes private KIs). For public KIs (user_id is None), do NOT change
+    the global status — only create the usage record so the KI stays fresh
+    globally while being excluded for this consumer.
+
+    Returns the created KnowledgeItemUsage, or None if the KI does not exist.
+    """
+    ki = session.get(KnowledgeItem, item_id)
+    if not ki:
+        return None
+
+    usage = KnowledgeItemUsage(
+        knowledge_item_id=item_id,
+        consumer_user_id=consumer_user_id,
+        video_id=video_id,
+    )
+    session.add(usage)
+
+    # Private KIs: only the owner consumes, so the global status is authoritative.
+    if ki.user_id is not None:
+        ki.status = KnowledgeItemStatus.used.value
+
+    session.flush()
+    return usage
+
+
+def get_stats(
+    session: Session,
+    *,
+    user_id: Optional[int] = None,
+    consumer_user_id: Optional[int] = None,
+) -> dict:
+    """Get statistics about the KnowledgeItem bank.
+
+    When `consumer_user_id` is provided, the "fresh"/"available" count
+    excludes KnowledgeItems that have a KnowledgeItemUsage record for that
+    consumer (i.e. public KIs already consumed by them are not available).
+    """
     base_filter = []
     if user_id is not None:
         base_filter.append(
@@ -126,6 +202,22 @@ def get_stats(session: Session, *, user_id: Optional[int] = None) -> dict:
     # Fresh count (available for content planning)
     fresh = by_status.get(KnowledgeItemStatus.fresh.value, 0)
 
+    # When a consumer is provided, count items that are fresh AND not already
+    # used by that consumer as "available".
+    available = fresh
+    if consumer_user_id is not None:
+        usage_exists = exists().where(
+            KnowledgeItemUsage.knowledge_item_id == KnowledgeItem.id,
+            KnowledgeItemUsage.consumer_user_id == consumer_user_id,
+        )
+        available = session.execute(
+            select(func.count(KnowledgeItem.id)).where(
+                *base_filter,
+                KnowledgeItem.status == KnowledgeItemStatus.fresh.value,
+                not_(usage_exists),
+            )
+        ).scalar() or 0
+
     # By source
     by_source = {}
     source_counts = session.execute(
@@ -139,6 +231,7 @@ def get_stats(session: Session, *, user_id: Optional[int] = None) -> dict:
     return {
         "total": total,
         "fresh": fresh,
+        "available": available,
         "by_type": by_type,
         "by_status": by_status,
         "by_source": by_source,

@@ -431,22 +431,48 @@ class EditorialStrategyService:
         between a game-specific video (generate_short) or a general curiosity
         video (curiosity_short) with any of the user's gameplays as background.
         """
-        # Only show games that have gameplay available — the LLM cannot
-        # produce a video for a game without gameplay assets.
-        playable = [g for g in inventory if g.has_gameplay]
-        if not playable:
+        # V3: Removed gameplay-as-prerequisite. Games with knowledge (not just
+        # gameplay) are candidates. Gameplay is chosen AFTER the subject.
+        games_with_knowledge = [g for g in inventory if g.has_knowledge]
+        gameplay_games = [g for g in inventory if g.has_gameplay]
+        gameplay_names = [g.game_name for g in gameplay_games]
+
+        if not games_with_knowledge and not general_ideas:
             return self._heuristic_decision(inventory, history)
 
-        games_info = [g.to_prompt_dict() for g in playable]
+        # ── Deterministic saturation signals ───────────────────────────
         recent_topics = history.get("recent_topics", [])[:10]
-        recent_game_ids = set(history.get("recent_game_ids", [])[:5])
+        recent_game_ids = history.get("recent_game_ids", [])[:10]
+        recent_game_counts: dict[int, int] = {}
+        for gid in recent_game_ids:
+            recent_game_counts[gid] = recent_game_counts.get(gid, 0) + 1
+        # Saturated: appeared in 2+ of recent videos
+        saturated_game_ids = {gid for gid, cnt in recent_game_counts.items() if cnt >= 2}
 
-        # Build a list of recently used game names to explicitly tell the LLM
+        # Pre-LLM override: if 3+ recent videos same game + general ideas exist
+        if saturated_game_ids and general_ideas:
+            max_sat = max(recent_game_counts.values())
+            if max_sat >= 3:
+                best_idea = max(general_ideas, key=lambda i: i.get("editorial_score", 0))
+                bg_game = gameplay_games[0] if gameplay_games else None
+                log.info(f"editorial: saturation override ({max_sat}x same game) → curiosity_short #{best_idea['id']}")
+                return EditorialDecision(
+                    job_type="curiosity_short",
+                    background_game_id=bg_game.game_id if bg_game else None,
+                    fact_id=None,
+                    topic_hint=best_idea.get("title", ""),
+                    reason=f"saturação: {max_sat} vídeos do mesmo jogo → ideia #{best_idea['id']}",
+                )
+
+        games_info = [g.to_prompt_dict() for g in games_with_knowledge]
+        for g_info, g_inv in zip(games_info, games_with_knowledge):
+            if g_inv.game_id in saturated_game_ids:
+                g_info["_saturated"] = True
+
         recent_game_names = []
-        for inv in playable:
-            if inv.game_id in recent_game_ids:
+        for inv in inventory:
+            if inv.game_id in set(recent_game_ids[:5]):
                 recent_game_names.append(inv.game_name)
-
         recent_games_str = (
             ", ".join(recent_game_names) if recent_game_names else "Nenhum"
         )
@@ -466,36 +492,30 @@ class EditorialStrategyService:
                 f"{json.dumps(ideas_json, indent=2, ensure_ascii=False)}\n\n"
             )
 
-        # Games available for background gameplay (same as playable)
-        gameplay_games = playable
-        gameplay_names = [g.game_name for g in gameplay_games]
-
         prompt = (
             f"Você é o editor-chefe de um canal no YouTube. Seu trabalho é decidir "
             f"qual vídeo produzir a seguir.\n\n"
             f"## Perfil do canal\n{channel_context}\n\n"
-            f"## Jogos disponíveis (com gameplays e/ou conhecimento)\n"
+            f"## Jogos com conhecimento disponível (facts/knowledge_items)\n"
+            f"Marcados como _saturated=true se já apareceram muito recentemente.\n"
             f"{json.dumps(games_info, indent=2, ensure_ascii=False)}\n\n"
             f"{ideas_section}"
             f"## Vídeos já produzidos recentemente (evite repetir)\n"
             f"{json.dumps(recent_topics, ensure_ascii=False) if recent_topics else 'Nenhum vídeo ainda'}\n\n"
-            f"## Jogos já usados recentemente (NÃO escolha estes)\n"
+            f"## Jogos já usados recentemente (evite repetir)\n"
             f"{recent_games_str}\n\n"
-            f"## Jogos com gameplay disponível para fundo\n"
+            f"## Jogos com gameplay disponível para fundo visual\n"
             f"{', '.join(gameplay_names) if gameplay_names else 'Nenhum'}\n\n"
             f"## Sua decisão\n"
-            f"Escolha o próximo vídeo. Você tem DUAS opções:\n\n"
-            f"OPÇÃO A — Vídeo específico de um jogo (generate_short):\n"
-            f"  Escolha um jogo que tenha gameplay E conhecimento (facts/knowledge_items).\n"
-            f"  O vídeo será sobre uma curiosidade DAQUELE jogo.\n\n"
-            f"OPÇÃO B — Vídeo de curiosidade geral (curiosity_short):\n"
-            f"  Escolha uma ideia geral da lista acima. O vídeo será sobre aquela ideia\n"
-            f"  com gameplay de qualquer jogo disponível como fundo.\n"
-            f"  Ideal para notícias da indústria, curiosidades gerais, etc.\n\n"
-            f"Priorize:\n"
-            f"1. Variedade (não repetir jogos/temas já usados)\n"
-            f"2. Ideias com maior editorial_score\n"
-            f"3. Jogos com menos vídeos produzidos\n\n"
+            f"Escolha o próximo vídeo considerando:\n"
+            f"1. VARIEDADE: se os últimos vídeos foram do mesmo jogo, escolha outro assunto\n"
+            f"2. QUALIDADE: ideias com maior editorial_score são preferíveis\n"
+            f"3. NOVIDADE: assuntos ainda não cobertos têm prioridade\n"
+            f"4. SATURAÇÃO: jogos marcados como _saturated devem ser evitados\n\n"
+            f"O vídeo pode ser:\n"
+            f"- generate_short: curiosidade SOBRE um jogo específico que tem conhecimento\n"
+            f"- curiosity_short: ideia geral (notícia/curiosidade da indústria) com gameplay como fundo\n"
+            f"  (a gameplay é escolhida depois como suporte visual — não precisa ser do mesmo jogo)\n\n"
             f"Responda em JSON:\n"
             f'{{"format": "generate_short" ou "curiosity_short", '
             f'"game_name": "nome do jogo (para generate_short)", '
@@ -506,7 +526,8 @@ class EditorialStrategyService:
         system = (
             "Você é um editor de canal do YouTube especializado em games. "
             "Você decide o conteúdo de forma autônoma, maximizando variedade "
-            "e qualidade. Responda sempre em JSON válido."
+            "e qualidade. O assunto do vídeo é decidido pelo seu valor editorial, "
+            "não pela gameplay disponível. Responda sempre em JSON válido."
         )
 
         data = self.llm.chat_json(system, prompt, temperature=0.7, max_tokens=500)
@@ -531,7 +552,7 @@ class EditorialStrategyService:
                 )
             else:
                 log.warning("curiosity_short chosen but no gameplay games available")
-                return self._heuristic_decision(inventory, history)
+                return self._heuristic_decision(inventory, history, general_ideas)
 
         # Handle generate_short (game-specific)
         chosen_name = (data.get("game_name") or "").strip()
@@ -549,7 +570,20 @@ class EditorialStrategyService:
                     break
         if not chosen_game:
             log.warning(f"editorial: LLM chose '{chosen_name}' but no matching game found")
-            return self._heuristic_decision(inventory, history)
+            return self._heuristic_decision(inventory, history, general_ideas)
+
+        # Post-LLM saturation check: if LLM chose a saturated game, override
+        if chosen_game.game_id in saturated_game_ids and general_ideas:
+            best_idea = max(general_ideas, key=lambda i: i.get("editorial_score", 0))
+            bg_game = gameplay_games[0] if gameplay_games else None
+            log.info(f"editorial: LLM chose saturated game {chosen_game.game_name}, overriding → idea #{best_idea['id']}")
+            return EditorialDecision(
+                job_type="curiosity_short",
+                background_game_id=bg_game.game_id if bg_game else None,
+                fact_id=None,
+                topic_hint=best_idea.get("title", ""),
+                reason=f"override: jogo saturado → ideia #{best_idea['id']}",
+            )
 
         return EditorialDecision(
             job_type="generate_short",
@@ -591,9 +625,49 @@ class EditorialStrategyService:
         self,
         inventory: list[GameInventory],
         history: dict,
+        general_ideas: list[dict] | None = None,
     ) -> EditorialDecision:
-        """Fallback: pick the game with fewest videos produced."""
+        """Fallback: pick the best candidate without LLM.
+
+        V3: Now considers general ideas for curiosity_short. If there are
+        high-quality general ideas and the recent history is saturated with
+        game-specific content, prefers curiosity_short.
+        """
+        # Check if recent history is saturated with same games
+        recent_game_ids = history.get("recent_game_ids", [])[:5]
+        recent_game_counts: dict[int, int] = {}
+        for gid in recent_game_ids:
+            recent_game_counts[gid] = recent_game_counts.get(gid, 0) + 1
+        saturated_game_ids = {gid for gid, cnt in recent_game_counts.items() if cnt >= 2}
+
+        # If we have general ideas and recent history is saturated, prefer curiosity_short
+        if general_ideas and saturated_game_ids:
+            best_idea = max(general_ideas, key=lambda i: i.get("editorial_score", 0))
+            if best_idea.get("editorial_score", 0) >= 30:
+                gameplay_games = [g for g in inventory if g.has_gameplay]
+                bg_game = gameplay_games[0] if gameplay_games else None
+                return EditorialDecision(
+                    job_type="curiosity_short",
+                    background_game_id=bg_game.game_id if bg_game else None,
+                    fact_id=None,
+                    topic_hint=best_idea.get("title", ""),
+                    reason=f"heurística: saturação detectada → ideia geral #{best_idea['id']}",
+                )
+
+        # Also: if no producible games but general ideas exist, use curiosity_short
         producible = [g for g in inventory if g.is_producible]
+        if not producible and general_ideas:
+            best_idea = max(general_ideas, key=lambda i: i.get("editorial_score", 0))
+            gameplay_games = [g for g in inventory if g.has_gameplay]
+            bg_game = gameplay_games[0] if gameplay_games else None
+            return EditorialDecision(
+                job_type="curiosity_short",
+                background_game_id=bg_game.game_id if bg_game else None,
+                fact_id=None,
+                topic_hint=best_idea.get("title", ""),
+                reason=f"heurística: sem jogos_producíveis → ideia geral #{best_idea['id']}",
+            )
+
         if not producible:
             producible = [g for g in inventory if g.has_gameplay]
         if not producible:

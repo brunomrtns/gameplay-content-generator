@@ -53,6 +53,13 @@ class KnowledgeItemOut(BaseModel):
         from_attributes = True
 
 
+class ManualIdeaCreate(BaseModel):
+    """Request body for creating a manual KnowledgeItem (user-curated idea)."""
+    title: str
+    content: str
+    game_id: Optional[int] = None
+
+
 class StatsOut(BaseModel):
     total: int
     fresh: int
@@ -99,7 +106,11 @@ def list_knowledge_items(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """List KnowledgeItems with optional filters."""
+    """List KnowledgeItems with optional filters.
+
+    When status=fresh (or no status filter), public KIs already used by this
+    consumer are excluded via KnowledgeItemUsage records.
+    """
     items = list_items(
         db,
         game_id=game_id,
@@ -109,6 +120,7 @@ def list_knowledge_items(
         limit=limit,
         offset=offset,
         min_score=min_score,
+        exclude_used_by_consumer=user.id,
     )
     return {
         "items": [_item_to_out(i) for i in items],
@@ -122,7 +134,7 @@ def get_knowledge_item_stats(
     user: User = Depends(get_current_user),
 ):
     """Get statistics about the KnowledgeItem bank."""
-    return get_stats(db, user_id=user.id)
+    return get_stats(db, user_id=user.id, consumer_user_id=user.id)
 
 
 @router.get("/knowledge-items/{item_id}")
@@ -194,6 +206,61 @@ def trigger_content_collection(
         "job_id": job.id,
         "job_uuid": job.job_uuid,
     }
+
+
+@router.post("/knowledge-items")
+def create_manual_knowledge_item(
+    req: ManualIdeaCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Create a manual KnowledgeItem (user-curated idea).
+
+    The item is private to the owner (is_public=False), sourced as "manual",
+    and classified as a "curiosity" with a neutral editorial score (50.0).
+    """
+    from gpcg.domain.models import (
+        KnowledgeItem,
+        KnowledgeItemSource,
+        KnowledgeItemStatus,
+    )
+
+    # Validate required fields
+    if not req.title or not req.title.strip():
+        raise HTTPException(status_code=422, detail="title must not be empty")
+    if not req.content or not req.content.strip():
+        raise HTTPException(status_code=422, detail="content must not be empty")
+    if len(req.title) > 500:
+        raise HTTPException(status_code=422, detail="title must be at most 500 characters")
+
+    # If game_id provided, verify the game exists
+    if req.game_id is not None:
+        game = db.get(Game, req.game_id)
+        if not game:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+    # Resolve source_type (use enum value if available, otherwise the string)
+    try:
+        source_type = KnowledgeItemSource.manual.value
+    except AttributeError:
+        source_type = "manual"
+
+    item = KnowledgeItem(
+        user_id=user.id,
+        is_public=False,
+        source_type=source_type,
+        item_type="curiosity",
+        status=KnowledgeItemStatus.fresh.value,
+        editorial_score=50.0,
+        title=req.title.strip(),
+        content=req.content.strip(),
+        game_id=req.game_id,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+
+    return _item_to_out(item)
 
 
 # ── Idea Queue (user-curated playlist of KnowledgeItems) ─────────────────────

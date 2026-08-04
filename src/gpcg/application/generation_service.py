@@ -359,6 +359,33 @@ class GenerationService:
             # force the content planner to use that specific KI.
             queued_ki_id = job.artifacts.get("queued_knowledge_item_id")
 
+            # ── Load channel profile once and propagate through pipeline ──
+            # The ChannelProfile is loaded a single time here and its
+            # stage-relevant context is injected into content_planning,
+            # story_finding, editorial_planning, and the script stage. Only
+            # stage-relevant fields are passed to each stage (via
+            # `to_stage_context`) instead of dumping the full profile.
+            channel_profile = None
+            channel_context = ""
+            cp_context_planning = ""
+            cp_context_story = ""
+            cp_context_editorial = ""
+            cp_user_id = job.artifacts.get("user_id") or job.user_id
+            if cp_user_id:
+                try:
+                    from gpcg.domain.models import ChannelProfile
+                    channel_profile = session.query(ChannelProfile).filter(
+                        ChannelProfile.user_id == cp_user_id
+                    ).first()
+                    if channel_profile is not None:
+                        channel_context = channel_profile.to_prompt_context()
+                        cp_context_planning = channel_profile.to_stage_context("content_planning")
+                        cp_context_story = channel_profile.to_stage_context("story_finding")
+                        cp_context_editorial = channel_profile.to_stage_context("editorial_planning")
+                        job.artifacts = {**job.artifacts, "channel_context": channel_context}
+                except Exception as e:
+                    log.warning(f"Could not load channel profile: {e}")
+
         # ── Stage: content_planning ─────────────────────────────────────────
         self._set_stage(job_id, JobStage.content_planning)
         with session_scope() as session:
@@ -377,11 +404,13 @@ class GenerationService:
                         session, queued_ki_id,
                         background_game_id=bg_game_id,
                         user_id=job.user_id,
+                        channel_context=cp_context_planning,
                     )
                 else:
                     plan = planner.plan_for_general_curiosity(
                         session, bg_game_id, fact_id=general_fact_id,
                         user_id=job.user_id,
+                        channel_context=cp_context_planning,
                     )
                 if plan is None:
                     raise GenerationError(
@@ -398,6 +427,7 @@ class GenerationService:
                         session, queued_ki_id,
                         background_game_id=None,
                         user_id=job.user_id,
+                        channel_context=cp_context_planning,
                     )
                 else:
                     # Pass editorial fact_id if the editorial strategy picked one,
@@ -415,6 +445,7 @@ class GenerationService:
                         fact_id=editorial_fact_id,
                         avoid_topics=recent_topics,
                         user_id=job.user_id,
+                        channel_context=cp_context_planning,
                     )
                 if plan is None:
                     raise GenerationError(
@@ -431,7 +462,8 @@ class GenerationService:
         if self.settings.gpcg_story_finder_enabled:
             self._set_stage(job_id, JobStage.story_finding)
             story_concept = self._run_story_finding(
-                job_id, llm=llm, is_curiosity=is_curiosity, bg_game_id=bg_game_id
+                job_id, llm=llm, is_curiosity=is_curiosity, bg_game_id=bg_game_id,
+                channel_context=cp_context_story,
             )
 
         # ── Stage: editorial_planning (NEW — produces VideoCreativePlan) ────
@@ -441,6 +473,7 @@ class GenerationService:
             creative_plan = self._run_editorial_planning(
                 job_id, llm=llm, is_curiosity=is_curiosity, bg_game_id=bg_game_id,
                 story_concept=story_concept,
+                channel_context=cp_context_editorial,
             )
 
         # ── Stage: creative_engine (optional, Qwen3-14B) ─────────────────────
@@ -462,14 +495,18 @@ class GenerationService:
         with session_scope() as session:
             job = session.get(Job, job_id)
 
-            # ── Channel context + knowledge retrieval (per-channel personalization) ──
-            # Fetch the user's channel profile and retrieve relevant knowledge
-            # chunks from their uploaded documents. This personalizes the script
-            # to the channel's niche, audience, tone, and accumulated knowledge.
-            channel_context = ""
-            knowledge_context = ""
+            # ── Channel context (per-channel personalization) ──
+            # The channel profile was loaded once at the start of the pipeline
+            # and its full prompt context is reused here (avoiding a second DB
+            # query). If the early load failed (e.g. profile created
+            # mid-pipeline), fall back to loading it now so the script stage
+            # still gets channel personalization.
+            # NOTE: File-upload knowledge base (RAG) retrieval has been removed.
+            # Channel knowledge is now managed via manual ideas (KnowledgeItem
+            # with source_type="manual"). Legacy Document/KnowledgeChunk data is
+            # preserved but no longer used.
             user_id = job.artifacts.get("user_id") or job.user_id
-            if user_id:
+            if not channel_context and user_id:
                 try:
                     from gpcg.domain.models import ChannelProfile
                     profile = session.query(ChannelProfile).filter(
@@ -480,36 +517,6 @@ class GenerationService:
                 except Exception as e:
                     log.warning(f"Failed to load channel profile for user {user_id}: {e}")
 
-                try:
-                    from gpcg.application.knowledge_service import retrieve_knowledge, build_knowledge_context
-                    # Build query from plan topic + fact
-                    plan = session.get(ContentPlan, job.content_plan_id)
-                    fact_text = ""
-                    if plan and plan.fact_id:
-                        fact = session.get(Fact, plan.fact_id)
-                        if fact:
-                            fact_text = fact.claim
-                    retrieval_query = f"{plan.topic if plan else ''} {fact_text}".strip()
-                    # Determine the game_id for knowledge isolation:
-                    # - generate_short: job.game_id (the game being played)
-                    # - curiosity_short: bg_game_id (the background game)
-                    # This ensures we only retrieve knowledge for the correct game
-                    # plus general channel knowledge — never from other games.
-                    retrieval_game_id = bg_game_id if is_curiosity else job.game_id
-                    if retrieval_query:
-                        chunks = retrieve_knowledge(
-                            session, user_id, retrieval_query,
-                            game_id=retrieval_game_id,
-                        )
-                        knowledge_context = build_knowledge_context(chunks)
-                        if chunks:
-                            log.info(
-                                f"Retrieved {len(chunks)} knowledge chunks for script generation "
-                                f"(game_id={retrieval_game_id})"
-                            )
-                except Exception as e:
-                    log.warning(f"Failed to retrieve knowledge for user {user_id}: {e}")
-
             svc = ScriptService(llm=llm)
             script = svc.generate_script(
                 session, job.content_plan_id,
@@ -517,7 +524,7 @@ class GenerationService:
                 creative_plan=creative_plan,
                 story_concept=story_concept,
                 channel_context=channel_context,
-                knowledge_context=knowledge_context,
+                knowledge_context="",
                 user_id=job.user_id,
             )
             if script is None:
@@ -631,6 +638,7 @@ class GenerationService:
                 video_type=video_type,
                 user_id=user_id,
                 accept_public=accept_public,
+                narrative_beats=job.artifacts.get("creative_plan", {}).get("narrative_beats", []),
             )
             if not clips:
                 bg_name = session.get(Game, select_game_id).canonical_name if select_game_id else "N/A"
@@ -804,6 +812,15 @@ class GenerationService:
                     )
             # Update artifacts using the SAME session (avoid nested session_scope → SQLite lock)
             job.artifacts = {**job.artifacts, "video_id": video.id, "qa_passed": qa_result.passed}
+            # Mark KnowledgeItem as used now that Video is persisted.
+            # For private KIs: set status=used (only owner consumes).
+            # For public KIs: record per-consumer usage (KI stays fresh globally).
+            if ki_id:
+                try:
+                    from gpcg.application.knowledge_item_service import record_usage
+                    record_usage(session, ki_id, job.user_id, video_id=video.id)
+                except Exception as e:
+                    log.warning(f"Failed to record KI usage for #{ki_id}: {e}")
             session.flush()
 
         # ── Stage: metadata_generation (optional — LLM-generated social metadata)
@@ -971,6 +988,7 @@ class GenerationService:
         is_curiosity: bool,
         bg_game_id: Optional[int],
         story_concept: Optional[StoryConcept] = None,
+        channel_context: str = "",
     ) -> Optional[VideoCreativePlan]:
         """Run the editorial planning stage for a job.
 
@@ -991,6 +1009,7 @@ class GenerationService:
             creative_plan = self.editorial_planner.plan(
                 session, plan, job_type=job_type, background_game_id=bg_game_id,
                 story_concept=story_concept,
+                channel_context=channel_context,
             )
 
             if creative_plan.success:
@@ -1015,6 +1034,7 @@ class GenerationService:
         llm: LLMClient,
         is_curiosity: bool,
         bg_game_id: Optional[int],
+        channel_context: str = "",
     ) -> Optional[StoryConcept]:
         """Run the story finding stage for a job (V2).
 
@@ -1034,7 +1054,8 @@ class GenerationService:
                 return None
 
             concept = self.story_finder.find_story(
-                session, plan, background_game_id=bg_game_id
+                session, plan, background_game_id=bg_game_id,
+                channel_context=channel_context,
             )
 
             if concept.success:
@@ -1374,5 +1395,29 @@ class GenerationService:
             job.status = JobStatus.failed.value
             job.stage = stage
             job.error = error[:2000]
+            # Rollback: if this job consumed a queued KnowledgeItem, re-queue it
+            # at the top so the user's intent is preserved.
+            queued_ki_id = (job.artifacts or {}).get("queued_knowledge_item_id")
+            if queued_ki_id:
+                try:
+                    from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
+                    from sqlalchemy.orm.attributes import flag_modified
+                    ki = session.get(KnowledgeItem, queued_ki_id)
+                    if ki and ki.status == KnowledgeItemStatus.fresh.value:
+                        # Only re-queue if KI is still fresh (not yet used by a successful video)
+                        auto = session.query(Automation).filter(
+                            Automation.user_id == job.user_id
+                        ).first()
+                        if auto:
+                            cfg = dict(auto.config or {})
+                            q = list(cfg.get("idea_queue", []))
+                            if queued_ki_id not in q:
+                                q.insert(0, queued_ki_id)  # top of queue
+                                cfg["idea_queue"] = q
+                                auto.config = cfg
+                                flag_modified(auto, "config")
+                                log.info(f"job #{job_id} failed: re-queued KI #{queued_ki_id} at top of idea queue")
+                except Exception as e:
+                    log.warning(f"job #{job_id} failed: could not re-queue KI #{queued_ki_id}: {e}")
             session.flush()
         log.error(f"job #{job_id} FAILED at {stage}: {error}")

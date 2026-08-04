@@ -119,6 +119,7 @@ class StoryFinder:
         content_plan: ContentPlan,
         *,
         background_game_id: Optional[int] = None,
+        channel_context: str = "",
     ) -> StoryConcept:
         """Find the story angle for the fact in a content plan.
 
@@ -157,7 +158,7 @@ class StoryFinder:
         else:
             context = "General curiosity"
 
-        user_prompt = self._build_user_prompt(fact, context)
+        user_prompt = self._build_user_prompt(fact, context, channel_context=channel_context)
 
         try:
             data = self.llm.chat_json(
@@ -182,16 +183,22 @@ class StoryFinder:
 
         return concept
 
-    def _build_user_prompt(self, fact: Fact, context: str) -> str:
+    def _build_user_prompt(self, fact: Fact, context: str, *, channel_context: str = "") -> str:
         parts = [
             f"CONTEXT: {context}",
             f"",
             f"FACT (the raw information): {fact.claim}",
             f"CATEGORY: {fact.category}",
             f"",
-            f"Find the editorial angle that turns this fact into a story. "
-            f"If there's no genuine angle, be honest: set is_story=false.",
         ]
+        if channel_context:
+            parts.append(f"CHANNEL CONTEXT (tone/narrative style to match):")
+            parts.append(channel_context)
+            parts.append(f"")
+        parts.append(
+            f"Find the editorial angle that turns this fact into a story. "
+            f"If there's no genuine angle, be honest: set is_story=false."
+        )
         return "\n".join(parts)
 
     def _parse_concept(self, data: dict, fact_claim: str) -> StoryConcept:

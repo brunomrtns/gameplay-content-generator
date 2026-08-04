@@ -1,4 +1,12 @@
-"""Knowledge service — RAG pipeline for channel knowledge.
+# NOTE: File-upload knowledge base (RAG) has been removed.
+# Channel knowledge is now managed via manual ideas (KnowledgeItem with source_type="manual").
+# Legacy Document/KnowledgeChunk data is preserved but no longer used.
+#
+# The indexing, retrieval, and context-building functions below have been
+# disabled. The chunking/embedding utilities are retained for backward
+# compatibility but are no longer invoked by the application pipeline.
+
+"""Knowledge service — RAG pipeline for channel knowledge (DISABLED).
 
 Transforms uploaded documents (PDF, TXT, MD, DOCX) into a queryable
 knowledge base that the AI uses during video generation.
@@ -409,7 +417,7 @@ def _mmr_diversify(
     return selected
 
 
-# ── Document indexing ─────────────────────────────────────────────────────────
+# ── Document indexing (DISABLED — file-upload knowledge base removed) ────────
 
 
 @dataclass
@@ -420,107 +428,107 @@ class IndexingResult:
     error: Optional[str] = None
 
 
-def index_document(document: Document, user_id: int) -> IndexingResult:
-    """Full RAG indexing pipeline for a single document.
+# def index_document(document: Document, user_id: int) -> IndexingResult:
+#     """Full RAG indexing pipeline for a single document.
+#
+#     1. Parse → text
+#     2. Chunk (structure-aware)
+#     3. Embed each chunk (with heading path prefix — Avesia pattern)
+#     4. Store in KnowledgeChunk table (propagating game_id from the document)
+#     5. Update Document.knowledge_status
+#
+#     The document's game_id is propagated to every chunk so that retrieval
+#     can filter by game: game-specific chunks are only retrieved when
+#     generating content for that game; general chunks (game_id=NULL) are
+#     always retrieved.
+#     """
+#     log.info(f"Indexing document {document.id} ({document.filename}) for user {user_id}")
+#
+#     try:
+#         # Mark as processing
+#         with session_scope() as session:
+#             doc = session.query(Document).filter(Document.id == document.id).first()
+#             if doc:
+#                 doc.knowledge_status = "processing"
+#                 session.flush()
+#
+#         # 1. Parse
+#         text = parse_document(document.file_path, document.file_type)
+#         if not text.strip():
+#             raise DocumentParseError("document is empty or could not be parsed")
+#
+#         # 2. Chunk
+#         chunks = chunk_text(text)
+#         if not chunks:
+#             raise DocumentParseError("no chunks generated from document")
+#
+#         log.info(f"Document {document.id}: {len(chunks)} chunks generated")
+#
+#         # 3. Embed + 4. Store
+#         embed_model = _get_embedding_model()
+#
+#         # Delete existing chunks (re-indexing case)
+#         with session_scope() as session:
+#             session.query(KnowledgeChunk).filter(
+#                 KnowledgeChunk.document_id == document.id
+#             ).delete()
+#             session.flush()
+#
+#         # Determine game_id from the document (propagate to all chunks)
+#         game_id = None
+#         with session_scope() as session:
+#             doc = session.query(Document).filter(Document.id == document.id).first()
+#             if doc:
+#                 game_id = doc.game_id
+#
+#         with session_scope() as session:
+#             for chunk in chunks:
+#                 try:
+#                     embedding = _embed_with_heading_prefix(
+#                         chunk.content, chunk.heading_path, embed_model
+#                     )
+#                 except LLMError as e:
+#                     log.warning(f"Failed to embed chunk {chunk.index} of doc {document.id}: {e}")
+#                     embedding = []  # Store without embedding — keyword-only searchable
+#
+#                 kc = KnowledgeChunk(
+#                     user_id=user_id,
+#                     document_id=document.id,
+#                     game_id=game_id,
+#                     content=chunk.content,
+#                     embedding=embedding,
+#                     chunk_index=chunk.index,
+#                     section=chunk.section,
+#                     char_start=chunk.char_start,
+#                     char_end=chunk.char_end,
+#                     embedding_model=embed_model if embedding else None,
+#                 )
+#                 session.add(kc)
+#             session.flush()
+#
+#         # 5. Update document status
+#         with session_scope() as session:
+#             doc = session.query(Document).filter(Document.id == document.id).first()
+#             if doc:
+#                 doc.knowledge_status = "indexed"
+#                 doc.chunk_count = len(chunks)
+#                 doc.text_extracted = True
+#                 session.flush()
+#
+#         log.info(f"Document {document.id} indexed: {len(chunks)} chunks")
+#         return IndexingResult(document_id=document.id, chunk_count=len(chunks), status="indexed")
+#
+#     except Exception as e:
+#         log.error(f"Failed to index document {document.id}: {e}")
+#         with session_scope() as session:
+#             doc = session.query(Document).filter(Document.id == document.id).first()
+#             if doc:
+#                 doc.knowledge_status = "error"
+#                 session.flush()
+#         return IndexingResult(document_id=document.id, chunk_count=0, status="error", error=str(e))
 
-    1. Parse → text
-    2. Chunk (structure-aware)
-    3. Embed each chunk (with heading path prefix — Avesia pattern)
-    4. Store in KnowledgeChunk table (propagating game_id from the document)
-    5. Update Document.knowledge_status
 
-    The document's game_id is propagated to every chunk so that retrieval
-    can filter by game: game-specific chunks are only retrieved when
-    generating content for that game; general chunks (game_id=NULL) are
-    always retrieved.
-    """
-    log.info(f"Indexing document {document.id} ({document.filename}) for user {user_id}")
-
-    try:
-        # Mark as processing
-        with session_scope() as session:
-            doc = session.query(Document).filter(Document.id == document.id).first()
-            if doc:
-                doc.knowledge_status = "processing"
-                session.flush()
-
-        # 1. Parse
-        text = parse_document(document.file_path, document.file_type)
-        if not text.strip():
-            raise DocumentParseError("document is empty or could not be parsed")
-
-        # 2. Chunk
-        chunks = chunk_text(text)
-        if not chunks:
-            raise DocumentParseError("no chunks generated from document")
-
-        log.info(f"Document {document.id}: {len(chunks)} chunks generated")
-
-        # 3. Embed + 4. Store
-        embed_model = _get_embedding_model()
-
-        # Delete existing chunks (re-indexing case)
-        with session_scope() as session:
-            session.query(KnowledgeChunk).filter(
-                KnowledgeChunk.document_id == document.id
-            ).delete()
-            session.flush()
-
-        # Determine game_id from the document (propagate to all chunks)
-        game_id = None
-        with session_scope() as session:
-            doc = session.query(Document).filter(Document.id == document.id).first()
-            if doc:
-                game_id = doc.game_id
-
-        with session_scope() as session:
-            for chunk in chunks:
-                try:
-                    embedding = _embed_with_heading_prefix(
-                        chunk.content, chunk.heading_path, embed_model
-                    )
-                except LLMError as e:
-                    log.warning(f"Failed to embed chunk {chunk.index} of doc {document.id}: {e}")
-                    embedding = []  # Store without embedding — keyword-only searchable
-
-                kc = KnowledgeChunk(
-                    user_id=user_id,
-                    document_id=document.id,
-                    game_id=game_id,
-                    content=chunk.content,
-                    embedding=embedding,
-                    chunk_index=chunk.index,
-                    section=chunk.section,
-                    char_start=chunk.char_start,
-                    char_end=chunk.char_end,
-                    embedding_model=embed_model if embedding else None,
-                )
-                session.add(kc)
-            session.flush()
-
-        # 5. Update document status
-        with session_scope() as session:
-            doc = session.query(Document).filter(Document.id == document.id).first()
-            if doc:
-                doc.knowledge_status = "indexed"
-                doc.chunk_count = len(chunks)
-                doc.text_extracted = True
-                session.flush()
-
-        log.info(f"Document {document.id} indexed: {len(chunks)} chunks")
-        return IndexingResult(document_id=document.id, chunk_count=len(chunks), status="indexed")
-
-    except Exception as e:
-        log.error(f"Failed to index document {document.id}: {e}")
-        with session_scope() as session:
-            doc = session.query(Document).filter(Document.id == document.id).first()
-            if doc:
-                doc.knowledge_status = "error"
-                session.flush()
-        return IndexingResult(document_id=document.id, chunk_count=0, status="error", error=str(e))
-
-
-# ── Retrieval (adapted from Avesia's graph-retriever.ts) ──────────────────────
+# ── Retrieval (DISABLED — file-upload knowledge base removed) ─────────────────
 
 
 @dataclass
@@ -533,148 +541,148 @@ class RetrievedChunk:
     document_id: Optional[int] = None
 
 
-def retrieve_knowledge(
-    session: Session,
-    user_id: int,
-    query: str,
-    game_id: Optional[int] = None,
-    top_k: int = 5,
-    max_tokens: int = 1500,
-    vector_weight: float = 0.65,
-    mmr_lambda: float = 0.6,
-) -> list[RetrievedChunk]:
-    """Retrieve the most relevant knowledge chunks for a given query.
+# def retrieve_knowledge(
+#     session: Session,
+#     user_id: int,
+#     query: str,
+#     game_id: Optional[int] = None,
+#     top_k: int = 5,
+#     max_tokens: int = 1500,
+#     vector_weight: float = 0.65,
+#     mmr_lambda: float = 0.6,
+# ) -> list[RetrievedChunk]:
+#     """Retrieve the most relevant knowledge chunks for a given query.
+#
+#     Uses Avesia's hybrid retrieval pattern:
+#     1. Vector similarity (cosine of query embedding vs chunk embeddings)
+#     2. Keyword matching (substring search for exact terminology)
+#     3. Reciprocal Rank Fusion (RRF) to merge both signals
+#     4. MMR diversification to reduce redundancy
+#
+#     Game isolation: when game_id is provided, only retrieves chunks that are
+#     either game-specific (game_id == game_id) or general channel knowledge
+#     (game_id IS NULL). Chunks from OTHER games are NEVER retrieved — this
+#     prevents cross-game knowledge leakage in the RAG pipeline.
+#
+#     No graph expansion (unlike Avesia) — GPCG's channel knowledge is simpler
+#     and doesn't need community detection. Pure hybrid search + MMR is enough.
+#     """
+#     # Game-isolated retrieval: game-specific + general, never other games
+#     if game_id is not None:
+#         chunks = session.query(KnowledgeChunk).filter(
+#             KnowledgeChunk.user_id == user_id,
+#             or_(
+#                 KnowledgeChunk.game_id == game_id,
+#                 KnowledgeChunk.game_id.is_(None),
+#             ),
+#         ).all()
+#     else:
+#         # No game context — retrieve only general channel knowledge
+#         chunks = session.query(KnowledgeChunk).filter(
+#             KnowledgeChunk.user_id == user_id,
+#             KnowledgeChunk.game_id.is_(None),
+#         ).all()
+#
+#     if not chunks:
+#         return []
+#
+#     # 1. Vector similarity
+#     query_embedding: list[float] = []
+#     try:
+#         query_embedding = embed_query(query)
+#     except LLMError as e:
+#         log.warning(f"Failed to embed query, falling back to keyword-only: {e}")
+#
+#     vector_scores: list[tuple[int, float]] = []
+#     if query_embedding:
+#         for chunk in chunks:
+#             if chunk.embedding:
+#                 score = _cosine_similarity(query_embedding, chunk.embedding)
+#                 vector_scores.append((chunk.id, score))
+#
+#     # 2. Keyword matching (ILIKE-style substring search)
+#     query_lower = query.lower()
+#     query_terms = [t for t in query_lower.split() if len(t) > 2]
+#     keyword_scores: list[tuple[int, float]] = []
+#     for chunk in chunks:
+#         content_lower = chunk.content.lower()
+#         matches = sum(1 for term in query_terms if term in content_lower)
+#         if matches > 0:
+#             keyword_scores.append((chunk.id, matches / max(len(query_terms), 1)))
+#
+#     # 3. Reciprocal Rank Fusion
+#     fused = _reciprocal_rank_fusion(vector_scores, keyword_scores, vector_weight)
+#
+#     # Take top_k * 3 candidates for MMR (need more than final limit for diversification)
+#     candidates_raw = fused[:top_k * 3]
+#     chunk_map = {c.id: c for c in chunks}
+#
+#     # Build candidates for MMR: (chunk_id, content, score)
+#     candidates: list[tuple[int, str, float]] = []
+#     for chunk_id, score in candidates_raw:
+#         chunk = chunk_map.get(chunk_id)
+#         if chunk:
+#             candidates.append((chunk_id, chunk.content, score))
+#
+#     # 4. MMR diversification
+#     diversified = _mmr_diversify(candidates, mmr_lambda, top_k)
+#
+#     # Build results respecting token budget
+#     max_chars = max_tokens * CHARS_PER_TOKEN
+#     results: list[RetrievedChunk] = []
+#     total_chars = 0
+#     for chunk_id, content, score in diversified:
+#         chunk = chunk_map.get(chunk_id)
+#         if not chunk:
+#             continue
+#         if total_chars + len(content) > max_chars:
+#             break
+#         results.append(RetrievedChunk(
+#             chunk_id=chunk.id,
+#             content=chunk.content,
+#             section=chunk.section or "",
+#             heading_path=[],  # Not stored in DB — would need a column for this
+#             score=score,
+#             document_id=chunk.document_id,
+#         ))
+#         total_chars += len(content)
+#
+#     return results
 
-    Uses Avesia's hybrid retrieval pattern:
-    1. Vector similarity (cosine of query embedding vs chunk embeddings)
-    2. Keyword matching (substring search for exact terminology)
-    3. Reciprocal Rank Fusion (RRF) to merge both signals
-    4. MMR diversification to reduce redundancy
 
-    Game isolation: when game_id is provided, only retrieves chunks that are
-    either game-specific (game_id == game_id) or general channel knowledge
-    (game_id IS NULL). Chunks from OTHER games are NEVER retrieved — this
-    prevents cross-game knowledge leakage in the RAG pipeline.
-
-    No graph expansion (unlike Avesia) — GPCG's channel knowledge is simpler
-    and doesn't need community detection. Pure hybrid search + MMR is enough.
-    """
-    # Game-isolated retrieval: game-specific + general, never other games
-    if game_id is not None:
-        chunks = session.query(KnowledgeChunk).filter(
-            KnowledgeChunk.user_id == user_id,
-            or_(
-                KnowledgeChunk.game_id == game_id,
-                KnowledgeChunk.game_id.is_(None),
-            ),
-        ).all()
-    else:
-        # No game context — retrieve only general channel knowledge
-        chunks = session.query(KnowledgeChunk).filter(
-            KnowledgeChunk.user_id == user_id,
-            KnowledgeChunk.game_id.is_(None),
-        ).all()
-
-    if not chunks:
-        return []
-
-    # 1. Vector similarity
-    query_embedding: list[float] = []
-    try:
-        query_embedding = embed_query(query)
-    except LLMError as e:
-        log.warning(f"Failed to embed query, falling back to keyword-only: {e}")
-
-    vector_scores: list[tuple[int, float]] = []
-    if query_embedding:
-        for chunk in chunks:
-            if chunk.embedding:
-                score = _cosine_similarity(query_embedding, chunk.embedding)
-                vector_scores.append((chunk.id, score))
-
-    # 2. Keyword matching (ILIKE-style substring search)
-    query_lower = query.lower()
-    query_terms = [t for t in query_lower.split() if len(t) > 2]
-    keyword_scores: list[tuple[int, float]] = []
-    for chunk in chunks:
-        content_lower = chunk.content.lower()
-        matches = sum(1 for term in query_terms if term in content_lower)
-        if matches > 0:
-            keyword_scores.append((chunk.id, matches / max(len(query_terms), 1)))
-
-    # 3. Reciprocal Rank Fusion
-    fused = _reciprocal_rank_fusion(vector_scores, keyword_scores, vector_weight)
-
-    # Take top_k * 3 candidates for MMR (need more than final limit for diversification)
-    candidates_raw = fused[:top_k * 3]
-    chunk_map = {c.id: c for c in chunks}
-
-    # Build candidates for MMR: (chunk_id, content, score)
-    candidates: list[tuple[int, str, float]] = []
-    for chunk_id, score in candidates_raw:
-        chunk = chunk_map.get(chunk_id)
-        if chunk:
-            candidates.append((chunk_id, chunk.content, score))
-
-    # 4. MMR diversification
-    diversified = _mmr_diversify(candidates, mmr_lambda, top_k)
-
-    # Build results respecting token budget
-    max_chars = max_tokens * CHARS_PER_TOKEN
-    results: list[RetrievedChunk] = []
-    total_chars = 0
-    for chunk_id, content, score in diversified:
-        chunk = chunk_map.get(chunk_id)
-        if not chunk:
-            continue
-        if total_chars + len(content) > max_chars:
-            break
-        results.append(RetrievedChunk(
-            chunk_id=chunk.id,
-            content=chunk.content,
-            section=chunk.section or "",
-            heading_path=[],  # Not stored in DB — would need a column for this
-            score=score,
-            document_id=chunk.document_id,
-        ))
-        total_chars += len(content)
-
-    return results
-
-
-def build_knowledge_context(chunks: list[RetrievedChunk]) -> str:
-    """Build a natural-language context block from retrieved chunks.
-
-    Adapted from Avesia's context-builder.ts:
-    - Prepends heading breadcrumb: [Section > Subsection]
-    - Adds relevance score: [Relevância: 85%]
-    - Joins with \n\n---\n\n
-    - Respects token budget
-
-    Includes a CRITICAL language instruction: the knowledge may be in any
-    language (often English — wikis, guides), but the generated script MUST
-    be in Brazilian Portuguese. This prevents the LLM from leaking English
-    phrasing into the output.
-    """
-    if not chunks:
-        return ""
-
-    header = (
-        "=== CONHECIMENTO DO CANAL (FONTE DE REFERÊNCIA) ===\n"
-        "Este conteúdo pode estar em diferentes idiomas.\n"
-        "Use estas informações apenas para compreender fatos, contexto e ideias.\n\n"
-        "REGRA OBRIGATÓRIA:\n"
-        "Todo roteiro, narração e texto gerado deve ser escrito exclusivamente\n"
-        "em português brasileiro (pt-BR).\n"
-        "Nunca responda em inglês.\n"
-        "Não copie frases das fontes.\n"
-        "Sempre adapte as informações para uma narrativa natural em português brasileiro."
-    )
-    parts: list[str] = [header]
-    for chunk in chunks:
-        breadcrumb = f"[{chunk.section}]\n" if chunk.section else ""
-        relevance = f"[Relevância: {chunk.score * 100:.0f}%]\n" if chunk.score > 0 else ""
-        parts.append(f"{breadcrumb}{relevance}{chunk.content}")
-
-    parts.append("=== FIM DO CONHECIMENTO DO CANAL ===")
-    return "\n\n---\n\n".join(parts)
+# def build_knowledge_context(chunks: list[RetrievedChunk]) -> str:
+#     """Build a natural-language context block from retrieved chunks.
+#
+#     Adapted from Avesia's context-builder.ts:
+#     - Prepends heading breadcrumb: [Section > Subsection]
+#     - Adds relevance score: [Relevância: 85%]
+#     - Joins with \n\n---\n\n
+#     - Respects token budget
+#
+#     Includes a CRITICAL language instruction: the knowledge may be in any
+#     language (often English — wikis, guides), but the generated script MUST
+#     be in Brazilian Portuguese. This prevents the LLM from leaking English
+#     phrasing into the output.
+#     """
+#     if not chunks:
+#         return ""
+#
+#     header = (
+#         "=== CONHECIMENTO DO CANAL (FONTE DE REFERÊNCIA) ===\n"
+#         "Este conteúdo pode estar em diferentes idiomas.\n"
+#         "Use estas informações apenas para compreender fatos, contexto e ideias.\n\n"
+#         "REGRA OBRIGATÓRIA:\n"
+#         "Todo roteiro, narração e texto gerado deve ser escrito exclusivamente\n"
+#         "em português brasileiro (pt-BR).\n"
+#         "Nunca responda em inglês.\n"
+#         "Não copie frases das fontes.\n"
+#         "Sempre adapte as informações para uma narrativa natural em português brasileiro."
+#     )
+#     parts: list[str] = [header]
+#     for chunk in chunks:
+#         breadcrumb = f"[{chunk.section}]\n" if chunk.section else ""
+#         relevance = f"[Relevância: {chunk.score * 100:.0f}%]\n" if chunk.score > 0 else ""
+#         parts.append(f"{breadcrumb}{relevance}{chunk.content}")
+#
+#     parts.append("=== FIM DO CONHECIMENTO DO CANAL ===")
+#     return "\n\n---\n\n".join(parts)

@@ -1,3 +1,5 @@
+# NOTE: This module is no longer used. File-upload knowledge base has been removed.
+# Preserved for backward compatibility with any legacy data.
 """Document parser — extract text from PDF, TXT, MD, DOCX uploads."""
 
 from __future__ import annotations

@@ -112,6 +112,8 @@ class GameplayRetriever:
         scope: str = ContentScope.game.value,
         user_id: Optional[int] = None,
         accept_public: bool = False,
+        narrative_beats: Optional[list] = None,
+        recent_game_ids: Optional[list[int]] = None,
     ) -> list[SelectedClip]:
         """Retrieve gameplay clips for a video.
 
@@ -119,6 +121,10 @@ class GameplayRetriever:
             session: DB session
             game_id: game to retrieve gameplay from. V2: accepts list[int]
                      for cross-game retrieval. If int, wraps to [game_id].
+                     NOTE: for GENERAL_TOPIC videos, the source search is
+                     expanded to ALL gameplay sources the user has access to
+                     (the subject is NOT about the game, so any gameplay can
+                     serve as background). game_id is only used as a fallback.
             target_duration: total duration to fill (narration duration)
             creative_plan: the editorial plan (may be None for fallback)
             scene_duration: scene grouping duration (0 = legacy mode)
@@ -130,6 +136,11 @@ class GameplayRetriever:
                      with public fallback when accept_public=True.
             accept_public: V2 — if True and user_id is set, fall back to public
                            gameplays when user's own are exhausted.
+            narrative_beats: narrative beats from the creative plan (used to
+                     score source fit for GENERAL_TOPIC source selection).
+                     If None, falls back to creative_plan.narrative_beats.
+            recent_game_ids: game_ids that appeared in recent videos (for
+                     diversity penalty in source scoring). Optional.
 
         Returns:
             List of SelectedClip with temporal references to gameplay segments
@@ -159,6 +170,7 @@ class GameplayRetriever:
             clips = self._retrieve_semantic(
                 session, game_ids, target_duration, creative_plan, scene_duration, rng,
                 user_id=user_id, accept_public=accept_public,
+                narrative_beats=narrative_beats, recent_game_ids=recent_game_ids,
             )
             if clips:
                 return clips
@@ -205,11 +217,18 @@ class GameplayRetriever:
         if plan.gameplay_strategy == "background_filler":
             return False
 
-        # V2: check sources across all game_ids (cross-game)
-        query = select(GameplaySource).where(
-            GameplaySource.game_id.in_(game_ids),
-            GameplaySource.ingestion_status == "ready",
-        )
+        # For GENERAL_TOPIC, search ALL gameplay sources the user has access to
+        # (the subject is NOT about the game, so any gameplay can be background).
+        # For GAME_RELATED, keep filtering by game_ids (the video IS about that game).
+        if video_type == "GENERAL_TOPIC":
+            query = select(GameplaySource).where(
+                GameplaySource.ingestion_status == "ready",
+            )
+        else:
+            query = select(GameplaySource).where(
+                GameplaySource.game_id.in_(game_ids),
+                GameplaySource.ingestion_status == "ready",
+            )
         # V2: filter by user_id if provided
         if user_id is not None:
             query = query.where(GameplaySource.user_id == user_id)
@@ -228,6 +247,131 @@ class GameplayRetriever:
 
         return False
 
+    def _beat_event_mapping(self, beats: list) -> set[str]:
+        """Map narrative beat tones/energies to preferred event types.
+
+        This is a SOFT signal (not a hard filter) used to score source fit.
+
+        High energy beats (hook, payoff, escalation) → {COMBAT, CHASE, VEHICLE}
+        Medium energy beats (development, context) → {EXPLORATION, TRAVEL, INTERACTION}
+        Low energy beats (conclusion, transition, others) → {DIALOGUE, CUTSCENE, IDLE}
+
+        Args:
+            beats: list of NarrativeBeat objects (or dicts with a "label" key).
+
+        Returns:
+            Set of preferred event_type strings.
+        """
+        preferred: set[str] = set()
+        high_energy = {"hook", "payoff", "escalation"}
+        medium_energy = {"development", "context"}
+        for beat in beats:
+            # Support both NarrativeBeat dataclass and plain dict
+            label = getattr(beat, "label", None)
+            if label is None and isinstance(beat, dict):
+                label = beat.get("label", "")
+            label = (label or "").lower()
+            if label in high_energy:
+                preferred.update({"COMBAT", "CHASE", "VEHICLE"})
+            elif label in medium_energy:
+                preferred.update({"EXPLORATION", "TRAVEL", "INTERACTION"})
+            else:
+                preferred.update({"DIALOGUE", "CUTSCENE", "IDLE"})
+        return preferred
+
+    def _score_source_fit(
+        self,
+        session: Session,
+        source: GameplaySource,
+        narrative_beats: list,
+        video_type: str,
+        topic_game_id: Optional[int],
+        consumer_user_id: Optional[int] = None,
+        recent_game_ids: Optional[list[int]] = None,
+    ) -> float:
+        """Score a gameplay source by how well its events fit the narrative.
+
+        Scoring components (max ~110):
+          1. Event type coverage: fraction of events matching preferred types
+             from the narrative beats (0-40 points)
+          2. Interesting score: average interesting_score of events (0-20)
+          3. Available clips: count of event time ranges NOT in cooldown/USED
+             for this consumer (0-20 points)
+          4. Game relevance bonus: +20 if GAME_RELATED and source.game_id ==
+             topic_game_id (the gameplay IS about the game being discussed)
+          5. Visual confidence: average visual_confidence of events (0-10)
+          6. Diversity penalty: -10 per recent appearance of source.game_id in
+             recent_game_ids
+
+        Args:
+            session: DB session
+            source: the GameplaySource to score
+            narrative_beats: narrative beats (NarrativeBeat or dict)
+            video_type: GAME_RELATED or GENERAL_TOPIC
+            topic_game_id: the game_id the video is about (for relevance bonus)
+            consumer_user_id: consumer for USED/cooldown checks
+            recent_game_ids: game_ids seen in recent videos (diversity penalty)
+
+        Returns:
+            Float score (higher = better fit).
+        """
+        events = session.execute(
+            select(GameplayEvent).where(GameplayEvent.source_id == source.id)
+        ).scalars().all()
+        if not events:
+            return 0.0
+
+        n_events = len(events)
+        score = 0.0
+
+        # 1. Event type coverage (0-40)
+        preferred_types = self._beat_event_mapping(narrative_beats)
+        if preferred_types:
+            matching = sum(1 for e in events if e.event_type in preferred_types)
+            coverage = matching / n_events
+            score += coverage * 40.0
+        else:
+            # No beats → neutral midpoint
+            score += 20.0
+
+        # 2. Interesting score (0-20)
+        avg_interesting = sum(e.interesting_score for e in events) / n_events
+        score += avg_interesting * 20.0
+
+        # 3. Available clips (0-20) — count ranges NOT in USED/cooldown
+        settings = get_settings()
+        cooldown_sec = settings.gpcg_gameplay_cooldown_sec
+        used_ranges = get_used_ranges(
+            session, source.id, consumer_user_id=consumer_user_id,
+        )
+        available = 0
+        for e in events:
+            if not is_range_available(used_ranges, e.start_time, e.end_time, tolerance=1.0):
+                continue
+            # Check cooldown: skip if within cooldown window of any used region
+            in_cooldown = False
+            for ur in used_ranges:
+                if ur.end_sec > 0 and e.start_time < ur.end_sec + cooldown_sec and e.end_time > ur.start_sec - cooldown_sec:
+                    in_cooldown = True
+                    break
+            if not in_cooldown:
+                available += 1
+        score += (available / n_events) * 20.0
+
+        # 4. Game relevance bonus (+20)
+        if video_type == "GAME_RELATED" and source.game_id == topic_game_id:
+            score += 20.0
+
+        # 5. Visual confidence (0-10)
+        avg_vc = sum(e.visual_confidence for e in events) / n_events
+        score += avg_vc * 10.0
+
+        # 6. Diversity penalty (-10 per recent appearance)
+        if recent_game_ids and source.game_id is not None:
+            score -= 10.0 * recent_game_ids.count(source.game_id)
+
+        return score
+
     def _retrieve_semantic(
         self,
         session: Session,
@@ -238,11 +382,16 @@ class GameplayRetriever:
         rng: random.Random,
         user_id: Optional[int] = None,
         accept_public: bool = False,
+        narrative_beats: Optional[list] = None,
+        recent_game_ids: Optional[list[int]] = None,
     ) -> list[SelectedClip]:
         """Retrieve clips using the semantic index.
 
         V2: searches across multiple game_ids (cross-game).
         V2: filters by user_id with public fallback.
+        V3: For GENERAL_TOPIC, considers ALL gameplay sources the user has
+            access to, scores each by narrative fit, and selects the ONE best
+            source. Clips come ONLY from that source (one source per video).
 
         Strategy:
         1. Find sources with ready analysis + compatible
@@ -250,12 +399,27 @@ class GameplayRetriever:
         3. If no query or no matches, get the most interesting events
         4. Build SelectedClips from event time ranges
         5. If total < target_duration, fill remaining with random selection
+           (GAME_RELATED only — GENERAL_TOPIC never mixes sources)
         """
-        # Find compatible sources with ready analysis (V2: across all game_ids)
-        query = select(GameplaySource).where(
-            GameplaySource.game_id.in_(game_ids),
-            GameplaySource.ingestion_status == "ready",
-        )
+        # Resolve narrative beats (explicit param or from the plan)
+        beats = narrative_beats if narrative_beats is not None else plan.narrative_beats
+        topic_game_id = game_ids[0] if game_ids else None
+
+        # Find compatible sources with ready analysis.
+        # For GENERAL_TOPIC: search ALL gameplay sources (any game) the user
+        # has access to — the subject is NOT about the game, so any gameplay
+        # can serve as background. Then score and pick the ONE best source.
+        # For GAME_RELATED: keep filtering by game_ids (the video IS about
+        # that game, so its gameplay is preferred).
+        if plan.video_type == "GENERAL_TOPIC":
+            query = select(GameplaySource).where(
+                GameplaySource.ingestion_status == "ready",
+            )
+        else:
+            query = select(GameplaySource).where(
+                GameplaySource.game_id.in_(game_ids),
+                GameplaySource.ingestion_status == "ready",
+            )
         # V2: filter by user_id if provided
         if user_id is not None:
             query = query.where(GameplaySource.user_id == user_id)
@@ -275,6 +439,26 @@ class GameplayRetriever:
 
         if not compatible_sources:
             return []
+
+        # V3: For GENERAL_TOPIC, score each source and select the ONE best fit.
+        # This implements intelligent source selection based on narrative fit
+        # rather than treating all compatible sources equally.
+        if plan.video_type == "GENERAL_TOPIC" and len(compatible_sources) > 1:
+            scored = []
+            for src in compatible_sources:
+                fit = self._score_source_fit(
+                    session, src, beats, plan.video_type, topic_game_id,
+                    consumer_user_id=user_id, recent_game_ids=recent_game_ids,
+                )
+                scored.append((fit, src))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            best_src = scored[0][1]
+            log.info(
+                f"GENERAL_TOPIC source selection: {len(compatible_sources)} candidates, "
+                f"best=source#{best_src.id} (game={best_src.game_id}) "
+                f"score={scored[0][0]:.1f}"
+            )
+            compatible_sources = [best_src]
 
         # Collect events from all compatible sources
         all_events: list[tuple[GameplaySource, GameplayEvent]] = []
@@ -475,8 +659,11 @@ class GameplayRetriever:
             f"{total:.1f}s / {target_duration:.1f}s target"
         )
 
-        # If we didn't fill the target, supplement with random selection
-        if total < target_duration - 0.5:
+        # If we didn't fill the target, supplement with random selection.
+        # V3: For GENERAL_TOPIC, do NOT mix with other sources — respect the
+        # "one source per video" rule. Just use what's available from the
+        # selected source.
+        if total < target_duration - 0.5 and plan.video_type != "GENERAL_TOPIC":
             remaining = target_duration - total
             log.info(f"supplementing with {remaining:.1f}s of random selection")
             # V2: try primary game first, then other game_ids
@@ -489,5 +676,10 @@ class GameplayRetriever:
             for clip in supplement:
                 clip.scene_index += scene_idx
                 clips.append(clip)
+        elif total < target_duration - 0.5 and plan.video_type == "GENERAL_TOPIC":
+            log.info(
+                f"GENERAL_TOPIC: selected source filled {total:.1f}s/{target_duration:.1f}s, "
+                f"not mixing with other sources (one source per video rule)"
+            )
 
         return clips

@@ -33,6 +33,7 @@ const TYPE_LABELS: Record<string, string> = {
   curiosity: "Curiosidade",
   lore: "Lore",
   fact: "Fact",
+  manual: "Manual",
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -40,6 +41,7 @@ const TYPE_COLORS: Record<string, string> = {
   curiosity: "bg-purple-500/20 text-purple-300 border-purple-500/30",
   lore: "bg-amber-500/20 text-amber-300 border-amber-500/30",
   fact: "bg-teal-500/20 text-teal-300 border-teal-500/30",
+  manual: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -64,21 +66,31 @@ export function IdeasPage() {
   const [collecting, setCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [queueIds, setQueueIds] = useState<Set<number>>(new Set());
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newIdeaTitle, setNewIdeaTitle] = useState("");
+  const [newIdeaContent, setNewIdeaContent] = useState("");
+  const [creating, setCreating] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      // "manual" is a source_type filter, not item_type — handle specially
+      const isManualFilter = filterType === "manual";
       const [itemsRes, statsRes, queueRes] = await Promise.all([
         api.listKnowledgeItems({
-          item_type: filterType || undefined,
+          item_type: isManualFilter ? undefined : filterType || undefined,
           status: filterStatus || undefined,
           limit: 100,
         }),
         api.getKnowledgeItemStats(),
         api.getIdeaQueue(),
       ]);
-      setItems(itemsRes.items || []);
+      let allItems = itemsRes.items || [];
+      if (isManualFilter) {
+        allItems = allItems.filter((i: KnowledgeItem) => i.source_type === "manual");
+      }
+      setItems(allItems);
       setStats(statsRes);
       setQueue(queueRes.items || []);
       setQueueIds(new Set(queueRes.queue || []));
@@ -118,6 +130,29 @@ export function IdeasPage() {
       setError(e.message);
     } finally {
       setCollecting(false);
+    }
+  };
+
+  const handleCreateIdea = async () => {
+    if (!newIdeaTitle.trim() || !newIdeaContent.trim()) {
+      setError("Título e conteúdo são obrigatórios");
+      return;
+    }
+    setCreating(true);
+    setError(null);
+    try {
+      await api.createManualIdea({
+        title: newIdeaTitle.trim(),
+        content: newIdeaContent.trim(),
+      });
+      setNewIdeaTitle("");
+      setNewIdeaContent("");
+      setShowCreateForm(false);
+      loadData();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -177,14 +212,62 @@ export function IdeasPage() {
             Banco de ideias de conteúdo (notícias, curiosidades, lore) coletadas automaticamente
           </p>
         </div>
-        <button
-          onClick={handleCollect}
-          disabled={collecting}
-          className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-500 disabled:opacity-50"
-        >
-          {collecting ? "Coletando..." : "Coletar Agora"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowCreateForm(!showCreateForm)}
+            className="rounded-lg border border-teal-500/30 bg-teal-500/10 px-4 py-2 text-sm font-medium text-teal-300 hover:bg-teal-500/20"
+          >
+            + Nova Ideia
+          </button>
+          <button
+            onClick={handleCollect}
+            disabled={collecting}
+            className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-500 disabled:opacity-50"
+          >
+            {collecting ? "Coletando..." : "Coletar Agora"}
+          </button>
+        </div>
       </div>
+
+      {/* Create Manual Idea Form */}
+      {showCreateForm && (
+        <div className="rounded-lg border border-teal-500/30 bg-teal-500/5 p-4 space-y-3">
+          <h3 className="font-semibold text-text">Nova Ideia Manual</h3>
+          <input
+            type="text"
+            placeholder="Título da ideia"
+            value={newIdeaTitle}
+            onChange={(e) => setNewIdeaTitle(e.target.value)}
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40"
+          />
+          <textarea
+            placeholder="Descreva a ideia de conteúdo..."
+            value={newIdeaContent}
+            onChange={(e) => setNewIdeaContent(e.target.value)}
+            rows={4}
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 resize-none"
+          />
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => {
+                setShowCreateForm(false);
+                setNewIdeaTitle("");
+                setNewIdeaContent("");
+              }}
+              className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleCreateIdea}
+              disabled={creating || !newIdeaTitle.trim() || !newIdeaContent.trim()}
+              className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-500 disabled:opacity-50"
+            >
+              {creating ? "Criando..." : "Criar Ideia"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Stats Cards */}
       {stats && (
@@ -299,17 +382,18 @@ export function IdeasPage() {
         <select
           value={filterType}
           onChange={(e) => setFilterType(e.target.value)}
-          className="rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text"
+          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
         >
           <option value="">Todos os tipos</option>
           <option value="news">Notícias</option>
           <option value="curiosity">Curiosidades</option>
           <option value="lore">Lore</option>
+          <option value="manual">Manuais</option>
         </select>
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
-          className="rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text"
+          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
         >
           <option value="">Todos os status</option>
           <option value="fresh">Disponíveis</option>

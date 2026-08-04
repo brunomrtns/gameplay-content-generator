@@ -64,6 +64,7 @@ class ContentPlanningService:
         *,
         scope: str = ContentScope.game.value,
         user_id: Optional[int] = None,
+        channel_context: str = "",
     ) -> Optional[ContentPlan]:
         """Pick the best unused fact/item and create a ContentPlan.
 
@@ -154,12 +155,19 @@ class ContentPlanningService:
                 f"Use it unless you find a clearly better alternative.\n"
             )
 
+        channel_str = ""
+        if channel_context:
+            channel_str = (
+                f"\n\n## Channel context\n{channel_context}\n"
+                f"Align the topic and tone with this channel identity.\n"
+            )
+
         prompt = (
             f"Game: {game.canonical_name}\n"
             f"Target duration: {self.settings.gpcg_default_target_duration}s\n"
             f"Format: {self.settings.gpcg_default_format}\n\n"
             f"Available ideas (sorted by potential):\n{candidates}\n"
-            f"{preselect_str}{avoid_str}\n"
+            f"{preselect_str}{avoid_str}{channel_str}\n"
             "Pick the best one for a new Short and design the plan."
         )
 
@@ -248,6 +256,7 @@ class ContentPlanningService:
         background_game_id: Optional[int] = None,
         *,
         user_id: Optional[int] = None,
+        channel_context: str = "",
     ) -> Optional[ContentPlan]:
         """Create a ContentPlan from a specific KnowledgeItem.
 
@@ -278,7 +287,7 @@ class ContentPlanningService:
             game_id=game_id,
             background_game_id=background_game_id,
             topic=topic,
-            hook=ki.summary[:200] if ki.summary else topic,
+            hook=(ki.content[:200] if ki.content else topic),
             tone="curious",
             music_mood="energetic",
             fact_id=None,
@@ -291,6 +300,7 @@ class ContentPlanningService:
                 "source_type": "knowledge_item",
                 "source_id": ki.id,
                 "idea_source": "user_queue",
+                "channel_context": channel_context if channel_context else None,
                 "provenance": {
                     "idea": ki.title,
                     "source": ki.source_type or "rss",
@@ -306,8 +316,9 @@ class ContentPlanningService:
         session.add(plan)
         session.flush()
 
-        # Mark KI as used
-        ki.status = KnowledgeItemStatus.used.value
+        # NOTE: KI status is NOT changed here. The KI is marked as used only
+        # when the Video is persisted (in generation_service.py). If the job
+        # fails before that, the KI remains fresh and can be re-queued.
         log.info(
             f"content plan #{plan.id} [user-queued KI #{ki.id}]: "
             f"topic='{topic[:50]}' game_id={game_id} bg={bg_game.canonical_name if bg_game else 'None'}"
@@ -321,6 +332,7 @@ class ContentPlanningService:
         fact_id: Optional[int] = None,
         *,
         user_id: Optional[int] = None,
+        channel_context: str = "",
     ) -> Optional[ContentPlan]:
         """Create a ContentPlan for a general curiosity (not game-specific).
 
@@ -415,6 +427,13 @@ class ContentPlanningService:
             log.warning("no scored general facts or knowledge items available")
             return None
 
+        channel_str = ""
+        if channel_context:
+            channel_str = (
+                f"\n\n## Channel context\n{channel_context}\n"
+                f"Align the topic and tone with this channel identity.\n"
+            )
+
         if self.settings.gpcg_curiosity_scoring_enabled:
             candidates = [
                 {"id": f.id, "category": f.category, "claim": f.claim,
@@ -430,6 +449,7 @@ class ContentPlanningService:
                 f"Available facts (sorted by curiosity potential — "
                 f"curiosity_score weighs curiosity gap, surprise, retention, "
                 f"familiarity of the TOPIC, and insight quality):\n{candidates}\n\n"
+                f"{channel_str}"
                 "Pick the fact with the best STORY potential (highest curiosity). "
                 "The script will be about the CURIOSITY, not the game — the gameplay is just background visual."
             )
@@ -444,6 +464,7 @@ class ContentPlanningService:
                 f"Target duration: {self.settings.gpcg_default_target_duration}s\n"
                 f"Format: {self.settings.gpcg_default_format}\n\n"
                 f"Available facts (sorted by potential):\n{candidates}\n\n"
+                f"{channel_str}"
                 "Pick the best one for a new Short and design the plan. "
                 "The script will be about the CURIOSITY, not the game — the gameplay is just background visual."
             )
