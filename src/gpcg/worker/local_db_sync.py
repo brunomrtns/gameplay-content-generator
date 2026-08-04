@@ -101,6 +101,8 @@ def _create_temp_db(db_path: Path) -> sessionmaker:
         f"sqlite:///{db_path}",
         connect_args={"check_same_thread": False},
     )
+    tables_before = list(Base.metadata.tables.keys())
+    log.info(f"_create_temp_db: {len(tables_before)} tables registered: {tables_before}")
     Base.metadata.create_all(bind=engine)
     return sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
@@ -275,7 +277,9 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
         session.flush()
 
         # Knowledge items (V2 content intelligence — used by ContentPlanningService)
-        for ki_data in job_data.get("knowledge_items", []):
+        ki_list_raw = job_data.get("knowledge_items", [])
+        log.info(f"populate_local_db: inserting {len(ki_list_raw)} knowledge_items")
+        for ki_data in ki_list_raw:
             session.add(KnowledgeItem(
                 id=ki_data["id"],
                 user_id=ki_data.get("user_id", user_id),
@@ -297,6 +301,7 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
                 content_hash=ki_data.get("content_hash"),
             ))
         session.flush()
+        log.info(f"populate_local_db: flushed {len(ki_list_raw)} knowledge_items")
 
         # Content plan (if exists)
         plan_data = job_data.get("content_plan")

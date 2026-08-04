@@ -319,7 +319,7 @@ class Settings(BaseSettings):
     # Collection interval in hours (how often to collect RSS for each game).
     gpcg_content_collection_interval_hours: int = 6
     # Minimum editorial_score for a KnowledgeItem to be considered for content.
-    gpcg_content_min_editorial_score: int = 50
+    gpcg_content_min_editorial_score: int = 0
     # Retention period for news KnowledgeItems in days (items older than this are deleted).
     gpcg_news_retention_days: int = 30
 

@@ -120,6 +120,11 @@ class ContentPlanningService:
         knowledge_items: list[KnowledgeItem] = []
         if self.settings.gpcg_content_intelligence_enabled:
             knowledge_items = self._get_knowledge_items(session, game_id, scope, user_id=user_id)
+            # Fallback: if no game-specific KIs, include general KIs (game_id=None)
+            if not knowledge_items:
+                knowledge_items = self._get_general_knowledge_items(session, user_id=user_id)
+                if knowledge_items:
+                    log.info(f"No game-specific KIs for '{game.canonical_name}', using {len(knowledge_items)} general KIs")
 
         if not facts and preselected_fact is None and not knowledge_items:
             log.warning(f"no scored facts or knowledge items for game '{game.canonical_name}'")
@@ -470,6 +475,30 @@ class ContentPlanningService:
         else:
             stmt = stmt.where(KnowledgeItem.game_id == game_id)
 
+        return list(session.execute(stmt).scalars().all())
+
+    def _get_general_knowledge_items(
+        self,
+        session: Session,
+        *,
+        user_id: Optional[int] = None,
+    ) -> list[KnowledgeItem]:
+        """V2: Get general (game_id=None) KnowledgeItems as fallback.
+
+        Used when no game-specific KIs are available — allows generating
+        a video about a general topic with the job's game as background.
+        """
+        from gpcg.domain.visibility import visible_to_user
+        ki_vis = visible_to_user(KnowledgeItem.user_id, KnowledgeItem.is_public, user_id)
+
+        stmt = (
+            select(KnowledgeItem)
+            .where(KnowledgeItem.status == KnowledgeItemStatus.fresh.value)
+            .where(KnowledgeItem.game_id.is_(None))
+            .where(ki_vis)
+            .order_by(KnowledgeItem.editorial_score.desc())
+            .limit(10)
+        )
         return list(session.execute(stmt).scalars().all())
 
     def _build_unified_candidates(
