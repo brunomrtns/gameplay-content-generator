@@ -240,6 +240,42 @@ def consume_idea_queue(
     return {"job_id": job_id, "source": "idea_queue"}
 
 
+class EnqueueRequest(BaseModel):
+    user_id: int
+    knowledge_item_ids: list[int]
+
+
+@router.post("/automation/enqueue-ideas")
+def enqueue_ideas_worker(
+    req: EnqueueRequest,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Worker-auth endpoint to add KnowledgeItems to a user's idea queue.
+
+    Useful when SSH is unavailable but the worker API key is available.
+    Only enqueues KIs that are fresh and visible to the user.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+    from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
+    auto = db.query(Automation).filter(Automation.user_id == req.user_id).first()
+    if not auto:
+        raise HTTPException(404, "Automation not found")
+    cfg = dict(auto.config or {})
+    q = list(cfg.get("idea_queue", []))
+    added = []
+    for kid in req.knowledge_item_ids:
+        ki = db.get(KnowledgeItem, kid)
+        if ki and ki.status == KnowledgeItemStatus.fresh.value and kid not in q:
+            q.append(kid)
+            added.append(kid)
+    cfg["idea_queue"] = q
+    auto.config = cfg
+    flag_modified(auto, "config")
+    db.commit()
+    return {"queue": q, "added": added}
+
+
 @router.get("/automation/editorial-data/{user_id}")
 def get_editorial_data(
     user_id: int,
