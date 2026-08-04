@@ -31,6 +31,7 @@ from typing import Optional, Union
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from gpcg.application.clip_usage_service import get_used_ranges, is_range_available, UsedRange
 from gpcg.application.gameplay_index_service import GameplayIndexService
 from gpcg.application.gameplay_selector import GameplaySelector, SelectedClip
 from gpcg.config import get_settings
@@ -341,71 +342,96 @@ class GameplayRetriever:
             tiered.extend(current_tier)
         all_events = tiered
 
+        # Load persisted clip usage history from the DB (per consumer).
+        # This is the KEY fix: without this, each job selected clips without
+        # knowing what was already used in previous videos.
+        settings = get_settings()
+        cooldown_sec = settings.gpcg_gameplay_cooldown_sec
+        persisted_used: dict[int, list[UsedRange]] = {}
+        for src in compatible_sources:
+            persisted_used[src.id] = get_used_ranges(
+                session, src.id, consumer_user_id=user_id,
+            )
+        log.info(
+            f"semantic retrieval: loaded usage history for {len(persisted_used)} sources, "
+            f"cooldown={cooldown_sec}s, consumer={user_id}"
+        )
+
         # Track used event time ranges to avoid picking overlapping segments
+        # within this selection AND across previous videos (persisted history).
         used_ranges: list[tuple[float, float, int]] = []  # (start, end, source_id)
 
         def _is_used(ev_start: float, ev_end: float, src_id: int) -> bool:
+            # Check intra-selection overlaps (clips already picked in this job)
             for ur_start, ur_end, ur_src in used_ranges:
                 if ur_src == src_id and ev_start < ur_end and ev_end > ur_start:
                     return True
+            # Check persisted history: block significant overlaps
+            history = persisted_used.get(src_id, [])
+            if not is_range_available(history, ev_start, ev_end, tolerance=1.0):
+                return True
             return False
 
-        # Build clips from events, accumulating until target_duration
+        def _is_in_cooldown(ev_start: float, ev_end: float, src_id: int) -> bool:
+            """Check if event is within cooldown window of any used region."""
+            history = persisted_used.get(src_id, [])
+            for ur in history:
+                if ur.end_sec > 0 and ev_start < ur.end_sec + cooldown_sec and ev_end > ur.start_sec - cooldown_sec:
+                    return True
+            return False
+
+        # Build clips from events, accumulating until target_duration.
+        # Two-pass strategy:
+        #   Pass 1: prefer events NOT in cooldown (far from previously used regions)
+        #   Pass 2: if target not filled, accept events in cooldown (but still
+        #           block significant overlaps with used ranges)
         clips: list[SelectedClip] = []
         total = 0.0
         scene_idx = 0
         scene_accum = 0.0  # accumulated duration within current scene
+        from gpcg.domain.models import GameplayAsset
 
-        for src, ev in all_events:
+        # Cache assets per source to avoid repeated queries
+        asset_cache: dict[int, GameplayAsset] = {}
+
+        def _get_asset(src: GameplaySource) -> GameplayAsset:
+            if src.id not in asset_cache:
+                asset = session.execute(
+                    select(GameplayAsset).where(GameplayAsset.source_id == src.id).limit(1)
+                ).scalars().first()
+                if asset is None:
+                    asset = GameplayAsset(
+                        source_id=src.id,
+                        label=f"auto:{src.filename}",
+                        start_sec=0.0,
+                        end_sec=src.duration or 0.0,
+                        duration=src.duration or 0.0,
+                        used_count=0,
+                    )
+                    session.add(asset)
+                    session.flush()
+                asset_cache[src.id] = asset
+            return asset_cache[src.id]
+
+        def _try_select(src: GameplaySource, ev: GameplayEvent) -> bool:
+            """Try to select an event as a clip. Returns True if selected."""
+            nonlocal total, scene_idx, scene_accum
             if total >= target_duration:
-                break
-
-            # Skip events that overlap with already-selected clips
+                return False
             if _is_used(ev.start_time, ev.end_time, src.id):
-                continue
-
-            # Determine clip duration
+                return False
             event_duration = ev.end_time - ev.start_time
             if event_duration <= 0:
-                continue
-
-            # If scene_duration > 0, cap clip at remaining scene budget
+                return False
             clip_duration = event_duration
             if scene_duration > 0:
                 scene_remaining = scene_duration - scene_accum
                 clip_duration = min(event_duration, scene_remaining)
-
-            # Don't exceed remaining target
             remaining = target_duration - total
             clip_duration = min(clip_duration, remaining)
-
             if clip_duration < 0.5:
-                continue
-
-            # Build the SelectedClip
-            # We need a GameplayAsset — but the semantic index doesn't use assets.
-            # We create a pseudo-asset using the source directly.
-            # The render stage will extract the segment from the source file.
-            from gpcg.domain.models import GameplayAsset
-            # Find or create a pseudo-asset for this source
-            asset = session.execute(
-                select(GameplayAsset).where(GameplayAsset.source_id == src.id).limit(1)
-            ).scalars().first()
-
-            if asset is None:
-                # No asset registered — create a pseudo-asset for this source
-                # so we can build a SelectedClip from the event's time range
-                asset = GameplayAsset(
-                    source_id=src.id,
-                    label=f"auto:{src.filename}",
-                    start_sec=0.0,
-                    end_sec=src.duration or 0.0,
-                    duration=src.duration or 0.0,
-                    used_count=0,
-                )
-                session.add(asset)
-                session.flush()
-
+                return False
+            asset = _get_asset(src)
             clip = SelectedClip(
                 asset=asset,
                 source_path=src.file_path,
@@ -416,11 +442,7 @@ class GameplayRetriever:
             )
             clips.append(clip)
             total += clip_duration
-
-            # Track the used range to avoid overlapping clips
             used_ranges.append((ev.start_time, ev.start_time + clip_duration, src.id))
-
-            # Advance scene index when the scene is filled
             if scene_duration > 0:
                 scene_accum += clip_duration
                 if scene_accum >= scene_duration - 0.1:
@@ -428,6 +450,25 @@ class GameplayRetriever:
                     scene_accum = 0.0
             elif scene_duration == 0:
                 scene_idx += 1
+            return True
+
+        # Pass 1: select events that are NOT in cooldown
+        for src, ev in all_events:
+            if total >= target_duration:
+                break
+            if _is_in_cooldown(ev.start_time, ev.end_time, src.id):
+                continue
+            _try_select(src, ev)
+
+        # Pass 2: if target not filled, accept events in cooldown (but still
+        # block significant overlaps)
+        if total < target_duration - 0.5:
+            log.info(f"pass 1 filled {total:.1f}s/{target_duration:.1f}s, "
+                     f"accepting cooldown events for remaining")
+            for src, ev in all_events:
+                if total >= target_duration:
+                    break
+                _try_select(src, ev)
 
         log.info(
             f"semantic retrieval: {len(clips)} clips from {len(compatible_sources)} sources, "

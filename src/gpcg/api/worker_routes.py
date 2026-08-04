@@ -1611,6 +1611,7 @@ def sync_job_result(
                         db.add(GameplayClipUsage(
                             video_id=video.id,
                             source_id=source_id,
+                            consumer_user_id=job.user_id,
                             start_sec=start_sec,
                             end_sec=end_sec,
                             duration=end_sec - start_sec,

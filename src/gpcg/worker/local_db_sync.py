@@ -276,6 +276,12 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
                 ))
         session.flush()
 
+        # Record the initial clip usage count so we can identify NEW records
+        # created during this job (for sync back to VPS without duplicates)
+        from gpcg.domain.models import GameplayClipUsage as _ClipUsage
+        initial_clip_usage_count = session.query(_ClipUsage).count()
+        job_data["_initial_clip_usage_count"] = initial_clip_usage_count
+
         # Knowledge items (V2 content intelligence — used by ContentPlanningService)
         ki_list_raw = job_data.get("knowledge_items", [])
         log.info(f"populate_local_db: inserting {len(ki_list_raw)} knowledge_items")
@@ -543,16 +549,22 @@ def run_generation_locally(
                 }
                 result["video_path"] = video.file_path
 
-            # V2: Extract clip usage records (to sync to VPS for cross-job avoidance)
+            # V2: Extract ONLY NEW clip usage records created during this job.
+            # The local DB was populated from the VPS at the start, so we must
+            # NOT re-sync pre-existing records (that would create duplicates).
+            # We track the count at population time and only send the new ones.
             from gpcg.domain.models import GameplayClipUsage as ClipUsage
-            clip_usages = session.query(ClipUsage).all()
-            if clip_usages:
+            initial_clip_usage_count = job_data.get("_initial_clip_usage_count", 0)
+            all_clip_usages = session.query(ClipUsage).order_by(ClipUsage.id).all()
+            new_clip_usages = all_clip_usages[initial_clip_usage_count:]
+            if new_clip_usages:
                 result["clip_usages"] = [{
                     "source_id": cu.source_id,
                     "start_sec": cu.start_sec,
                     "end_sec": cu.end_sec,
                     "duration": cu.duration,
-                } for cu in clip_usages]
+                    "consumer_user_id": cu.consumer_user_id,
+                } for cu in new_clip_usages]
 
             return result
 
