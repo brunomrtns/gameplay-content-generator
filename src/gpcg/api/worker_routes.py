@@ -1995,10 +1995,10 @@ def panel_list_jobs(
     for j in jobs:
         result.append({
             "id": j.id,
-            "job_type": j.job_type,
+            "job_type": j.type,
             "status": j.status,
             "game_id": j.game_id,
-            "stage": (j.artifacts or {}).get("stage") if j.artifacts else None,
+            "stage": j.stage,
             "worker_id": j.worker_id,
             "created_at": j.created_at.isoformat() if j.created_at else None,
         })
@@ -2021,9 +2021,8 @@ def panel_list_videos(
             "game_id": v.game_id,
             "duration": v.duration,
             "status": v.status,
-            "script_id": v.script_id if hasattr(v, "script_id") else None,
-            "job_id": v.job_id if hasattr(v, "job_id") else None,
-            "created_at": v.created_at.isoformat() if hasattr(v, "created_at") and v.created_at else None,
+            "job_id": v.job_id,
+            "created_at": v.created_at.isoformat() if v.created_at else None,
         })
     return result
 

@@ -279,7 +279,7 @@ class WorkerPanelApp(App):
         jobs_table.cursor_type = "row"
 
         videos_table = self.query_one("#videos-table", DataTable)
-        videos_table.add_columns("ID", "Game", "Duration", "Status", "Script", "Created")
+        videos_table.add_columns("ID", "Game", "Duration", "Status", "Job", "Created")
         videos_table.cursor_type = "row"
 
         ideas_table = self.query_one("#ideas-table", DataTable)
@@ -400,7 +400,7 @@ class WorkerPanelApp(App):
                     str(v.get("game_id", "")),
                     f"{dur:.0f}s" if dur else "—",
                     v.get("status", ""),
-                    str(v.get("script_id", "") or "—"),
+                    str(v.get("job_id", "") or "—"),
                     (v.get("created_at", "") or "")[:19],
                 )
 
