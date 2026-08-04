@@ -278,6 +278,7 @@ class ContentPlanningService:
             game_id=game_id,
             background_game_id=background_game_id,
             topic=topic,
+            hook=ki.summary[:200] if ki.summary else topic,
             tone="curious",
             music_mood="energetic",
             fact_id=None,
