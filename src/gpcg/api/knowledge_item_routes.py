@@ -236,6 +236,7 @@ def add_to_idea_queue(
     user: User = Depends(get_current_user),
 ):
     """Add a KnowledgeItem to the end of the user's idea queue."""
+    from sqlalchemy.orm.attributes import flag_modified
     from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
     ki = db.get(KnowledgeItem, req.knowledge_item_id)
     if not ki:
@@ -245,12 +246,13 @@ def add_to_idea_queue(
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     if not auto:
         raise HTTPException(404, "Automation not found")
-    config = auto.config or {}
-    queue: list = config.get("idea_queue", [])
+    config = dict(auto.config or {})
+    queue: list = list(config.get("idea_queue", []))
     if req.knowledge_item_id not in queue:
         queue.append(req.knowledge_item_id)
         config["idea_queue"] = queue
         auto.config = config
+        flag_modified(auto, "config")
         db.commit()
     return {"queue": queue, "message": "Added to queue"}
 
@@ -262,16 +264,18 @@ def remove_from_idea_queue(
     user: User = Depends(get_current_user),
 ):
     """Remove a KnowledgeItem from the user's idea queue."""
+    from sqlalchemy.orm.attributes import flag_modified
     from gpcg.domain.models import Automation
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     if not auto:
         raise HTTPException(404, "Automation not found")
-    config = auto.config or {}
-    queue: list = config.get("idea_queue", [])
+    config = dict(auto.config or {})
+    queue: list = list(config.get("idea_queue", []))
     if req.knowledge_item_id in queue:
         queue.remove(req.knowledge_item_id)
         config["idea_queue"] = queue
         auto.config = config
+        flag_modified(auto, "config")
         db.commit()
     return {"queue": queue, "message": "Removed from queue"}
 
@@ -283,12 +287,14 @@ def reorder_idea_queue(
     user: User = Depends(get_current_user),
 ):
     """Reorder the user's idea queue. Receives the full ordered list of IDs."""
+    from sqlalchemy.orm.attributes import flag_modified
     from gpcg.domain.models import Automation
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     if not auto:
         raise HTTPException(404, "Automation not found")
-    config = auto.config or {}
+    config = dict(auto.config or {})
     config["idea_queue"] = new_order
     auto.config = config
+    flag_modified(auto, "config")
     db.commit()
     return {"queue": new_order, "message": "Queue reordered"}
