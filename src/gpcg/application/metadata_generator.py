@@ -59,6 +59,8 @@ class MetadataGenerator:
         system = (
             "You are a YouTube SEO specialist for gaming content. "
             "Generate catchy, click-worthy metadata optimized for YouTube Shorts. "
+            "IMPORTANT: Generate the title and description in Brazilian Portuguese (pt-BR), "
+            "matching the language of the script. Tags can be in English (common YouTube search terms). "
             "Respond ONLY in JSON format."
         )
 
@@ -72,9 +74,9 @@ Game: {game_name or 'N/A'}
 Script excerpt:
 {script_text}
 
-Generate:
-1. "title": A catchy title (max 100 characters). Use the game name if relevant. Include curiosity or emotion. NO clickbait that misleads.
-2. "description": A description (max 1000 characters). First line = hook. Then 2-3 sentences expanding the topic. End with a call to action and relevant hashtags.
+Generate (title and description in Brazilian Portuguese, tags can be in English):
+1. "title": A catchy title in pt-BR (max 100 characters). Use the game name if relevant. Include curiosity or emotion. NO clickbait that misleads.
+2. "description": A description in pt-BR (max 1000 characters). First line = hook. Then 2-3 sentences expanding the topic. End with a call to action and relevant hashtags.
 3. "tags": 8-12 lowercase tags (single words or short phrases), including the game name, topic keywords, and general gaming tags like "gameplay", "curiosidades", "gaming".
 
 Respond as JSON: {{"title": "...", "description": "...", "tags": ["tag1", "tag2", ...]}}
