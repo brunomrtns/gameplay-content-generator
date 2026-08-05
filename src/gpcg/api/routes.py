@@ -22,6 +22,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -965,6 +966,7 @@ def list_videos(
                 "id": v.id,
                 "game_id": v.game_id,
                 "file_path": v.file_path,
+                "storage_key": v.storage_key,
                 "duration": v.duration,
                 "width": v.width,
                 "height": v.height,
@@ -1110,9 +1112,68 @@ def serve_thumbnail(video_id: int, db: Session = Depends(get_db)):
     raise HTTPException(404, "thumbnail not available")
 
 
+class VideoMetadataUpdate(BaseModel):
+    """Request body for updating video metadata before publishing."""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    tags: Optional[list[str]] = None
+
+
+@router.put("/videos/{video_id}/metadata")
+def update_video_metadata(
+    video_id: int,
+    body: VideoMetadataUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update the social metadata (title, description, tags) of a video.
+
+    These fields are stored in the job's artifacts and used when publishing
+    to YouTube. Allows the user to edit them before publishing.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    v = db.get(Video, video_id)
+    if v is None:
+        raise HTTPException(404, "video not found")
+    if v.user_id != user.id:
+        raise HTTPException(403, "not your video")
+
+    job = db.get(Job, v.job_id) if v.job_id else None
+    if not job:
+        raise HTTPException(400, "video has no associated job to update")
+
+    artifacts = dict(job.artifacts or {})
+    if body.title is not None:
+        artifacts["social_title"] = body.title.strip()
+    if body.description is not None:
+        artifacts["social_description"] = body.description.strip()
+    if body.tags is not None:
+        artifacts["social_tags"] = [t.strip().lstrip("#") for t in body.tags if t.strip()]
+
+    job.artifacts = artifacts
+    flag_modified(job, "artifacts")
+    db.commit()
+
+    return {
+        "success": True,
+        "social_title": artifacts.get("social_title"),
+        "social_description": artifacts.get("social_description"),
+        "social_tags": artifacts.get("social_tags"),
+    }
+
+
+class PublishVideoRequest(BaseModel):
+    """Optional overrides for the publish endpoint."""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    tags: Optional[list[str]] = None
+
+
 @router.post("/videos/{video_id}/publish")
 def publish_video(
     video_id: int,
+    body: PublishVideoRequest = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1152,6 +1213,25 @@ def publish_video(
     title = artifacts.get("social_title", "")
     description = artifacts.get("social_description", "")
     tags = artifacts.get("social_tags", [])
+
+    # V3: Apply user overrides from the request body (edited in the UI modal)
+    if body:
+        if body.title is not None:
+            title = body.title.strip()
+        if body.description is not None:
+            description = body.description.strip()
+        if body.tags is not None:
+            tags = [t.strip().lstrip("#") for t in body.tags if t.strip()]
+        # Also persist the overrides to job artifacts for future reference
+        if job:
+            from sqlalchemy.orm.attributes import flag_modified
+            updated_artifacts = dict(artifacts)
+            updated_artifacts["social_title"] = title
+            updated_artifacts["social_description"] = description
+            updated_artifacts["social_tags"] = tags
+            job.artifacts = updated_artifacts
+            flag_modified(job, "artifacts")
+            db.commit()
 
     if not title:
         cp = db.get(ContentPlan, v.content_plan_id) if v.content_plan_id else None

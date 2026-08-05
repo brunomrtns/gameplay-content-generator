@@ -372,8 +372,16 @@ export const api = {
     request<any[]>(`/videos${game_id ? `?game_id=${game_id}` : ""}`),
   videoUrl: (id: number) => `${API_BASE}/videos/${id}/file`,
   thumbUrl: (id: number) => `${API_BASE}/videos/${id}/thumbnail`,
-  publishVideo: (id: number) =>
-    request<any>(`/videos/${id}/publish`, { method: "POST" }),
+  updateVideoMetadata: (id: number, data: { title?: string; description?: string; tags?: string[] }) =>
+    request<any>(`/videos/${id}/metadata`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  publishVideo: (id: number, overrides?: { title?: string; description?: string; tags?: string[] }) =>
+    request<any>(`/videos/${id}/publish`, {
+      method: "POST",
+      body: overrides ? JSON.stringify(overrides) : undefined,
+    }),
   deleteVideo: (id: number, releaseClips: boolean = false) =>
     request<any>(`/videos/${id}?release_clips=${releaseClips}`, { method: "DELETE" }),
   toggleGameplayVisibility: (sourceId: number, isPublic: boolean) =>

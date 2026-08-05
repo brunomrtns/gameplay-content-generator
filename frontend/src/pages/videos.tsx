@@ -32,6 +32,10 @@ const VIDEO_STATUS_CONFIG: Record<
   publish_failed: { variant: "error", label: "Publicação falhou" },
 };
 
+// V3: Helper — can publish from modal (any non-published status with a file)
+const canPublishModal = (v: any) =>
+  v.storage_key && v.status !== "published";
+
 export function VideosPage() {
   const { data: videos, loading, refetch } = usePoll(() => api.listVideos(), 10000);
   const [search, setSearch] = useState("");
@@ -41,6 +45,12 @@ export function VideosPage() {
   const [deleting, setDeleting] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [confirmRelease, setConfirmRelease] = useState<number | null>(null);
+  // V3: Editable metadata in modal
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editTags, setEditTags] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [savingMeta, setSavingMeta] = useState(false);
 
   const filtered = videos?.filter((v: any) => {
     if (!search) return true;
@@ -52,12 +62,13 @@ export function VideosPage() {
   });
 
   const handlePublish = useCallback(
-    async (id: number) => {
+    async (id: number, overrides?: { title?: string; description?: string; tags?: string[] }) => {
       setPublishing(id);
       setPublishError(null);
       try {
-        await api.publishVideo(id);
+        await api.publishVideo(id, overrides);
         await refetch();
+        setPlaying(null);
       } catch (e: any) {
         setPublishError(e.message || "Falha ao publicar no YouTube");
       } finally {
@@ -65,6 +76,57 @@ export function VideosPage() {
       }
     },
     [refetch]
+  );
+
+  // V3: Open modal and initialize edit fields from video data
+  const openModal = useCallback((v: any) => {
+    setPlaying(v);
+    setEditTitle(v.social_title || v.topic || "");
+    setEditDescription(v.social_description || "");
+    setEditTags((v.social_tags || []).join(", "));
+    setEditMode(false);
+  }, []);
+
+  // V3: Save metadata edits
+  const handleSaveMetadata = useCallback(
+    async (id: number) => {
+      setSavingMeta(true);
+      setPublishError(null);
+      try {
+        const tags = editTags
+          .split(",")
+          .map((t) => t.trim().replace(/^#/, ""))
+          .filter(Boolean);
+        await api.updateVideoMetadata(id, {
+          title: editTitle,
+          description: editDescription,
+          tags,
+        });
+        await refetch();
+        setEditMode(false);
+      } catch (e: any) {
+        setPublishError(e.message || "Falha ao salvar metadados");
+      } finally {
+        setSavingMeta(false);
+      }
+    },
+    [editTitle, editDescription, editTags, refetch]
+  );
+
+  // V3: Publish from modal — sends edited metadata as overrides
+  const handlePublishFromModal = useCallback(
+    (id: number) => {
+      const tags = editTags
+        .split(",")
+        .map((t) => t.trim().replace(/^#/, ""))
+        .filter(Boolean);
+      handlePublish(id, {
+        title: editTitle,
+        description: editDescription,
+        tags,
+      });
+    },
+    [editTitle, editDescription, editTags, handlePublish]
   );
 
   const handleDelete = useCallback(
@@ -147,7 +209,7 @@ export function VideosPage() {
                 {/* Thumbnail */}
                 <div
                   className="relative aspect-[9/16] bg-surface-elevated overflow-hidden cursor-pointer"
-                  onClick={() => setPlaying(v)}
+                  onClick={() => openModal(v)}
                 >
                   {v.thumbnail_path ? (
                     <img
@@ -263,7 +325,7 @@ export function VideosPage() {
           onClick={() => setPlaying(null)}
         >
           <div
-            className="relative w-full max-w-3xl rounded-2xl border border-border bg-surface overflow-hidden"
+            className="relative w-full max-w-3xl max-h-[90vh] rounded-2xl border border-border bg-surface overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Close button */}
@@ -279,32 +341,106 @@ export function VideosPage() {
               src={api.videoUrl(playing.id)}
               controls
               autoPlay
-              className="w-full max-h-[70vh] bg-black"
+              className="w-full max-h-[45vh] bg-black shrink-0"
             />
 
-            {/* Metadata */}
-            <div className="space-y-3 p-4">
-              <h3 className="text-sm font-semibold">
-                {playing.social_title || playing.topic || `Vídeo #${playing.id}`}
-              </h3>
-              {playing.social_description && (
-                <p className="text-xs text-text-secondary line-clamp-3 whitespace-pre-wrap">
-                  {playing.social_description}
-                </p>
-              )}
-              {playing.social_tags && playing.social_tags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {playing.social_tags.map((tag: string, i: number) => (
-                    <span
-                      key={i}
-                      className="rounded-md bg-surface-elevated px-2 py-0.5 text-[10px] text-text-muted"
+            {/* Metadata — editable */}
+            <div className="space-y-3 p-4 overflow-y-auto">
+              {/* View mode */}
+              {!editMode ? (
+                <>
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="text-sm font-semibold flex-1">
+                      {editTitle || `Vídeo #${playing.id}`}
+                    </h3>
+                    <button
+                      onClick={() => setEditMode(true)}
+                      className="shrink-0 rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium text-text-muted transition-all hover:border-accent/40 hover:text-accent"
                     >
-                      #{tag}
-                    </span>
-                  ))}
+                      Editar
+                    </button>
+                  </div>
+                  {editDescription && (
+                    <p className="text-xs text-text-secondary line-clamp-4 whitespace-pre-wrap">
+                      {editDescription}
+                    </p>
+                  )}
+                  {editTags && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {editTags.split(",").map((tag, i) => (
+                        <span
+                          key={i}
+                          className="rounded-md bg-surface-elevated px-2 py-0.5 text-[10px] text-text-muted"
+                        >
+                          #{tag.trim().replace(/^#/, "")}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                /* Edit mode */
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[10px] font-medium text-text-muted uppercase tracking-wide">
+                      Título
+                    </label>
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      maxLength={100}
+                      className="mt-1 w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
+                      placeholder="Título do vídeo"
+                    />
+                    <p className="mt-1 text-[10px] text-text-muted text-right">
+                      {editTitle.length}/100
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-medium text-text-muted uppercase tracking-wide">
+                      Descrição
+                    </label>
+                    <textarea
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      rows={4}
+                      className="mt-1 w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent resize-none"
+                      placeholder="Descrição do vídeo"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-medium text-text-muted uppercase tracking-wide">
+                      Tags (separadas por vírgula)
+                    </label>
+                    <input
+                      type="text"
+                      value={editTags}
+                      onChange={(e) => setEditTags(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
+                      placeholder="gaming, curiosidades, nintendo"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setEditMode(false)}
+                      className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={() => handleSaveMetadata(playing.id)}
+                      disabled={savingMeta}
+                      className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
+                    >
+                      {savingMeta ? "Salvando..." : "Salvar"}
+                    </button>
+                  </div>
                 </div>
               )}
-              <div className="flex items-center gap-3 text-[10px] text-text-muted">
+
+              {/* Video info */}
+              <div className="flex items-center gap-3 text-[10px] text-text-muted border-t border-border pt-3">
                 <span>{fmtDuration(playing.duration)}</span>
                 <span>
                   {playing.width}×{playing.height}
@@ -321,6 +457,39 @@ export function VideosPage() {
                   </a>
                 )}
               </div>
+
+              {/* Publish to YouTube button */}
+              {canPublishModal(playing) && (
+                <button
+                  onClick={() => handlePublishFromModal(playing.id)}
+                  disabled={publishing === playing.id}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-all hover:bg-red-700 disabled:opacity-50"
+                >
+                  {publishing === playing.id ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Publicando no YouTube...
+                    </>
+                  ) : (
+                    <>
+                      <Youtube className="h-4 w-4" />
+                      Publicar no YouTube
+                    </>
+                  )}
+                </button>
+              )}
+              {playing.status === "published" && (
+                <div className="flex items-center justify-center gap-2 rounded-xl border border-green-600/30 bg-green-600/10 px-4 py-3 text-sm font-medium text-green-400">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Publicado no YouTube
+                </div>
+              )}
+              {playing.status === "publish_failed" && (
+                <div className="flex items-center justify-center gap-2 rounded-xl border border-red-600/30 bg-red-600/10 px-4 py-3 text-sm font-medium text-red-400">
+                  <XCircle className="h-4 w-4" />
+                  Publicação falhou — tente novamente
+                </div>
+              )}
             </div>
           </div>
         </div>
