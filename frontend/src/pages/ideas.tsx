@@ -356,7 +356,7 @@ export function IdeasPage() {
             {queue.map((item, index) => (
               <div
                 key={item.id}
-                className="flex items-center gap-3 rounded-lg border border-border bg-bg-card p-3"
+                className="flex items-center gap-3 rounded-lg border border-border bg-surface p-3"
               >
                 <div className="flex flex-col gap-0.5">
                   <button
@@ -470,7 +470,7 @@ export function IdeasPage() {
           <Spinner className="h-8 w-8" />
         </div>
       ) : items.length === 0 ? (
-        <div className="rounded-lg border border-border bg-bg-card p-8 text-center text-text-muted">
+        <div className="rounded-lg border border-border bg-surface p-8 text-center text-text-muted">
           Nenhuma ideia de conteúdo encontrada. Clique em "Coletar Agora" para buscar notícias.
         </div>
       ) : (
@@ -478,7 +478,7 @@ export function IdeasPage() {
           {items.map((item) => (
             <div
               key={item.id}
-              className={`rounded-lg border bg-bg-card p-4 transition-colors ${
+              className={`rounded-lg border bg-surface p-4 transition-colors ${
                 queueIds.has(item.id)
                   ? "border-purple-500/40 bg-purple-500/5"
                   : "border-border hover:border-teal-500/30"
@@ -558,11 +558,11 @@ export function IdeasPage() {
       {/* V3: Gameplay Preference Modal */}
       {queueModalItem && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
           onClick={() => setQueueModalItem(null)}
         >
           <div
-            className="w-full max-w-md rounded-xl border border-border bg-bg-card p-6 shadow-2xl"
+            className="w-full max-w-md rounded-xl border border-border-bright bg-surface-elevated p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-semibold text-text mb-1">Adicionar à Fila</h3>
@@ -718,7 +718,7 @@ function StatCard({
       ? "text-purple-400"
       : "text-text";
   return (
-    <div className="rounded-lg border border-border bg-bg-card p-4">
+    <div className="rounded-lg border border-border bg-surface p-4">
       <div className="text-xs text-text-muted">{label}</div>
       <div className={`text-2xl font-bold ${colorClass}`}>{value}</div>
     </div>
