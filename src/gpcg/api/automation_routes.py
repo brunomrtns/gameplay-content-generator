@@ -257,21 +257,30 @@ def check_automation(
             continue
 
         cfg = auto.config or {}
-        # V3: Reconciliador — auto-fill empty queue with fresh KIs
+        # V3: Reconciliador — auto-fill queue with fresh KIs up to max_queue_size
         # Only in automatic mode (manual mode = user curates everything)
         queue_mode = cfg.get("queue_mode", "automatic")
         idea_queue = cfg.get("idea_queue", [])
-        if not idea_queue and queue_mode == "automatic" and cfg.get("auto_fill_queue", False):
-            idea_queue = _reconcile_idea_queue(db, auto.user_id, cfg)
-            if idea_queue:
-                # Persist the auto-filled queue
-                from sqlalchemy.orm.attributes import flag_modified
-                cfg2 = dict(cfg)
-                cfg2["idea_queue"] = idea_queue
-                auto.config = cfg2
-                flag_modified(auto, "config")
-                db.flush()
-                log.info(f"Reconciliador: auto-filled queue for user {auto.user_id} with {len(idea_queue)} KIs")
+        if queue_mode == "automatic" and cfg.get("auto_fill_queue", False):
+            max_size = int(cfg.get("max_queue_size", 10))
+            if len(idea_queue) < max_size:
+                new_entries = _reconcile_idea_queue(
+                    db, auto.user_id, cfg,
+                    exclude_ids={e.get("ki_id") for e in idea_queue},
+                    limit=max_size - len(idea_queue),
+                )
+                if new_entries:
+                    idea_queue = list(idea_queue) + new_entries
+                    from sqlalchemy.orm.attributes import flag_modified
+                    cfg2 = dict(cfg)
+                    cfg2["idea_queue"] = idea_queue
+                    auto.config = cfg2
+                    flag_modified(auto, "config")
+                    db.flush()
+                    log.info(
+                        f"Reconciliador: auto-filled queue for user {auto.user_id} "
+                        f"with {len(new_entries)} KIs (now {len(idea_queue)}/{max_size})"
+                    )
 
         pending.append({
             "user_id": auto.user_id,
@@ -287,12 +296,19 @@ def check_automation(
     return {"pending": pending}
 
 
-def _reconcile_idea_queue(db: Session, user_id: int, config: dict) -> list[dict]:
+def _reconcile_idea_queue(
+    db: Session,
+    user_id: int,
+    config: dict,
+    *,
+    exclude_ids: set[int] | None = None,
+    limit: int | None = None,
+) -> list[dict]:
     """V3: Auto-fill the idea queue with fresh KnowledgeItems.
 
     Selects fresh KIs visible to the user, sorted by editorial_score descending.
-    Respects max_queue_size (default 10) to avoid filling the queue with too
-    many items. Only runs when auto_fill_queue is enabled in the config.
+    Excludes KIs already in the queue (exclude_ids) and respects the limit
+    (defaults to max_queue_size from config).
 
     Returns the new queue entries (list[dict] with ki_id, gameplay_preference,
     reuse_override). Returns empty list if no fresh KIs are available.
@@ -300,12 +316,15 @@ def _reconcile_idea_queue(db: Session, user_id: int, config: dict) -> list[dict]
     from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
     from gpcg.domain.visibility import visible_to_user
 
-    max_size = int(config.get("max_queue_size", 10))
+    max_size = limit if limit is not None else int(config.get("max_queue_size", 10))
     vis = visible_to_user(KnowledgeItem.user_id, KnowledgeItem.is_public, user_id)
-    kis = db.query(KnowledgeItem).filter(
+    query = db.query(KnowledgeItem).filter(
         KnowledgeItem.status == KnowledgeItemStatus.fresh.value,
         vis,
-    ).order_by(KnowledgeItem.editorial_score.desc()).limit(max_size).all()
+    )
+    if exclude_ids:
+        query = query.filter(~KnowledgeItem.id.in_(exclude_ids))
+    kis = query.order_by(KnowledgeItem.editorial_score.desc()).limit(max_size).all()
 
     if not kis:
         return []

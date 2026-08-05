@@ -284,6 +284,47 @@ def test_reconciliador_returns_empty_when_no_fresh_kis(db_session, full_setup):
     assert result == []
 
 
+def test_reconciliador_tops_up_partial_queue(db_session, full_setup):
+    """_reconcile_idea_queue fills up to max_queue_size, excluding KIs already queued."""
+    from gpcg.api.automation_routes import _reconcile_idea_queue
+
+    user_a = full_setup["user_a"]
+    ki_in_queue = full_setup["ki"]
+
+    # Add 5 more fresh KIs
+    extra_ids = []
+    for i in range(5):
+        extra = KnowledgeItem(
+            user_id=None,
+            is_public=True,
+            title=f"Extra news {i}",
+            content=f"Content {i}",
+            item_type="news",
+            source_type="rss",
+            status=KnowledgeItemStatus.fresh.value,
+            editorial_score=60.0 + i * 5,
+        )
+        db_session.add(extra)
+        db_session.flush()
+        extra_ids.append(extra.id)
+    db_session.commit()
+
+    # Queue already has 1 KI (ki_in_queue), max=4 → should add 3 more
+    config = {"max_queue_size": 4, "queue_mode": "automatic"}
+    result = _reconcile_idea_queue(
+        db_session, user_a.id, config,
+        exclude_ids={ki_in_queue.id},
+        limit=4 - 1,  # max - current
+    )
+
+    assert len(result) == 3
+    # Must NOT include the KI already in queue
+    returned_ids = {e["ki_id"] for e in result}
+    assert ki_in_queue.id not in returned_ids
+    # All returned must be from the extras
+    assert returned_ids.issubset(set(extra_ids))
+
+
 # ── 6. Job artifacts include all V3 fields ─────────────────────────────────
 
 def test_job_artifacts_include_v3_fields(db_session, full_setup):
