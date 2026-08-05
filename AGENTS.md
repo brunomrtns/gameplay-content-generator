@@ -8,7 +8,7 @@
 - **Worker (legacy):** `./scripts/dev.sh worker` (inbox watcher + job processor — runs on VPS)
 - **Remote Worker (Compute Plane):** `gpcg remote-worker --vps-url <url> --worker-id <id> --api-key <secret>`
   (runs on local PC with GPU, connects to VPS API, processes mapping + generation jobs)
-- **Tests:** `.venv/bin/pytest tests/ -q` (198 tests, ~45s)
+- **Tests:** `.venv/bin/pytest tests/ -q` (462 tests, ~53s)
 - **Frontend build:** `cd frontend && npm run build`
 - **Frontend typecheck:** `cd frontend && npm run typecheck`
 - **Deploy:** `./scripts/deploy.sh` (syncs to VPS, builds Docker, updates nginx)
@@ -521,3 +521,85 @@ integrity, configuration propagation, gameplay lifecycle, and editorial quality.
 - faster-whisper (large-v3, cuda/float16) for ASR
 - video-generate at `../video-generate` (sibling repo)
 - ai-media-core at `../ai-media-core` (sibling repo)
+
+## V3 Refactor — Architectural Corrections
+
+The V3 refactor addressed critical gaps in the VPS↔Worker contract, queue
+management, and semantic gameplay selection. Key changes:
+
+### ChannelProfile Sync (Phase 1)
+- `GET /api/jobs/{id}/data` now includes `channel_profile` in the payload
+- `local_db_sync.populate_local_db` creates the `ChannelProfile` in the
+  worker's local SQLite DB, so `GenerationService` can access it
+- Without this, the worker always received `channel_profile=None`
+
+### Config Snapshot (Phase 1)
+- Jobs created from automation now store a `config_snapshot` in
+  `job.artifacts` — a deterministic copy of generation-relevant config
+  fields (video_format, scene_duration, subtitle_*, transition_*, voice,
+  max_clip_uses, fallback_policy)
+- Excludes secrets, tokens, idea_queue (mutable), and non-generation fields
+- `GenerationService` reads from `config_snapshot` (preferred) over the
+  live automation config, ensuring retry uses the same intent
+- Helper: `_build_config_snapshot(config)` in `automation_routes.py`
+
+### Per-Consumer KI Usage (Phase 1)
+- `record_usage(session, item_id, consumer_user_id)` replaces direct
+  `ki.status = KnowledgeItemStatus.used.value` in sync paths
+- For **public KIs** (user_id=None): only creates a
+  `KnowledgeItemUsage` record — global status stays `fresh` so other
+  users can still consume it
+- For **private KIs** (user_id set): also marks global status=used
+  (only the owner consumes those)
+- `mark_as_used()` is the legacy function (always sets global status)
+- `is_used_by_consumer(session, item_id, user_id)` checks per-consumer
+- Applied in: `worker_routes.py` (sync_job_result, 2 paths),
+  `content_planning_service.py` (2 paths)
+
+### Worker Status Classification (Phase 2)
+- `GET /api/workers` now returns `stale` (bool) and `stale_seconds` (int)
+- Stale = offline AND no heartbeat for 10x the timeout threshold
+- Workers are NOT deleted — they may represent restarts or machines
+  that will come back
+- Frontend groups workers by `hostname` (machine) and shows process
+  count per machine
+
+### Queue Mode (Phase 4)
+- `config.queue_mode`: "manual" (only consume queue, no auto-editorial)
+  or "automatic" (fall back to editorial when queue empty, default)
+- `check_automation` returns `queue_mode` in the pending list
+- Remote worker respects: if queue empty + manual mode → skip
+- Frontend has a "Fila de Produção" section in the automation page
+
+### Reconciliador (Phase 4)
+- `_reconcile_idea_queue(db, user_id, config)` auto-fills empty queue
+  with fresh KIs sorted by editorial_score descending
+- Only runs when `auto_fill_queue=True` AND `queue_mode="automatic"`
+- Respects `max_queue_size` (default 10)
+- Persists the auto-filled queue in the automation config
+
+### Semantic Gameplay Search (Phase 5)
+- `GameplayIndexService.search_events` now tries semantic search first
+  (embeddings via nomic-embed-text + cosine similarity), falls back to
+  ILIKE text search when embeddings unavailable or LLM offline
+- `_search_events_semantic` returns None (not empty list) to signal
+  fallback — the caller falls back to text search
+- Embeddings stored in `GameplayEventEmbedding` table (BLOB, float32)
+- `cosine_similarity(a, b)` in `embedding_service.py`
+
+### Frontend Changes
+- **Dashboard:** Recent videos now have actions (publish, YouTube link,
+  player modal with metadata). "Ver todos →" link to videos page.
+- **Workers:** Grouped by hostname, stale classification, process count
+  per machine, hardware stats only for active workers.
+- **Content:** Tabs (Gravações | Identidade do Canal) instead of stacked.
+- **Automation:** New "Fila de Produção" section with queue_mode select
+  and auto_fill_queue toggle + max_queue_size input.
+- **Ideas:** Drag-and-drop reorder (HTML5 DnD) replaces up/down buttons.
+
+### Test Files
+- `tests/test_refactor_v3_phase1.py` — 11 tests: ChannelProfile sync,
+  config snapshot, per-consumer KI usage, public/private visibility
+- `tests/test_refactor_v3_homologation.py` — 11 tests: E2E lifecycle,
+  queue_mode, reconciliador, worker classification, full flow
+

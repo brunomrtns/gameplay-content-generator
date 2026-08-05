@@ -401,6 +401,11 @@ def list_workers(
     Public endpoint (uses BI Identity SSO via frontend, not worker auth).
     Automatically marks workers as offline if heartbeat timeout exceeded.
     Also cleans up orphan gameplay files (uploaded but never downloaded).
+
+    V3: Classifies workers as active/offline/stale based on heartbeat and
+    last_activity. Does NOT delete stale workers — they may represent
+    restarts, crashed processes, or machines that will come back.
+    The UI should make the distinction clear.
     """
     # Clean up orphan gameplays (runs on every poll — cheap query)
     _cleanup_orphan_gameplays(db)
@@ -409,13 +414,34 @@ def list_workers(
     result = []
     for w in workers:
         # Auto-detect offline workers
-        if _check_worker_offline(w) and w.status != WorkerStatus.offline.value:
+        is_offline = _check_worker_offline(w)
+        if is_offline and w.status != WorkerStatus.offline.value:
             w.status = WorkerStatus.offline.value
             db.flush()
+
+        # V3: Classify staleness
+        # stale = offline AND no heartbeat for a long time (10x timeout)
+        # This is informational only — we do NOT delete stale workers.
+        stale = False
+        stale_seconds = None
+        if is_offline and w.last_heartbeat:
+            settings = get_settings()
+            stale_threshold = settings.gpcg_worker_heartbeat_timeout * 10
+            now = _utcnow().replace(tzinfo=None)
+            last = w.last_heartbeat
+            if last.tzinfo:
+                last = last.replace(tzinfo=None)
+            elapsed = (now - last).total_seconds()
+            stale_seconds = int(elapsed)
+            if elapsed > stale_threshold:
+                stale = True
+
         result.append({
             "worker_id": w.worker_id,
             "hostname": w.hostname,
             "status": w.status,
+            "stale": stale,
+            "stale_seconds": stale_seconds,
             "last_heartbeat": w.last_heartbeat.isoformat() if w.last_heartbeat else None,
             "last_status_at": w.last_status_at.isoformat() if w.last_status_at else None,
             "current_activity": w.current_activity,
@@ -426,6 +452,7 @@ def list_workers(
             "ram_usage": w.ram_usage,
             "capabilities": w.capabilities,
             "worker_version": w.worker_version,
+            "git_commit": w.git_commit,
             "registered_at": w.registered_at.isoformat() if w.registered_at else None,
         })
     db.commit()
@@ -1579,6 +1606,30 @@ def get_job_data(
             "config": automation.config, "upload_config": automation.upload_config,
         }
 
+    # V3: ChannelProfile — sync to worker so the pipeline can use channel
+    # context in content_planning, story_finding, editorial_planning, script.
+    # Without this, GenerationService._run_pipeline loads ChannelProfile from
+    # the local DB and always gets None (G1 gap).
+    from gpcg.domain.models import ChannelProfile as _ChannelProfile
+    profile = db.query(_ChannelProfile).filter(
+        _ChannelProfile.user_id == job.user_id
+    ).first()
+    if profile:
+        data["channel_profile"] = {
+            "id": profile.id,
+            "user_id": profile.user_id,
+            "channel_description": profile.channel_description,
+            "niche": profile.niche,
+            "target_audience": profile.target_audience,
+            "tone_of_voice": profile.tone_of_voice,
+            "narrative_style": profile.narrative_style,
+            "content_goals": profile.content_goals,
+            "special_rules": profile.special_rules,
+            "metadata_json": profile.metadata_json,
+        }
+    else:
+        data["channel_profile"] = None
+
     return data
 
 
@@ -1637,15 +1688,17 @@ def sync_job_result(
                 for k, v in req.content_plan.items():
                     if k != "id" and hasattr(plan, k):
                         setattr(plan, k, v)
-                # V2: Mark KnowledgeItem as used if the plan was based on one
+                # V3: Record per-consumer usage of the KnowledgeItem.
+                # For public KIs (user_id=NULL), only creates a
+                # KnowledgeItemUsage record — global status stays fresh so
+                # other users can still consume it. For private KIs, also
+                # marks global status=used (only the owner consumes those).
                 plan_meta = req.content_plan.get("metadata_json", {}) or {}
                 ki_id = plan_meta.get("knowledge_item_id")
                 if ki_id:
-                    from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
-                    ki = db.query(KnowledgeItem).filter(KnowledgeItem.id == int(ki_id)).first()
-                    if ki and ki.status == KnowledgeItemStatus.fresh.value:
-                        ki.status = KnowledgeItemStatus.used.value
-                        log.info(f"Marked KI #{ki.id} as used (job #{job_id}, existing plan)")
+                    from gpcg.application.knowledge_item_service import record_usage as _record_usage
+                    _record_usage(db, int(ki_id), job.user_id)
+                    log.info(f"Recorded usage of KI #{ki_id} by user {job.user_id} (job #{job_id}, existing plan)")
         if not plan:
             print(f"[SYNC] job #{job_id}: creating new ContentPlan in VPS DB (local id={req.content_plan.get('id')}, topic={req.content_plan.get('topic','')})", flush=True)
             # Create new ContentPlan in VPS DB (local DB id is irrelevant)
@@ -1667,15 +1720,13 @@ def sync_job_result(
             db.add(plan)
             db.flush()
             job.content_plan_id = plan.id
-            # V2: Mark KnowledgeItem as used if the plan was based on one
+            # V3: Record per-consumer usage (see note above on public/private)
             plan_meta = req.content_plan.get("metadata_json", {}) or {}
             ki_id = plan_meta.get("knowledge_item_id")
             if ki_id:
-                from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
-                ki = db.query(KnowledgeItem).filter(KnowledgeItem.id == int(ki_id)).first()
-                if ki and ki.status == KnowledgeItemStatus.fresh.value:
-                    ki.status = KnowledgeItemStatus.used.value
-                    log.info(f"Marked KI #{ki.id} as used (job #{job_id})")
+                from gpcg.application.knowledge_item_service import record_usage as _record_usage
+                _record_usage(db, int(ki_id), job.user_id)
+                log.info(f"Recorded usage of KI #{ki_id} by user {job.user_id} (job #{job_id})")
 
     # Sync Script
     # NOTE: Same as ContentPlan — the script id is from the LOCAL DB.

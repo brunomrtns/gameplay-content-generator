@@ -653,26 +653,33 @@ class GenerationService:
             # (backward compat: accept_public_gameplays boolean still works)
             user_id = job.user_id
             accept_public = False
+            # V3: Prefer config_snapshot from job.artifacts (deterministic for
+            # retry) over the live automation config (which may have changed).
+            config_snapshot = job.artifacts.get("config_snapshot") or {}
+            max_clip_uses = config_snapshot.get("max_clip_uses", 1)
+            fallback_policy = config_snapshot.get("fallback_policy")
             if user_id is not None:
-                # Check automation config for fallback policy
-                auto = session.execute(
-                    select(Automation).where(Automation.user_id == user_id)
-                ).scalars().first()
-                if auto and isinstance(auto.config, dict):
-                    # REFACTORY_V2: prefer fallback_policy string, fall back
-                    # to legacy accept_public_gameplays boolean
-                    fallback_policy = auto.config.get("fallback_policy")
-                    if fallback_policy == "allow_public":
-                        accept_public = True
-                    elif fallback_policy == "stop":
-                        accept_public = False
+                # Fall back to live config only if snapshot is missing
+                # (backward compat with jobs created before V3)
+                if not config_snapshot:
+                    auto = session.execute(
+                        select(Automation).where(Automation.user_id == user_id)
+                    ).scalars().first()
+                    if auto and isinstance(auto.config, dict):
+                        fallback_policy = auto.config.get("fallback_policy")
+                        max_clip_uses = auto.config.get("max_clip_uses", 1)
+                        if not fallback_policy:
+                            # Legacy boolean field
+                            accept_public = auto.config.get("accept_public_gameplays", False)
                     else:
-                        # Legacy boolean field
-                        accept_public = auto.config.get("accept_public_gameplays", False)
-                    # V3: Read max_clip_uses from automation config (default=1)
-                    max_clip_uses = auto.config.get("max_clip_uses", 1)
-                else:
-                    max_clip_uses = 1
+                        max_clip_uses = 1
+                # Resolve fallback_policy to accept_public boolean
+                if fallback_policy == "allow_public":
+                    accept_public = True
+                elif fallback_policy == "stop":
+                    accept_public = False
+                # If fallback_policy is None and we didn't set accept_public
+                # via legacy field, it stays False (default)
 
             # V3: Read gameplay preference + reuse override from job artifacts
             gameplay_preference = job.artifacts.get("gameplay_preference")

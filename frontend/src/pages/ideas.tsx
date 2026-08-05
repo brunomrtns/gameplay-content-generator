@@ -238,6 +238,38 @@ export function IdeasPage() {
     }
   };
 
+  // V3: Drag-and-drop reorder
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  const handleDragStart = (index: number) => {
+    setDragIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (dragIndex === null || dragIndex === index) return;
+    setDragOverIndex(index);
+  };
+
+  const handleDragEnd = () => {
+    if (dragIndex === null || dragOverIndex === null || dragIndex === dragOverIndex) {
+      setDragIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+    const newQueue = [...queue];
+    const [moved] = newQueue.splice(dragIndex, 1);
+    newQueue.splice(dragOverIndex, 0, moved);
+    setQueue(newQueue);
+    setDragIndex(null);
+    setDragOverIndex(null);
+    api.reorderIdeaQueue(newQueue.map((i) => i.id)).catch((e: any) => {
+      setError(e.message);
+      loadData(); // Revert on error
+    });
+  };
+
   const scoreColor = (score: number) => {
     if (score >= 70) return "text-green-400";
     if (score >= 50) return "text-yellow-400";
@@ -356,29 +388,24 @@ export function IdeasPage() {
             {queue.map((item, index) => (
               <div
                 key={item.id}
-                className="flex items-center gap-3 rounded-lg border border-border bg-surface p-3"
+                draggable
+                onDragStart={() => handleDragStart(index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDragEnd={handleDragEnd}
+                onDrop={(e) => { e.preventDefault(); handleDragEnd(); }}
+                className={`flex items-center gap-3 rounded-lg border bg-surface p-3 transition-all cursor-grab active:cursor-grabbing ${
+                  dragIndex === index
+                    ? "opacity-40 border-purple-500/60"
+                    : dragOverIndex === index
+                    ? "border-purple-500/60 bg-purple-500/10 scale-[1.01]"
+                    : "border-border hover:border-purple-500/30"
+                }`}
               >
-                <div className="flex flex-col gap-0.5">
-                  <button
-                    onClick={() => handleMoveQueueItem(index, "up")}
-                    disabled={index === 0}
-                    className="text-text-muted hover:text-text disabled:opacity-20"
-                    title="Mover para cima"
-                  >
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => handleMoveQueueItem(index, "down")}
-                    disabled={index === queue.length - 1}
-                    className="text-text-muted hover:text-text disabled:opacity-20"
-                    title="Mover para baixo"
-                  >
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
+                {/* Drag handle */}
+                <div className="flex flex-col gap-0.5 text-text-muted">
+                  <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M7 4a1 1 0 110 2 1 1 0 010-2zM7 9a1 1 0 110 2 1 1 0 010-2zM7 14a1 1 0 110 2 1 1 0 010-2zM13 4a1 1 0 110 2 1 1 0 010-2zM13 9a1 1 0 110 2 1 1 0 010-2zM13 14a1 1 0 110 2 1 1 0 010-2z" />
+                  </svg>
                 </div>
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-purple-500/20 text-xs font-bold text-purple-300">
                   {index + 1}
@@ -434,7 +461,7 @@ export function IdeasPage() {
           </div>
           <p className="mt-3 text-xs text-text-muted">
             A automação consome estas ideias em ordem (primeiro = próximo vídeo).
-            Quando a fila esvazia, o sistema volta a decidir automaticamente.
+            Arraste para reordenar. Quando a fila esvazia, o sistema volta a decidir automaticamente.
           </p>
         </div>
       )}

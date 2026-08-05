@@ -232,17 +232,24 @@ class GameplayIndexService:
         min_confidence: float = 0.3,
         limit: int = 20,
     ) -> list[GameplayEvent]:
-        """Text search over event descriptions, transcripts, locations, tags, and actions.
+        """Semantic search over events using embeddings, with text fallback.
 
-        Searches description, transcript, location (LIKE) plus tags and actions
-        (JSON arrays — matched as substring on the JSON text). This is a basic
-        text search. A future enhancement could use embeddings (nomic-embed-text)
-        for semantic search.
+        V3: When GameplayEvent embeddings are available, uses cosine similarity
+        against the query embedding (generated via nomic-embed-text). Falls back
+        to ILIKE text search when embeddings are not available or LLM is offline.
 
         The cascaded pipeline produces rich tags like ``on_skate``, ``on_bike``,
-        ``combat``, ``riding`` — searching these tags is the most reliable way
-        to find specific player actions.
+        ``combat``, ``riding`` — the text fallback searches these tags plus
+        description, transcript, location, and actions.
         """
+        # V3: Try semantic search first
+        semantic_results = self._search_events_semantic(
+            session, source_id, query, min_confidence=min_confidence, limit=limit
+        )
+        if semantic_results is not None:
+            return semantic_results
+
+        # Fallback: text search (ILIKE)
         pattern = f"%{query}%"
         stmt = (
             select(GameplayEvent)
@@ -260,6 +267,83 @@ class GameplayIndexService:
             .limit(limit)
         )
         return list(session.execute(stmt).scalars().all())
+
+    def _search_events_semantic(
+        self,
+        session: Session,
+        source_id: int,
+        query: str,
+        *,
+        min_confidence: float = 0.3,
+        limit: int = 20,
+        min_similarity: float = 0.3,
+    ) -> Optional[list[GameplayEvent]]:
+        """Semantic search using embeddings. Returns None if unavailable.
+
+        Generates a query embedding via Ollama, then computes cosine similarity
+        against all event embeddings for this source. Returns events sorted by
+        similarity (descending), filtered by min_similarity and min_confidence.
+
+        Returns None (not empty list) when embeddings are not available or
+        the LLM is offline, so the caller can fall back to text search.
+        """
+        from gpcg.application.embedding_service import (
+            get_gameplay_event_embedding,
+            cosine_similarity,
+        )
+        from gpcg.infrastructure.llm import LLMClient, LLMError
+
+        # Get all events for this source with confidence filter
+        stmt = (
+            select(GameplayEvent)
+            .where(GameplayEvent.source_id == source_id)
+            .where(GameplayEvent.visual_confidence >= min_confidence)
+        )
+        events = list(session.execute(stmt).scalars().all())
+        if not events:
+            return None
+
+        # Check if any events have embeddings
+        embeddings: dict[int, list[float]] = {}
+        for ev in events:
+            vec = get_gameplay_event_embedding(session, ev.id)
+            if vec:
+                embeddings[ev.id] = vec
+
+        if not embeddings:
+            # No embeddings available — signal fallback
+            return None
+
+        # Generate query embedding
+        try:
+            from gpcg.application.embedding_service import EMBEDDING_MODEL
+            llm = LLMClient()
+            query_vec = llm.embed(query, model=EMBEDDING_MODEL)
+            if not query_vec:
+                return None
+        except (LLMError, Exception) as e:
+            log.info(f"semantic search: LLM unavailable ({e}), falling back to text search")
+            return None
+
+        # Score events by cosine similarity
+        scored: list[tuple[float, GameplayEvent]] = []
+        for ev in events:
+            vec = embeddings.get(ev.id)
+            if vec:
+                sim = cosine_similarity(query_vec, vec)
+                if sim >= min_similarity:
+                    scored.append((sim, ev))
+
+        # Sort by similarity (desc), then by interesting_score as tiebreaker
+        scored.sort(key=lambda x: (x[0], x[1].interesting_score), reverse=True)
+
+        result = [ev for _, ev in scored[:limit]]
+        log.info(
+            f"semantic search: query='{query[:40]}' source={source_id} "
+            f"found {len(result)} events (from {len(events)} total, "
+            f"{len(embeddings)} embedded)"
+        )
+        return result
 
     def get_compatible_sources(
         self,

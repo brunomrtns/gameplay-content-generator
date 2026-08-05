@@ -28,6 +28,7 @@ import {
   Loader2,
   Upload,
   Trash2,
+  ListOrdered,
 } from "lucide-react";
 
 const CREATIVE_STYLES = [
@@ -66,6 +67,10 @@ interface AutomationConfig extends VideoCustomization {
   max_clip_uses?: number;
   fallback_policy?: string;
   accept_public_gameplays?: boolean;
+  // V3: Queue mode + reconciliador
+  queue_mode?: "manual" | "automatic";
+  auto_fill_queue?: boolean;
+  max_queue_size?: number;
 }
 
 function SectionTitle({ icon: Icon, title, desc }: { icon: any; title: string; desc?: string }) {
@@ -498,7 +503,56 @@ export function AutomationPage() {
             </p>
           </Card>
 
-          {/* Section 7: YouTube */}
+          {/* Section 7: Fila de Produção */}
+          <Card>
+            <SectionTitle icon={ListOrdered} title="Fila de Produção" desc="Como a automação escolhe o próximo vídeo" />
+            <div className="space-y-4">
+              <div>
+                <Label>Modo da fila</Label>
+                <Select
+                  value={config.queue_mode || "automatic"}
+                  onChange={(v) => update("queue_mode", v)}
+                >
+                  <option value="automatic">Automático (fila + decisão editorial)</option>
+                  <option value="manual">Manual (apenas fila do usuário)</option>
+                </Select>
+                <p className="mt-1.5 text-xs text-text-muted">
+                  {config.queue_mode === "manual"
+                    ? "Manual: a automação só produz vídeos das ideias que você enfileirar. Quando a fila esvazia, a produção para até você adicionar mais."
+                    : "Automático: quando a fila esvazia, o sistema decide automaticamente o próximo vídeo baseado no material disponível."}
+                </p>
+              </div>
+
+              {config.queue_mode !== "manual" && (
+                <div className="space-y-3 rounded-lg border border-border bg-surface-elevated/50 p-4">
+                  <Toggle
+                    checked={config.auto_fill_queue ?? false}
+                    onChange={(v) => update("auto_fill_queue", v)}
+                    label="Auto-preencher fila quando vazia (reconciliador)"
+                  />
+                  {config.auto_fill_queue && (
+                    <div>
+                      <Label>Tamanho máximo da fila auto-preenchida</Label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={50}
+                        placeholder="10"
+                        value={config.max_queue_size || ""}
+                        onChange={(e) => update("max_queue_size", Number(e.target.value))}
+                        className="h-11 w-full rounded-xl border border-border bg-bg/60 px-4 text-sm text-text placeholder:text-text-muted backdrop-blur-sm transition-all"
+                      />
+                      <p className="mt-1.5 text-xs text-text-muted">
+                        Quantas ideias fresh adicionar automaticamente (ordenadas por score editorial).
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* Section 8: YouTube */}
           <Card>
             <SectionTitle icon={Youtube} title="YouTube" desc="Configurações de publicação" />
             <div className="grid gap-4 sm:grid-cols-2">
@@ -542,6 +596,7 @@ export function AutomationPage() {
                   <SummaryRow label="Estilo" value={CREATIVE_STYLES.find(s => s.value === config.creative_style)?.label || "padrão"} />
                   <SummaryRow label="Transição" value={TRANSITION_TYPES.find(t => t.value === config.transition_type)?.label || "padrão"} />
                   <SummaryRow label="YouTube" value={YOUTUBE_PRIVACY.find(p => p.value === (config.youtube_privacy || "unlisted"))?.label || "Não listado"} />
+                  <SummaryRow label="Fila" value={config.queue_mode === "manual" ? "Manual" : "Automática"} />
                 </div>
               </div>
 

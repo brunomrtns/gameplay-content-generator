@@ -58,7 +58,7 @@ const KNOWLEDGE_STATUS_CONFIG: Record<string, { variant: "default" | "success" |
   error: { variant: "error", label: "Erro" },
 };
 
-type Tab = "media";
+type Tab = "media" | "channel";
 
 export function ContentPage() {
   const [tab, setTab] = useState<Tab>("media");
@@ -73,9 +73,52 @@ export function ContentPage() {
         </p>
       </div>
 
-      <MediaTab />
-      <ChannelProfileSection />
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-border">
+        <TabButton
+          active={tab === "media"}
+          onClick={() => setTab("media")}
+          icon={<Film className="h-4 w-4" />}
+          label="Gravações"
+        />
+        <TabButton
+          active={tab === "channel"}
+          onClick={() => setTab("channel")}
+          icon={<Brain className="h-4 w-4" />}
+          label="Identidade do Canal"
+        />
+      </div>
+
+      {/* Tab content */}
+      {tab === "media" && <MediaTab />}
+      {tab === "channel" && <ChannelProfileSection />}
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-px ${
+        active
+          ? "border-accent text-accent"
+          : "border-transparent text-text-muted hover:text-text-secondary"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 

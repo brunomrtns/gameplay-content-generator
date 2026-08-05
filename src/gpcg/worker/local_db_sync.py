@@ -134,7 +134,7 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
     from gpcg.domain.models import (
         User, Game, GameplaySource, GameplayEvent, GameplayAsset, Fact,
         ContentPlan, Script, Job, Automation, KnowledgeItem,
-        GameplayClipUsage,
+        GameplayClipUsage, ChannelProfile,
     )
 
     SessionLocal = _create_temp_db(db_path)
@@ -417,6 +417,26 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
                 status=auto_data.get("status", "idle"),
                 config=auto_data.get("config", {}),
                 upload_config=auto_data.get("upload_config", {}),
+            ))
+        session.flush()
+
+        # V3: ChannelProfile — sync from VPS so the pipeline can use it.
+        # GenerationService._run_pipeline loads ChannelProfile from the local
+        # DB (session.query(ChannelProfile).filter(user_id==...).first()).
+        # Without this record, channel context is always None in the worker.
+        profile_data = job_data.get("channel_profile")
+        if profile_data:
+            session.add(ChannelProfile(
+                id=profile_data["id"],
+                user_id=profile_data.get("user_id", user_id),
+                channel_description=profile_data.get("channel_description", ""),
+                niche=profile_data.get("niche", ""),
+                target_audience=profile_data.get("target_audience", ""),
+                tone_of_voice=profile_data.get("tone_of_voice", ""),
+                narrative_style=profile_data.get("narrative_style", ""),
+                content_goals=profile_data.get("content_goals", ""),
+                special_rules=profile_data.get("special_rules", ""),
+                metadata_json=profile_data.get("metadata_json", {}),
             ))
         session.flush()
 

@@ -124,7 +124,7 @@ def is_used_by_consumer(session: Session, item_id: int, consumer_user_id: int) -
 def record_usage(
     session: Session,
     item_id: int,
-    consumer_user_id: int,
+    consumer_user_id: Optional[int],
     video_id: Optional[int] = None,
 ) -> Optional[KnowledgeItemUsage]:
     """Record per-consumer usage of a KnowledgeItem.
@@ -135,25 +135,33 @@ def record_usage(
     the global status — only create the usage record so the KI stays fresh
     globally while being excluded for this consumer.
 
+    If consumer_user_id is None (e.g. legacy/test path with no user),
+    falls back to the legacy behavior of marking global status=used.
+
     Returns the created KnowledgeItemUsage, or None if the KI does not exist.
     """
     ki = session.get(KnowledgeItem, item_id)
     if not ki:
         return None
 
-    usage = KnowledgeItemUsage(
-        knowledge_item_id=item_id,
-        consumer_user_id=consumer_user_id,
-        video_id=video_id,
-    )
-    session.add(usage)
+    # When we have a real consumer, record per-consumer usage
+    if consumer_user_id is not None:
+        usage = KnowledgeItemUsage(
+            knowledge_item_id=item_id,
+            consumer_user_id=consumer_user_id,
+            video_id=video_id,
+        )
+        session.add(usage)
 
     # Private KIs: only the owner consumes, so the global status is authoritative.
-    if ki.user_id is not None:
+    # Public KIs with a real consumer: do NOT change global status.
+    # Public KIs without a real consumer (legacy/test): mark global status
+    # to preserve backward-compatible behavior.
+    if ki.user_id is not None or consumer_user_id is None:
         ki.status = KnowledgeItemStatus.used.value
 
     session.flush()
-    return usage
+    return usage if consumer_user_id is not None else None
 
 
 def get_stats(

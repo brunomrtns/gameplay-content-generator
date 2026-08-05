@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { usePoll } from "@/hooks/usePoll";
@@ -20,12 +20,32 @@ import {
   XCircle,
   Clock,
   Zap,
+  Upload,
+  X,
+  ExternalLink,
+  AlertCircle,
 } from "lucide-react";
+
+const VIDEO_STATUS_CONFIG: Record<
+  string,
+  { variant: "default" | "success" | "warning" | "error" | "info"; label: string }
+> = {
+  pending: { variant: "default", label: "Pendente" },
+  ready: { variant: "info", label: "Pronto" },
+  qa_passed: { variant: "success", label: "QA OK" },
+  qa_failed: { variant: "error", label: "QA Falhou" },
+  pending_approval: { variant: "warning", label: "Aguardando publicação" },
+  published: { variant: "success", label: "Publicado" },
+  publish_failed: { variant: "error", label: "Publicação falhou" },
+};
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { data: dash, loading } = usePoll(() => api.getDashboard(), 10000);
+  const { data: dash, loading, refetch } = usePoll(() => api.getDashboard(), 10000);
   const [toggling, setToggling] = useState(false);
+  const [playing, setPlaying] = useState<any | null>(null);
+  const [publishing, setPublishing] = useState<number | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
 
   const automationRunning = dash?.automation_status === "running";
 
@@ -54,6 +74,24 @@ export function DashboardPage() {
       toast.error(err.message);
     }
   };
+
+  const handlePublish = useCallback(
+    async (id: number) => {
+      setPublishing(id);
+      setPublishError(null);
+      try {
+        await api.publishVideo(id);
+        await refetch();
+        toast.success("Vídeo publicado no YouTube!");
+      } catch (e: any) {
+        setPublishError(e.message || "Falha ao publicar no YouTube");
+        toast.error(e.message || "Falha ao publicar");
+      } finally {
+        setPublishing(null);
+      }
+    },
+    [refetch]
+  );
 
   if (loading && !dash) {
     return (
@@ -116,6 +154,17 @@ export function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      {/* Publish error toast */}
+      {publishError && (
+        <div className="flex items-center gap-3 rounded-xl border border-red-600/30 bg-red-600/10 px-4 py-3 text-sm text-red-400">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span className="flex-1">{publishError}</span>
+          <button onClick={() => setPublishError(null)} className="text-red-400/70 hover:text-red-400">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Worker status card */}
@@ -208,9 +257,19 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      {/* Recent videos */}
+      {/* Recent videos with actions */}
       <div>
-        <h2 className="mb-4 text-lg font-semibold">Vídeos produzidos</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Vídeos produzidos</h2>
+          {recentVideos.length > 0 && (
+            <button
+              onClick={() => navigate("/videos")}
+              className="text-xs text-text-muted hover:text-accent transition-colors"
+            >
+              Ver todos →
+            </button>
+          )}
+        </div>
         {recentVideos.length === 0 ? (
           <Card>
             <EmptyState
@@ -229,9 +288,15 @@ export function DashboardPage() {
             {recentVideos.slice(0, 5).map((v: any) => {
               const title = v.social_title || v.topic || "—";
               const isPublished = v.status === "published" && v.youtube_url;
+              const canPublish = v.status === "pending_approval" || v.status === "publish_failed";
+              const statusCfg = VIDEO_STATUS_CONFIG[v.status] || VIDEO_STATUS_CONFIG.pending;
               return (
-                <Card key={v.id} className="!p-0 overflow-hidden group cursor-pointer">
-                  <div className="relative aspect-[9/16] bg-surface-elevated overflow-hidden">
+                <Card key={v.id} className="!p-0 overflow-hidden group flex flex-col">
+                  {/* Thumbnail */}
+                  <div
+                    className="relative aspect-[9/16] bg-surface-elevated overflow-hidden cursor-pointer"
+                    onClick={() => setPlaying(v)}
+                  >
                     {v.thumbnail_path ? (
                       <img src={api.thumbUrl(v.id)} alt={title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
                     ) : (
@@ -239,6 +304,12 @@ export function DashboardPage() {
                         <VideoIcon className="h-8 w-8" />
                       </div>
                     )}
+                    {/* Play overlay */}
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all group-hover:bg-black/30 group-hover:opacity-100">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/90 backdrop-blur">
+                        <Play className="h-5 w-5 text-white ml-0.5" fill="white" />
+                      </div>
+                    </div>
                     <div className="absolute bottom-2 right-2">
                       {v.qa_passed ? (
                         <Badge variant="success">QA {v.qa_score?.toFixed(0)}</Badge>
@@ -252,11 +323,44 @@ export function DashboardPage() {
                       </div>
                     )}
                   </div>
-                  <div className="p-3">
+                  {/* Info + actions */}
+                  <div className="flex flex-1 flex-col p-3">
                     <p className="text-xs font-medium line-clamp-2 min-h-[2rem]" title={title}>{title}</p>
                     <div className="mt-1 flex items-center justify-between text-[10px] text-text-muted">
                       <span>{fmtDuration(v.duration)}</span>
                       <span>{fmtDate(v.created_at)}</span>
+                    </div>
+                    {/* Actions */}
+                    <div className="mt-2 flex items-center justify-between gap-1.5">
+                      <Badge variant={statusCfg.variant}>{statusCfg.label}</Badge>
+                      <div className="flex items-center gap-1">
+                        {isPublished && (
+                          <a
+                            href={v.youtube_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex h-6 w-6 items-center justify-center rounded-lg border border-border text-text-muted transition-all hover:border-red-600/40 hover:text-red-400"
+                            title="Abrir no YouTube"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        )}
+                        {canPublish && (
+                          <button
+                            onClick={() => handlePublish(v.id)}
+                            disabled={publishing === v.id}
+                            className="flex h-6 items-center gap-1 rounded-lg border border-border px-2 text-[10px] font-medium text-text-muted transition-all hover:border-accent/40 hover:text-accent disabled:opacity-50"
+                            title="Publicar no YouTube"
+                          >
+                            {publishing === v.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Upload className="h-3 w-3" />
+                            )}
+                            Publicar
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </Card>
@@ -265,6 +369,69 @@ export function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Video player modal (reused from videos.tsx) */}
+      {playing && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in"
+          onClick={() => setPlaying(null)}
+        >
+          <div
+            className="relative w-full max-w-3xl rounded-2xl border border-border bg-surface overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setPlaying(null)}
+              className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-black/50 text-white/80 backdrop-blur transition-all hover:bg-black/70 hover:text-white"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <video
+              src={api.videoUrl(playing.id)}
+              controls
+              autoPlay
+              className="w-full max-h-[70vh] bg-black"
+            />
+            <div className="space-y-3 p-4">
+              <h3 className="text-sm font-semibold">
+                {playing.social_title || playing.topic || `Vídeo #${playing.id}`}
+              </h3>
+              {playing.social_description && (
+                <p className="text-xs text-text-secondary line-clamp-3 whitespace-pre-wrap">
+                  {playing.social_description}
+                </p>
+              )}
+              {playing.social_tags && playing.social_tags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {playing.social_tags.map((tag: string, i: number) => (
+                    <span
+                      key={i}
+                      className="rounded-md bg-surface-elevated px-2 py-0.5 text-[10px] text-text-muted"
+                    >
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-3 text-[10px] text-text-muted">
+                <span>{fmtDuration(playing.duration)}</span>
+                {playing.width && playing.height && <span>{playing.width}×{playing.height}</span>}
+                <span>{fmtDate(playing.created_at)}</span>
+                {playing.youtube_url && (
+                  <a
+                    href={playing.youtube_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-red-400 hover:text-red-300"
+                  >
+                    <Youtube className="h-3 w-3" /> Abrir no YouTube
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

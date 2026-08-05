@@ -63,6 +63,30 @@ def _normalize_idea_queue(raw) -> list[dict]:
     return [_normalize_queue_entry(e) for e in raw]
 
 
+# V3: Fields included in the config snapshot stored in job.artifacts.
+# Only generation-relevant fields — never secrets, tokens, idea_queue, etc.
+_CONFIG_SNAPSHOT_FIELDS = (
+    "scene_duration", "video_format",
+    "subtitle_font", "subtitle_font_size", "subtitle_color",
+    "subtitle_outline_color", "subtitle_position", "subtitle_case",
+    "subtitle_box_enabled", "subtitle_box_color", "subtitle_box_padding",
+    "subtitle_stroke_color", "subtitle_stroke_width", "subtitle_rounded_box",
+    "transition_type", "transition_duration",
+    "creative_style", "voice",
+    "max_clip_uses", "fallback_policy",
+)
+
+
+def _build_config_snapshot(config: dict) -> dict:
+    """Build a deterministic config snapshot for a job.
+
+    Only includes fields needed for generation. Excludes secrets, tokens,
+    idea_queue (mutable), and other non-generation fields. This ensures
+    retry uses the same intent even if the user changes config later.
+    """
+    return {k: config.get(k) for k in _CONFIG_SNAPSHOT_FIELDS}
+
+
 # ── Automation ───────────────────────────────────────────────────────────────
 
 
@@ -232,14 +256,68 @@ def check_automation(
         if ready_count == 0:
             continue
 
+        cfg = auto.config or {}
+        # V3: Reconciliador — auto-fill empty queue with fresh KIs
+        # Only in automatic mode (manual mode = user curates everything)
+        queue_mode = cfg.get("queue_mode", "automatic")
+        idea_queue = cfg.get("idea_queue", [])
+        if not idea_queue and queue_mode == "automatic" and cfg.get("auto_fill_queue", False):
+            idea_queue = _reconcile_idea_queue(db, auto.user_id, cfg)
+            if idea_queue:
+                # Persist the auto-filled queue
+                from sqlalchemy.orm.attributes import flag_modified
+                cfg2 = dict(cfg)
+                cfg2["idea_queue"] = idea_queue
+                auto.config = cfg2
+                flag_modified(auto, "config")
+                db.flush()
+                log.info(f"Reconciliador: auto-filled queue for user {auto.user_id} with {len(idea_queue)} KIs")
+
         pending.append({
             "user_id": auto.user_id,
             "automation_id": auto.id,
-            "config": auto.config or {},
-            "idea_queue": (auto.config or {}).get("idea_queue", []),
+            "config": cfg,
+            "idea_queue": idea_queue,
+            # V3: queue_mode = "manual" (only consume queue, no auto-editorial)
+            #               | "automatic" (fall back to editorial when queue empty)
+            # Default: "automatic" (backward compat)
+            "queue_mode": queue_mode,
         })
 
     return {"pending": pending}
+
+
+def _reconcile_idea_queue(db: Session, user_id: int, config: dict) -> list[dict]:
+    """V3: Auto-fill the idea queue with fresh KnowledgeItems.
+
+    Selects fresh KIs visible to the user, sorted by editorial_score descending.
+    Respects max_queue_size (default 10) to avoid filling the queue with too
+    many items. Only runs when auto_fill_queue is enabled in the config.
+
+    Returns the new queue entries (list[dict] with ki_id, gameplay_preference,
+    reuse_override). Returns empty list if no fresh KIs are available.
+    """
+    from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
+    from gpcg.domain.visibility import visible_to_user
+
+    max_size = int(config.get("max_queue_size", 10))
+    vis = visible_to_user(KnowledgeItem.user_id, KnowledgeItem.is_public, user_id)
+    kis = db.query(KnowledgeItem).filter(
+        KnowledgeItem.status == KnowledgeItemStatus.fresh.value,
+        vis,
+    ).order_by(KnowledgeItem.editorial_score.desc()).limit(max_size).all()
+
+    if not kis:
+        return []
+
+    return [
+        {
+            "ki_id": ki.id,
+            "gameplay_preference": None,
+            "reuse_override": None,
+        }
+        for ki in kis
+    ]
 
 
 @router.post("/automation/consume-queue")
@@ -806,6 +884,9 @@ def create_job_from_automation(user_id: int) -> int | None:
 
             service = GenerationService(llm=get_llm())
 
+            # V3: Build a config snapshot for deterministic retry.
+            config_snapshot = _build_config_snapshot(cfg)
+
             # V3: Store gameplay preference + reuse override in job artifacts
             # so the generation pipeline can use them during gameplay selection.
             extra_artifacts = {
@@ -814,6 +895,7 @@ def create_job_from_automation(user_id: int) -> int | None:
                 "gameplay_preference": gameplay_preference,  # null=auto, game_id=user chose
                 "reuse_override": reuse_override,  # null, "allow_reuse", "skip"
                 "gameplay_selection_mode": "manual" if gameplay_preference else "auto",
+                "config_snapshot": config_snapshot,
             }
 
             # If KI has a game_id, create a game-specific short;
@@ -966,6 +1048,7 @@ def create_job_from_automation(user_id: int) -> int | None:
                     **j.artifacts,
                     "editorial_decision": decision.to_dict(),
                     "fact_id": decision.fact_id,
+                    "config_snapshot": _build_config_snapshot(config),
                 }
                 s2.flush()
         elif decision.job_type == "curiosity_short" and decision.background_game_id:
@@ -975,6 +1058,16 @@ def create_job_from_automation(user_id: int) -> int | None:
                 user_id=user_id,
                 **subtitle_kwargs,
             )
+            # Store editorial decision + config snapshot
+            with session_scope() as s2:
+                j = s2.get(Job, job.id)
+                j.artifacts = {
+                    **j.artifacts,
+                    "editorial_decision": decision.to_dict(),
+                    "fact_id": decision.fact_id,
+                    "config_snapshot": _build_config_snapshot(config),
+                }
+                s2.flush()
         else:
             log.warning(f"automation: invalid editorial decision: {decision.to_dict()}")
             return None
@@ -1109,10 +1202,14 @@ def dashboard(
     recent_list = []
     for v in recent_videos:
         social_title = None
+        social_description = None
+        social_tags = None
         if v.job_id:
             job = db.get(Job, v.job_id)
             if job and isinstance(job.artifacts, dict):
                 social_title = job.artifacts.get("social_title")
+                social_description = job.artifacts.get("social_description")
+                social_tags = job.artifacts.get("social_tags")
         cp = db.get(ContentPlan, v.content_plan_id) if v.content_plan_id else None
         recent_list.append({
             "id": v.id,
@@ -1121,9 +1218,13 @@ def dashboard(
             "qa_score": v.qa_score,
             "qa_passed": v.qa_report.get("passed", False) if v.qa_report else False,
             "duration": v.duration,
+            "width": v.width,
+            "height": v.height,
             "thumbnail_path": v.thumbnail_path,
             "topic": cp.topic if cp else None,
             "social_title": social_title,
+            "social_description": social_description,
+            "social_tags": social_tags,
             "youtube_url": v.youtube_url,
             "youtube_video_id": v.youtube_video_id,
         })

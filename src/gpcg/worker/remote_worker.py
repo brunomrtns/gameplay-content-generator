@@ -698,10 +698,16 @@ class RemoteWorker:
             for item in pending:
                 user_id = item["user_id"]
                 idea_queue = item.get("idea_queue", [])
+                queue_mode = item.get("queue_mode", "automatic")
                 if idea_queue:
                     # User has curated ideas in queue — consume directly (no LLM needed)
                     self._consume_idea_queue(user_id)
+                elif queue_mode == "manual":
+                    # V3: Manual mode — do NOT auto-generate when queue is empty.
+                    # The user explicitly wants to curate every video.
+                    log.info(f"User {user_id}: queue empty + manual mode — skipping")
                 else:
+                    # Automatic mode — fall back to editorial decision
                     self._make_editorial_decision(user_id)
         except Exception as e:
             log.warning(f"Automation check failed: {e}")

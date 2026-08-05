@@ -238,9 +238,12 @@ class ContentPlanningService:
         if fact is not None:
             fact.used_count += 1
 
-        # V2: Mark knowledge item as used
+        # V3: Record per-consumer usage of the knowledge item.
+        # For public KIs, only creates a usage record (global status stays
+        # fresh). For private KIs, also marks global status=used.
         if ki is not None:
-            ki.status = KnowledgeItemStatus.used.value
+            from gpcg.application.knowledge_item_service import record_usage as _record_usage
+            _record_usage(session, ki.id, plan.user_id)
 
         log.info(
             f"content plan #{plan.id} for '{game.canonical_name}': "
@@ -417,8 +420,9 @@ class ContentPlanningService:
                     )
                     session.add(plan)
                     session.flush()
-                    # Mark KI as used
-                    ki.status = KnowledgeItemStatus.used.value
+                    # V3: Record per-consumer usage (not global status for public KIs)
+                    from gpcg.application.knowledge_item_service import record_usage as _record_usage
+                    _record_usage(session, ki.id, plan.user_id)
                     log.info(
                         f"content plan #{plan.id} [curiosity] bg='{bg_game.canonical_name}': "
                         f"KI #{ki.id} '{ki.title[:60]}'"
