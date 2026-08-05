@@ -83,8 +83,11 @@ def _build_config_snapshot(config: dict) -> dict:
     Only includes fields needed for generation. Excludes secrets, tokens,
     idea_queue (mutable), and other non-generation fields. This ensures
     retry uses the same intent even if the user changes config later.
+
+    Skips None values so that downstream .get(key, default) calls work
+    correctly (otherwise None in the snapshot shadows the default).
     """
-    return {k: config.get(k) for k in _CONFIG_SNAPSHOT_FIELDS}
+    return {k: v for k, v in ((k, config.get(k)) for k in _CONFIG_SNAPSHOT_FIELDS) if v is not None}
 
 
 # ── Automation ───────────────────────────────────────────────────────────────

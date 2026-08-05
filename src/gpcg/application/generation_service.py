@@ -656,7 +656,7 @@ class GenerationService:
             # V3: Prefer config_snapshot from job.artifacts (deterministic for
             # retry) over the live automation config (which may have changed).
             config_snapshot = job.artifacts.get("config_snapshot") or {}
-            max_clip_uses = config_snapshot.get("max_clip_uses", 1)
+            max_clip_uses = config_snapshot.get("max_clip_uses") or 1
             fallback_policy = config_snapshot.get("fallback_policy")
             if user_id is not None:
                 # Fall back to live config only if snapshot is missing

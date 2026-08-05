@@ -196,6 +196,9 @@ def find_available_segment(
     if source_duration < needed_duration:
         return None
 
+    # Defensive: max_uses should never be None, but guard against it
+    max_uses = max_uses if max_uses is not None else 1
+
     # For unlimited reuse, any segment works — but still prefer unused
     if max_uses <= 0 and not used_ranges:
         # No used ranges at all — pick random or event-aligned
