@@ -1484,6 +1484,16 @@ def get_job_data(
         ).order_by(KnowledgeItem.editorial_score.desc()).limit(30).all()
 
         ki_list = game_kis + general_kis
+
+        # V3: Ensure the queued KnowledgeItem is always included in the
+        # sync data, even if it doesn't match the game/general filters
+        # (e.g. a news KI about Xbox used with Crash Team Racing background).
+        queued_ki_id = (_ensure_dict(job.artifacts) or {}).get("queued_knowledge_item_id")
+        if queued_ki_id:
+            existing_ids = {ki.id for ki in ki_list}
+            queued_ki = db.get(KnowledgeItem, queued_ki_id)
+            if queued_ki and queued_ki.id not in existing_ids:
+                ki_list = [queued_ki] + ki_list
         data["knowledge_items"] = [{
             "id": ki.id, "user_id": ki.user_id, "game_id": ki.game_id,
             "is_public": ki.is_public,
