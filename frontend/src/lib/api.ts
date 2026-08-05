@@ -427,20 +427,32 @@ export const api = {
     }),
 
   // ── Idea Queue (user-curated playlist) ────────────────────────────────
-  getIdeaQueue: () => request<{ queue: number[]; items: any[] }>("/idea-queue"),
-  addToIdeaQueue: (knowledgeItemId: number) =>
-    request<{ queue: number[]; message: string }>("/idea-queue/add", {
+  getIdeaQueue: () => request<{ queue: any[]; items: any[] }>("/idea-queue"),
+  addToIdeaQueue: (
+    knowledgeItemId: number,
+    gameplayPreference?: number | null,
+    reuseOverride?: string | null,
+  ) =>
+    request<{ queue: any[]; message: string }>("/idea-queue/add", {
       method: "POST",
-      body: JSON.stringify({ knowledge_item_id: knowledgeItemId }),
+      body: JSON.stringify({
+        knowledge_item_id: knowledgeItemId,
+        gameplay_preference: gameplayPreference ?? null,
+        reuse_override: reuseOverride ?? null,
+      }),
     }),
   removeFromIdeaQueue: (knowledgeItemId: number) =>
-    request<{ queue: number[]; message: string }>("/idea-queue/remove", {
+    request<{ queue: any[]; message: string }>("/idea-queue/remove", {
       method: "POST",
       body: JSON.stringify({ knowledge_item_id: knowledgeItemId }),
     }),
   reorderIdeaQueue: (newOrder: number[]) =>
-    request<{ queue: number[]; message: string }>("/idea-queue/reorder", {
+    request<{ queue: any[]; message: string }>("/idea-queue/reorder", {
       method: "POST",
       body: JSON.stringify(newOrder),
     }),
+
+  // ── Gameplay Availability (V3) ────────────────────────────────────────
+  getGameplayAvailability: () =>
+    request<{ games: any[]; max_uses: number }>("/gameplay-availability"),
 };

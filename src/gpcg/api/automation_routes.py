@@ -43,6 +43,26 @@ log = get_logger(__name__)
 router = APIRouter(tags=["automation"])
 
 
+def _normalize_queue_entry(entry) -> dict:
+    """Normalize a queue entry to dict format (backward compat: int → dict)."""
+    if isinstance(entry, dict):
+        return {
+            "ki_id": entry.get("ki_id") or entry.get("id"),
+            "gameplay_preference": entry.get("gameplay_preference"),
+            "reuse_override": entry.get("reuse_override"),
+        }
+    if isinstance(entry, int):
+        return {"ki_id": entry, "gameplay_preference": None, "reuse_override": None}
+    return {"ki_id": None, "gameplay_preference": None, "reuse_override": None}
+
+
+def _normalize_idea_queue(raw) -> list[dict]:
+    """Normalize the idea_queue config value to list[dict]."""
+    if not raw:
+        return []
+    return [_normalize_queue_entry(e) for e in raw]
+
+
 # ── Automation ───────────────────────────────────────────────────────────────
 
 
@@ -680,11 +700,16 @@ def create_job_from_automation(user_id: int) -> int | None:
         # instead of running the autonomous editorial decision.
         auto = session.query(Automation).filter(Automation.user_id == user_id).first()
         config = auto.config or {} if auto else {}
-        idea_queue: list[int] = config.get("idea_queue", [])
+        # V3: idea_queue is now list[dict] with metadata. Normalize for backward compat.
+        raw_queue = config.get("idea_queue", [])
+        idea_queue = _normalize_idea_queue(raw_queue)
 
     if idea_queue:
         # Consume the first idea in the queue
-        ki_id = idea_queue[0]
+        queue_entry = idea_queue[0]
+        ki_id = queue_entry.get("ki_id") if isinstance(queue_entry, dict) else queue_entry
+        gameplay_preference = queue_entry.get("gameplay_preference") if isinstance(queue_entry, dict) else None
+        reuse_override = queue_entry.get("reuse_override") if isinstance(queue_entry, dict) else None
         from gpcg.application.generation_service import GenerationService
         from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
         from gpcg.infrastructure.llm import get_llm
@@ -701,22 +726,47 @@ def create_job_from_automation(user_id: int) -> int | None:
                 from sqlalchemy.orm.attributes import flag_modified
                 auto = session.query(Automation).filter(Automation.user_id == user_id).first()
                 cfg = dict(auto.config or {})
-                q = list(cfg.get("idea_queue", []))
-                if ki_id in q:
-                    q.remove(ki_id)
-                    cfg["idea_queue"] = q
-                    auto.config = cfg
-                    flag_modified(auto, "config")
-                    session.commit()
+                q = _normalize_idea_queue(cfg.get("idea_queue", []))
+                q = [e for e in q if e.get("ki_id") != ki_id]
+                cfg["idea_queue"] = q
+                auto.config = cfg
+                flag_modified(auto, "config")
+                session.commit()
                 return None
 
-            # Pick a background game (least recently used with gameplay ready)
-            bg_game = session.query(Game).join(
-                GameplaySource, GameplaySource.game_id == Game.id
-            ).filter(
-                GameplaySource.user_id == user_id,
-                GameplaySource.ingestion_status == IngestionStatus.ready.value,
-            ).order_by(Game.id).first()
+            # V3: If user chose a specific game (gameplay_preference), use it
+            # as the background game instead of the automatic selection.
+            # Validate that the game has ready gameplay for this user.
+            bg_game = None
+            if gameplay_preference:
+                bg_game = session.query(Game).join(
+                    GameplaySource, GameplaySource.game_id == Game.id
+                ).filter(
+                    Game.id == gameplay_preference,
+                    GameplaySource.ingestion_status == IngestionStatus.ready.value,
+                ).first()
+                if bg_game:
+                    # Check ownership/visibility: user's own or public
+                    has_access = session.query(GameplaySource).filter(
+                        GameplaySource.game_id == gameplay_preference,
+                        GameplaySource.ingestion_status == IngestionStatus.ready.value,
+                        ((GameplaySource.user_id == user_id) |
+                         (GameplaySource.is_public == True)),
+                    ).first()
+                    if not has_access:
+                        log.warning(f"automation: gameplay_preference game #{gameplay_preference} not accessible by user #{user_id}")
+                        bg_game = None
+                else:
+                    log.warning(f"automation: gameplay_preference game #{gameplay_preference} has no ready gameplay")
+
+            # Fallback: automatic background game selection
+            if not bg_game:
+                bg_game = session.query(Game).join(
+                    GameplaySource, GameplaySource.game_id == Game.id
+                ).filter(
+                    GameplaySource.user_id == user_id,
+                    GameplaySource.ingestion_status == IngestionStatus.ready.value,
+                ).order_by(Game.id).first()
 
             if not bg_game:
                 log.warning("automation: idea queue has items but no gameplay available")
@@ -756,6 +806,16 @@ def create_job_from_automation(user_id: int) -> int | None:
 
             service = GenerationService(llm=get_llm())
 
+            # V3: Store gameplay preference + reuse override in job artifacts
+            # so the generation pipeline can use them during gameplay selection.
+            extra_artifacts = {
+                "queued_knowledge_item_id": ki_id,
+                "idea_source": "user_queue",
+                "gameplay_preference": gameplay_preference,  # null=auto, game_id=user chose
+                "reuse_override": reuse_override,  # null, "allow_reuse", "skip"
+                "gameplay_selection_mode": "manual" if gameplay_preference else "auto",
+            }
+
             # If KI has a game_id, create a game-specific short;
             # otherwise, create a curiosity_short with background gameplay.
             if ki.game_id:
@@ -771,8 +831,7 @@ def create_job_from_automation(user_id: int) -> int | None:
                         j = s2.get(Job, job.id)
                         j.artifacts = {
                             **j.artifacts,
-                            "queued_knowledge_item_id": ki_id,
-                            "idea_source": "user_queue",
+                            **extra_artifacts,
                         }
                         s2.flush()
                     log.info(f"automation: created generate_short job #{job.id} from queued KI #{ki_id} (game={game.canonical_name})")
@@ -780,18 +839,23 @@ def create_job_from_automation(user_id: int) -> int | None:
                     log.warning(f"automation: queued KI #{ki_id} references missing game {ki.game_id}")
                     # Remove from queue
                     from sqlalchemy.orm.attributes import flag_modified
-                    q = list(cfg.get("idea_queue", []))
-                    if ki_id in q:
-                        q.remove(ki_id)
-                        cfg["idea_queue"] = q
-                        auto.config = cfg
-                        flag_modified(auto, "config")
-                        session.commit()
+                    q = _normalize_idea_queue(cfg.get("idea_queue", []))
+                    q = [e for e in q if e.get("ki_id") != ki_id]
+                    cfg["idea_queue"] = q
+                    auto.config = cfg
+                    flag_modified(auto, "config")
+                    session.commit()
                     return None
             else:
                 # General idea → curiosity_short with background gameplay
+                # V3: If gameplay_preference was set, use it as background_game_id
+                # instead of the auto-selected bg_game.
+                chosen_bg_game_id = bg_game.id
+                if gameplay_preference and bg_game and bg_game.id == gameplay_preference:
+                    chosen_bg_game_id = bg_game.id
+                    log.info(f"automation: using user-selected gameplay game #{chosen_bg_game_id} for KI #{ki_id}")
                 job = service.create_curiosity_job(
-                    background_game_id=bg_game.id,
+                    background_game_id=chosen_bg_game_id,
                     fact_id=None,
                     user_id=user_id,
                     **subtitle_kwargs,
@@ -800,8 +864,7 @@ def create_job_from_automation(user_id: int) -> int | None:
                     j = s2.get(Job, job.id)
                     j.artifacts = {
                         **j.artifacts,
-                        "queued_knowledge_item_id": ki_id,
-                        "idea_source": "user_queue",
+                        **extra_artifacts,
                     }
                     s2.flush()
                 log.info(f"automation: created curiosity_short job #{job.id} from queued KI #{ki_id} (bg={bg_game.canonical_name})")
@@ -811,13 +874,12 @@ def create_job_from_automation(user_id: int) -> int | None:
                 from sqlalchemy.orm.attributes import flag_modified
                 auto2 = session2.query(Automation).filter(Automation.user_id == user_id).first()
                 cfg2 = dict(auto2.config or {})
-                q2 = list(cfg2.get("idea_queue", []))
-                if ki_id in q2:
-                    q2.remove(ki_id)
-                    cfg2["idea_queue"] = q2
-                    auto2.config = cfg2
-                    flag_modified(auto2, "config")
-                    session2.commit()
+                q2 = _normalize_idea_queue(cfg2.get("idea_queue", []))
+                q2 = [e for e in q2 if e.get("ki_id") != ki_id]
+                cfg2["idea_queue"] = q2
+                auto2.config = cfg2
+                flag_modified(auto2, "config")
+                session2.commit()
                 log.info(f"automation: removed KI #{ki_id} from idea queue (remaining: {len(q2)})")
 
             # Update last_run_at

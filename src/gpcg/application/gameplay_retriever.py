@@ -31,7 +31,13 @@ from typing import Optional, Union
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gpcg.application.clip_usage_service import get_used_ranges, is_range_available, UsedRange
+from gpcg.application.clip_usage_service import (
+    get_used_ranges,
+    is_range_available,
+    is_range_eligible,
+    count_overlapping_uses,
+    UsedRange,
+)
 from gpcg.application.gameplay_index_service import GameplayIndexService
 from gpcg.application.gameplay_selector import GameplaySelector, SelectedClip
 from gpcg.config import get_settings
@@ -114,6 +120,8 @@ class GameplayRetriever:
         accept_public: bool = False,
         narrative_beats: Optional[list] = None,
         recent_game_ids: Optional[list[int]] = None,
+        max_uses: int = 1,
+        gameplay_preference_game_id: Optional[int] = None,
     ) -> list[SelectedClip]:
         """Retrieve gameplay clips for a video.
 
@@ -163,6 +171,20 @@ class GameplayRetriever:
         # Use the first game_id for compatibility checks (primary game)
         primary_game_id = game_ids[0] if game_ids else game_id
 
+        # If user specified a gameplay preference (chose a specific game),
+        # override the game_ids to only that game. This takes precedence
+        # over the automatic GENERAL_TOPIC source selection.
+        if gameplay_preference_game_id is not None:
+            game_ids = [gameplay_preference_game_id]
+            primary_game_id = gameplay_preference_game_id
+            # Force video_type to GAME_RELATED so _retrieve_semantic filters
+            # by game_id instead of searching ALL sources (GENERAL_TOPIC).
+            # The user chose this game — we only use its gameplay.
+            if video_type == "GENERAL_TOPIC":
+                video_type = "GAME_RELATED"
+                log.info(f"gameplay_preference: user chose game #{gameplay_preference_game_id}, "
+                         f"switching GENERAL_TOPIC → GAME_RELATED for source filtering")
+
         # Decide whether to use semantic retrieval or fallback
         use_semantic = self._should_use_semantic(session, game_ids, creative_plan, video_type, user_id)
 
@@ -171,6 +193,7 @@ class GameplayRetriever:
                 session, game_ids, target_duration, creative_plan, scene_duration, rng,
                 user_id=user_id, accept_public=accept_public,
                 narrative_beats=narrative_beats, recent_game_ids=recent_game_ids,
+                max_uses=max_uses,
             )
             if clips:
                 return clips
@@ -179,6 +202,7 @@ class GameplayRetriever:
 
         # Fallback: random selection via GameplaySelector
         # V2: pass user_id and accept_public to the selector
+        # V3: pass max_uses for configurable reuse policy
         if len(game_ids) > 1:
             # Cross-game fallback: try expanded games, then contract to primary
             for gid in game_ids:
@@ -186,6 +210,7 @@ class GameplayRetriever:
                     session, gid, target_duration,
                     scene_duration=scene_duration, rng=rng,
                     user_id=user_id, accept_public=accept_public,
+                    max_uses=max_uses,
                 )
                 if clips:
                     return clips
@@ -194,11 +219,13 @@ class GameplayRetriever:
                 session, primary_game_id, target_duration,
                 scene_duration=scene_duration, rng=rng,
                 user_id=user_id, accept_public=accept_public,
+                max_uses=max_uses,
             )
         return self.fallback_selector.select(
             session, primary_game_id, target_duration,
             scene_duration=scene_duration, rng=rng,
             user_id=user_id, accept_public=accept_public,
+            max_uses=max_uses,
         )
 
     def _should_use_semantic(
@@ -384,6 +411,7 @@ class GameplayRetriever:
         accept_public: bool = False,
         narrative_beats: Optional[list] = None,
         recent_game_ids: Optional[list[int]] = None,
+        max_uses: int = 1,
     ) -> list[SelectedClip]:
         """Retrieve clips using the semantic index.
 
@@ -550,11 +578,16 @@ class GameplayRetriever:
             for ur_start, ur_end, ur_src in used_ranges:
                 if ur_src == src_id and ev_start < ur_end and ev_end > ur_start:
                     return True
-            # Check persisted history: block significant overlaps
+            # Check persisted history with configurable reuse policy
             history = persisted_used.get(src_id, [])
-            if not is_range_available(history, ev_start, ev_end, tolerance=1.0):
+            if not is_range_eligible(history, ev_start, ev_end, max_uses=max_uses, tolerance=1.0):
                 return True
             return False
+
+        def _count_uses(ev_start: float, ev_end: float, src_id: int) -> int:
+            """Count how many existing uses overlap this range (for auditability)."""
+            history = persisted_used.get(src_id, [])
+            return count_overlapping_uses(history, ev_start, ev_end, tolerance=1.0)
 
         def _is_in_cooldown(ev_start: float, ev_end: float, src_id: int) -> bool:
             """Check if event is within cooldown window of any used region."""
@@ -616,6 +649,8 @@ class GameplayRetriever:
             if clip_duration < 0.5:
                 return False
             asset = _get_asset(src)
+            n_uses = _count_uses(ev.start_time, ev.start_time + clip_duration, src.id)
+            reason = "semantic_event" if n_uses == 0 else "semantic_event_reused"
             clip = SelectedClip(
                 asset=asset,
                 source_path=src.file_path,
@@ -623,6 +658,9 @@ class GameplayRetriever:
                 end_sec=ev.start_time + clip_duration,
                 duration=clip_duration,
                 scene_index=scene_idx,
+                event_id=ev.id,
+                selection_reason=reason,
+                usage_count_at_selection=n_uses,
             )
             clips.append(clip)
             total += clip_duration

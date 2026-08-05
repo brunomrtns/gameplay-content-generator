@@ -18,6 +18,8 @@ interface KnowledgeItem {
   franchise: string | null;
   developer: string | null;
   tags: string[];
+  gameplay_preference?: number | null;
+  reuse_override?: string | null;
 }
 
 interface Stats {
@@ -26,6 +28,18 @@ interface Stats {
   by_type: Record<string, number>;
   by_status: Record<string, number>;
   by_source: Record<string, number>;
+}
+
+interface GameAvailability {
+  game_id: number;
+  game_name: string;
+  ownership: "own" | "public";
+  availability: "abundant" | "partial" | "low" | "none" | "reuse_only";
+  total_sources: number;
+  available_seconds: number;
+  used_seconds: number;
+  eligible_events: number;
+  total_events: number;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -70,6 +84,11 @@ export function IdeasPage() {
   const [newIdeaTitle, setNewIdeaTitle] = useState("");
   const [newIdeaContent, setNewIdeaContent] = useState("");
   const [creating, setCreating] = useState(false);
+  // V3: Gameplay preference modal
+  const [availability, setAvailability] = useState<GameAvailability[]>([]);
+  const [queueModalItem, setQueueModalItem] = useState<KnowledgeItem | null>(null);
+  const [selectedGameplay, setSelectedGameplay] = useState<number | null>(null);
+  const [selectedReuseOverride, setSelectedReuseOverride] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -77,7 +96,7 @@ export function IdeasPage() {
     try {
       // "manual" is a source_type filter, not item_type — handle specially
       const isManualFilter = filterType === "manual";
-      const [itemsRes, statsRes, queueRes] = await Promise.all([
+      const [itemsRes, statsRes, queueRes, availRes] = await Promise.all([
         api.listKnowledgeItems({
           item_type: isManualFilter ? undefined : filterType || undefined,
           status: filterStatus || undefined,
@@ -85,6 +104,7 @@ export function IdeasPage() {
         }),
         api.getKnowledgeItemStats(),
         api.getIdeaQueue(),
+        api.getGameplayAvailability(),
       ]);
       let allItems = itemsRes.items || [];
       if (isManualFilter) {
@@ -93,7 +113,11 @@ export function IdeasPage() {
       setItems(allItems);
       setStats(statsRes);
       setQueue(queueRes.items || []);
-      setQueueIds(new Set(queueRes.queue || []));
+      // V3: queue can be list[dict] or list[int] — extract IDs
+      const qData = queueRes.queue || [];
+      const qIds = qData.map((q: any) => (typeof q === "object" ? q.ki_id : q));
+      setQueueIds(new Set(qIds));
+      setAvailability(availRes.games || []);
     } catch (e: any) {
       setError(e.message || "Failed to load content ideas");
     } finally {
@@ -156,13 +180,31 @@ export function IdeasPage() {
     }
   };
 
-  const handleAddToQueue = async (id: number) => {
+  // V3: Open gameplay preference modal when adding to queue
+  const openQueueModal = (item: KnowledgeItem) => {
+    setQueueModalItem(item);
+    setSelectedGameplay(null);
+    setSelectedReuseOverride(null);
+  };
+
+  const handleAddToQueue = async () => {
+    if (!queueModalItem) return;
     try {
-      await api.addToIdeaQueue(id);
-      setQueueIds((prev) => new Set(prev).add(id));
+      await api.addToIdeaQueue(
+        queueModalItem.id,
+        selectedGameplay,
+        selectedReuseOverride,
+      );
+      setQueueIds((prev) => new Set(prev).add(queueModalItem.id));
       // Update queue display
-      const item = items.find((i) => i.id === id);
-      if (item) setQueue((prev) => [...prev, item]);
+      setQueue((prev) => [...prev, {
+        ...queueModalItem,
+        gameplay_preference: selectedGameplay,
+        reuse_override: selectedReuseOverride,
+      }]);
+      setQueueModalItem(null);
+      setSelectedGameplay(null);
+      setSelectedReuseOverride(null);
     } catch (e: any) {
       setError(e.message);
     }
@@ -355,6 +397,26 @@ export function IdeasPage() {
                         jogo-specific
                       </span>
                     )}
+                    {/* V3: Show gameplay preference */}
+                    {item.gameplay_preference && (
+                      <span className="rounded-full border border-teal-500/30 bg-teal-500/10 px-2 py-0.5 text-xs font-medium text-teal-300">
+                        {availability.find((g) => g.game_id === item.gameplay_preference)?.game_name || `Jogo #${item.gameplay_preference}`}
+                      </span>
+                    )}
+                    {!item.gameplay_preference && !item.game_id && (
+                      <span className="text-xs text-text-muted">Automático</span>
+                    )}
+                    {/* V3: Show reuse override */}
+                    {item.reuse_override === "allow_reuse" && (
+                      <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-300">
+                        Reutilização excepcional
+                      </span>
+                    )}
+                    {item.reuse_override === "skip" && (
+                      <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-300">
+                        Aguardar material
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-text line-clamp-1">{item.title}</p>
                 </div>
@@ -462,7 +524,7 @@ export function IdeasPage() {
                 <div className="flex flex-col gap-2 shrink-0">
                   {item.status === "fresh" && !queueIds.has(item.id) && (
                     <button
-                      onClick={() => handleAddToQueue(item.id)}
+                      onClick={() => openQueueModal(item)}
                       className="rounded-lg bg-purple-600/80 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500"
                       title="Adicionar à fila de produção"
                     >
@@ -492,8 +554,150 @@ export function IdeasPage() {
           ))}
         </div>
       )}
+
+      {/* V3: Gameplay Preference Modal */}
+      {queueModalItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setQueueModalItem(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-border bg-bg-card p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-text mb-1">Adicionar à Fila</h3>
+            <p className="text-sm text-text-muted mb-4 line-clamp-2">
+              {queueModalItem.title}
+            </p>
+
+            {/* Gameplay selector */}
+            <label className="block text-sm font-medium text-text mb-2">
+              Gameplay de fundo
+            </label>
+            <select
+              value={selectedGameplay ?? ""}
+              onChange={(e) => {
+                setSelectedGameplay(e.target.value ? Number(e.target.value) : null);
+                setSelectedReuseOverride(null);
+              }}
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40 mb-3"
+            >
+              <option value="">Automático (sistema escolhe)</option>
+              {availability.map((g) => (
+                <option key={g.game_id} value={g.game_id}>
+                  {g.game_name} · {ownershipLabel(g.ownership)} · {availabilityLabel(g.availability)}
+                </option>
+              ))}
+            </select>
+
+            {/* Availability badges for selected game */}
+            {selectedGameplay && (() => {
+              const game = availability.find((g) => g.game_id === selectedGameplay);
+              if (!game) return null;
+              const isLow = game.availability === "none" || game.availability === "low" || game.availability === "reuse_only";
+              return (
+                <div className="mb-4 space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${availabilityColor(game.availability)}`}>
+                      {availabilityLabel(game.availability)}
+                    </span>
+                    <span className="text-xs text-text-muted">
+                      {ownershipLabel(game.ownership)}
+                    </span>
+                    <span className="text-xs text-text-muted">
+                      {game.eligible_events}/{game.total_events} eventos
+                    </span>
+                  </div>
+                  {isLow && (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+                      <p className="text-xs text-amber-300">
+                        Pouco material elegível disponível para este jogo.
+                        O que fazer?
+                      </p>
+                      <div className="space-y-1.5">
+                        <label className="flex items-center gap-2 text-sm text-text cursor-pointer">
+                          <input
+                            type="radio"
+                            name="reuse-override"
+                            value=""
+                            checked={selectedReuseOverride === null}
+                            onChange={() => setSelectedReuseOverride(null)}
+                          />
+                          Usar outra gameplay automaticamente (fallback)
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-text cursor-pointer">
+                          <input
+                            type="radio"
+                            name="reuse-override"
+                            value="allow_reuse"
+                            checked={selectedReuseOverride === "allow_reuse"}
+                            onChange={() => setSelectedReuseOverride("allow_reuse")}
+                          />
+                          Permitir reutilização excepcional nesta ideia
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-text cursor-pointer">
+                          <input
+                            type="radio"
+                            name="reuse-override"
+                            value="skip"
+                            checked={selectedReuseOverride === "skip"}
+                            onChange={() => setSelectedReuseOverride("skip")}
+                          />
+                          Não gerar enquanto não houver material elegível
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            <div className="flex gap-2 justify-end mt-4">
+              <button
+                onClick={() => setQueueModalItem(null)}
+                className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleAddToQueue}
+                className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500"
+              >
+                Adicionar à Fila
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// V3: Helper functions for availability display
+function ownershipLabel(ownership: string): string {
+  return ownership === "own" ? "Própria" : "Pública";
+}
+
+function availabilityLabel(status: string): string {
+  const labels: Record<string, string> = {
+    abundant: "Bastante material",
+    partial: "Material parcial",
+    low: "Pouco material",
+    none: "Sem material novo",
+    reuse_only: "Apenas reutilização",
+  };
+  return labels[status] || status;
+}
+
+function availabilityColor(status: string): string {
+  const colors: Record<string, string> = {
+    abundant: "bg-green-500/20 text-green-300 border-green-500/30",
+    partial: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30",
+    low: "bg-orange-500/20 text-orange-300 border-orange-500/30",
+    none: "bg-red-500/20 text-red-300 border-red-500/30",
+    reuse_only: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+  };
+  return colors[status] || "bg-gray-500/20 text-gray-300 border-gray-500/30";
 }
 
 function StatCard({

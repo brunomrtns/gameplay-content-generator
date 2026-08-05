@@ -254,3 +254,156 @@ def delete_game_alias(
         raise HTTPException(status_code=404, detail="Alias not found for this game")
     db.commit()
     return {"message": "Alias removed"}
+
+
+# ── Gameplay Availability (V3) ───────────────────────────────────────────────
+
+
+@router.get("/gameplay-availability")
+def get_gameplay_availability(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List games with available gameplay for the current user, with availability status.
+
+    V3: Returns per-game availability information so the UI can show badges
+    like "bastante material", "pouco material", "sem material novo".
+
+    For each game:
+    - game_id, game_name
+    - ownership: "own" or "public" (whether user has own gameplay or only public)
+    - availability: "abundant" | "partial" | "low" | "none" | "reuse_only"
+    - total_sources, available_seconds, used_seconds
+    - eligible_events, total_events
+
+    Availability is calculated from the consumer's perspective (per-user
+    usage history), not globally.
+    """
+    from sqlalchemy import select, func as sql_func
+    from gpcg.domain.models import (
+        GameplaySource, GameplayAsset, GameplayEvent, Automation,
+        IngestionStatus,
+    )
+    from gpcg.application.clip_usage_service import (
+        get_used_ranges, estimate_availability,
+    )
+
+    # Read max_clip_uses from automation config
+    auto = db.query(Automation).filter(Automation.user_id == user.id).first()
+    max_uses = 1
+    accept_public = False
+    if auto and isinstance(auto.config, dict):
+        max_uses = auto.config.get("max_clip_uses", 1)
+        fallback_policy = auto.config.get("fallback_policy")
+        if fallback_policy == "allow_public":
+            accept_public = True
+        elif fallback_policy == "stop":
+            accept_public = False
+        else:
+            accept_public = auto.config.get("accept_public_gameplays", False)
+
+    # Get all games that have ready gameplay sources accessible to this user
+    # User's own + public (if allowed)
+    sources_query = (
+        select(GameplaySource, Game)
+        .join(Game, GameplaySource.game_id == Game.id)
+        .where(GameplaySource.ingestion_status == IngestionStatus.ready.value)
+    )
+    # User's own sources
+    own_sources = sources_query.where(GameplaySource.user_id == user.id)
+    own_results = db.execute(own_sources).all()
+
+    # Public sources (only if user allows)
+    public_results = []
+    if accept_public:
+        public_sources = sources_query.where(
+            GameplaySource.is_public == True,
+            GameplaySource.user_id != user.id,
+        )
+        public_results = db.execute(public_sources).all()
+
+    # Group by game_id
+    games_map: dict[int, dict] = {}
+    for src, game in own_results:
+        if game.id not in games_map:
+            games_map[game.id] = {
+                "game_id": game.id,
+                "game_name": game.canonical_name,
+                "ownership": "own",
+                "sources": [],
+            }
+        games_map[game.id]["sources"].append(src)
+
+    for src, game in public_results:
+        if game.id not in games_map:
+            games_map[game.id] = {
+                "game_id": game.id,
+                "game_name": game.canonical_name,
+                "ownership": "public",
+                "sources": [],
+            }
+        elif games_map[game.id]["ownership"] == "own":
+            # User has own gameplay for this game — mark as own (precedence)
+            pass
+        games_map[game.id]["sources"].append(src)
+
+    # Calculate availability per game
+    result = []
+    for game_id, info in games_map.items():
+        total_avail_sec = 0.0
+        total_used_sec = 0.0
+        total_sources = len(info["sources"])
+        total_eligible_events = 0
+        total_events = 0
+        worst_status = "abundant"
+
+        for src in info["sources"]:
+            # Get assets for this source (to find duration)
+            asset = db.execute(
+                select(GameplayAsset).where(GameplayAsset.source_id == src.id)
+            ).scalars().first()
+            if not asset:
+                continue
+            source_duration = asset.duration
+
+            # Get used ranges for this consumer
+            used = get_used_ranges(db, src.id, consumer_user_id=user.id)
+
+            # Get events for this source
+            events = db.execute(
+                select(GameplayEvent.start_time, GameplayEvent.end_time)
+                .where(GameplayEvent.source_id == src.id)
+                .order_by(GameplayEvent.start_time)
+            ).all()
+            event_tuples = [(r[0], r[1]) for r in events]
+
+            avail = estimate_availability(
+                source_duration, used, event_tuples, max_uses=max_uses,
+            )
+            total_avail_sec += avail["available_seconds"]
+            total_used_sec += avail["used_seconds"]
+            total_eligible_events += avail["eligible_events"]
+            total_events += avail["total_events"]
+
+            # Worst status across sources determines game status
+            status_order = {"abundant": 0, "partial": 1, "low": 2, "reuse_only": 3, "none": 4}
+            if status_order.get(avail["status"], 4) > status_order.get(worst_status, 0):
+                worst_status = avail["status"]
+
+        result.append({
+            "game_id": game_id,
+            "game_name": info["game_name"],
+            "ownership": info["ownership"],
+            "availability": worst_status,
+            "total_sources": total_sources,
+            "available_seconds": round(total_avail_sec, 1),
+            "used_seconds": round(total_used_sec, 1),
+            "eligible_events": total_eligible_events,
+            "total_events": total_events,
+        })
+
+    # Sort: own games first, then by availability (abundant first)
+    status_order = {"abundant": 0, "partial": 1, "low": 2, "reuse_only": 3, "none": 4}
+    result.sort(key=lambda g: (0 if g["ownership"] == "own" else 1, status_order.get(g["availability"], 4), g["game_name"]))
+
+    return {"games": result, "max_uses": max_uses}

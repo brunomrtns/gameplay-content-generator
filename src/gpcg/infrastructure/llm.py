@@ -191,6 +191,40 @@ class LLMClient:
             max_tokens=max_tokens,
         )
 
+    def unload_model(self, model: str) -> None:
+        """Unload a model from Ollama VRAM.
+
+        Uses the Ollama /api/generate endpoint with keep_alive=0 to release
+        the model from GPU memory. This is critical before GPU-intensive
+        operations like TTS (XTTS) that need the full VRAM.
+        """
+        url = f"{self.host}/api/generate"
+        payload = {"model": model, "prompt": "", "keep_alive": 0}
+        try:
+            resp = httpx.post(url, json=payload, timeout=30)
+            resp.raise_for_status()
+            log.info(f"unloaded Ollama model '{model}' from VRAM")
+        except httpx.HTTPError as e:
+            log.warning(f"could not unload Ollama model '{model}': {e}")
+
+    def unload_all_models(self) -> None:
+        """Unload all currently loaded Ollama models from VRAM.
+
+        Queries /api/ps for running models and unloads each one.
+        Called before TTS to free VRAM for XTTS.
+        """
+        try:
+            resp = httpx.get(f"{self.host}/api/ps", timeout=5)
+            resp.raise_for_status()
+            data = resp.json()
+            models = data.get("models", [])
+            for m in models:
+                name = m.get("name", "") or m.get("model", "")
+                if name:
+                    self.unload_model(name)
+        except httpx.HTTPError as e:
+            log.warning(f"could not list Ollama models for unload: {e}")
+
     def embed(
         self,
         text: str,

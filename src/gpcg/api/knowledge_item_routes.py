@@ -271,38 +271,91 @@ class IdeaQueueUpdate(BaseModel):
     knowledge_item_id: int
 
 
+def _normalize_queue_entry(entry) -> dict:
+    """Normalize a queue entry to dict format.
+
+    Backward compat: plain int → {"ki_id": int, "gameplay_preference": None, "reuse_override": None}
+    """
+    if isinstance(entry, dict):
+        return {
+            "ki_id": entry.get("ki_id") or entry.get("id"),
+            "gameplay_preference": entry.get("gameplay_preference"),
+            "reuse_override": entry.get("reuse_override"),
+        }
+    if isinstance(entry, int):
+        return {"ki_id": entry, "gameplay_preference": None, "reuse_override": None}
+    if isinstance(entry, str):
+        try:
+            return {"ki_id": int(entry), "gameplay_preference": None, "reuse_override": None}
+        except ValueError:
+            return {"ki_id": None, "gameplay_preference": None, "reuse_override": None}
+    return {"ki_id": None, "gameplay_preference": None, "reuse_override": None}
+
+
+def _normalize_idea_queue(raw) -> list[dict]:
+    """Normalize the idea_queue config value to list[dict]."""
+    if not raw:
+        return []
+    return [_normalize_queue_entry(e) for e in raw]
+
+
+def _queue_ki_ids(queue: list[dict]) -> list[int]:
+    """Extract just the KI IDs from a normalized queue."""
+    return [e["ki_id"] for e in queue if e.get("ki_id") is not None]
+
+
 @router.get("/idea-queue")
 def get_idea_queue(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get the user's idea queue (ordered list of KnowledgeItem IDs).
+    """Get the user's idea queue (ordered list with metadata).
 
     The automation consumes this queue first (FIFO) before falling back
     to autonomous editorial selection. When a video is generated from a
     queued idea, it's removed from the queue.
+
+    V3: Each queue entry is a dict with:
+        - ki_id: KnowledgeItem ID
+        - gameplay_preference: null (auto) or game_id (user chose specific game)
+        - reuse_override: null (use global config), "allow_reuse", or "skip"
     """
     from gpcg.domain.models import Automation, KnowledgeItem
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     if not auto:
         return {"queue": [], "items": []}
-    queue_ids: list[int] = (auto.config or {}).get("idea_queue", [])
+    queue = _normalize_idea_queue((auto.config or {}).get("idea_queue", []))
     # Fetch the actual items (preserve order)
     items = []
-    for ki_id in queue_ids:
-        ki = db.get(KnowledgeItem, ki_id)
+    for entry in queue:
+        ki = db.get(KnowledgeItem, entry["ki_id"])
         if ki:
-            items.append(_item_to_out(ki))
-    return {"queue": queue_ids, "items": items}
+            item_out = _item_to_out(ki)
+            item_out["gameplay_preference"] = entry.get("gameplay_preference")
+            item_out["reuse_override"] = entry.get("reuse_override")
+            items.append(item_out)
+    return {"queue": queue, "items": items}
+
+
+class IdeaQueueAddRequest(BaseModel):
+    """Add a KnowledgeItem to the queue with optional gameplay preference."""
+    knowledge_item_id: int
+    gameplay_preference: Optional[int] = None  # null=auto, game_id=user chose
+    reuse_override: Optional[str] = None  # null, "allow_reuse", "skip"
 
 
 @router.post("/idea-queue/add")
 def add_to_idea_queue(
-    req: IdeaQueueUpdate,
+    req: IdeaQueueAddRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Add a KnowledgeItem to the end of the user's idea queue."""
+    """Add a KnowledgeItem to the end of the user's idea queue.
+
+    V3: Accepts gameplay_preference (null=auto, game_id=specific game) and
+    reuse_override (null=use global config, "allow_reuse"=exceptional reuse,
+    "skip"=don't generate without material).
+    """
     from sqlalchemy.orm.attributes import flag_modified
     from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
     ki = db.get(KnowledgeItem, req.knowledge_item_id)
@@ -314,9 +367,14 @@ def add_to_idea_queue(
     if not auto:
         raise HTTPException(404, "Automation not found")
     config = dict(auto.config or {})
-    queue: list = list(config.get("idea_queue", []))
-    if req.knowledge_item_id not in queue:
-        queue.append(req.knowledge_item_id)
+    queue = _normalize_idea_queue(config.get("idea_queue", []))
+    existing_ids = _queue_ki_ids(queue)
+    if req.knowledge_item_id not in existing_ids:
+        queue.append({
+            "ki_id": req.knowledge_item_id,
+            "gameplay_preference": req.gameplay_preference,
+            "reuse_override": req.reuse_override,
+        })
         config["idea_queue"] = queue
         auto.config = config
         flag_modified(auto, "config")
@@ -337,14 +395,14 @@ def remove_from_idea_queue(
     if not auto:
         raise HTTPException(404, "Automation not found")
     config = dict(auto.config or {})
-    queue: list = list(config.get("idea_queue", []))
-    if req.knowledge_item_id in queue:
-        queue.remove(req.knowledge_item_id)
-        config["idea_queue"] = queue
+    queue = _normalize_idea_queue(config.get("idea_queue", []))
+    new_queue = [e for e in queue if e["ki_id"] != req.knowledge_item_id]
+    if len(new_queue) != len(queue):
+        config["idea_queue"] = new_queue
         auto.config = config
         flag_modified(auto, "config")
         db.commit()
-    return {"queue": queue, "message": "Removed from queue"}
+    return {"queue": new_queue, "message": "Removed from queue"}
 
 
 @router.post("/idea-queue/reorder")
@@ -353,15 +411,27 @@ def reorder_idea_queue(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Reorder the user's idea queue. Receives the full ordered list of IDs."""
+    """Reorder the user's idea queue. Receives the full ordered list of IDs.
+
+    V3: Preserves existing metadata (gameplay_preference, reuse_override)
+    for items that already have it. New items get defaults.
+    """
     from sqlalchemy.orm.attributes import flag_modified
     from gpcg.domain.models import Automation
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     if not auto:
         raise HTTPException(404, "Automation not found")
     config = dict(auto.config or {})
-    config["idea_queue"] = new_order
+    old_queue = _normalize_idea_queue(config.get("idea_queue", []))
+    old_by_id = {e["ki_id"]: e for e in old_queue if e.get("ki_id")}
+    new_queue = []
+    for ki_id in new_order:
+        if ki_id in old_by_id:
+            new_queue.append(old_by_id[ki_id])
+        else:
+            new_queue.append({"ki_id": ki_id, "gameplay_preference": None, "reuse_override": None})
+    config["idea_queue"] = new_queue
     auto.config = config
     flag_modified(auto, "config")
     db.commit()
-    return {"queue": new_order, "message": "Queue reordered"}
+    return {"queue": new_queue, "message": "Queue reordered"}

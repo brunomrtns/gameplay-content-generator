@@ -47,6 +47,13 @@ class SelectedClip:
     duration: float
     # For scene-based mode: which scene this clip belongs to (0-indexed)
     scene_index: int = 0
+    # Auditability: which GameplayEvent informed this clip's boundaries (if any)
+    event_id: Optional[int] = None
+    # Why this clip was selected: "semantic_event", "event_aligned_fallback",
+    # "random_fallback", "semantic_event_reused"
+    selection_reason: str = ""
+    # How many times this region was already used by this consumer at selection time
+    usage_count_at_selection: int = 0
 
 
 @dataclass
@@ -87,6 +94,7 @@ class GameplaySelector:
         rng: Optional[random.Random] = None,
         user_id: Optional[int] = None,
         accept_public: bool = False,
+        max_uses: int = 1,
     ) -> list[SelectedClip]:
         """Select clips totaling ~target_duration seconds.
 
@@ -100,6 +108,7 @@ class GameplaySelector:
             user_id: If provided, filter gameplays by this user first.
             accept_public: If True and user_id is set, fall back to public
                 gameplays when the user's own are exhausted.
+            max_uses: Reuse policy. 1 = strict (default), 0 = unlimited.
 
         Returns:
             List of SelectedClip, each with scene_index indicating which scene
@@ -113,6 +122,7 @@ class GameplaySelector:
                 session, game_id, target_duration,
                 scene_duration=scene_duration, rng=rng,
                 user_id=user_id, public_only=False,
+                max_uses=max_uses,
             )
             if clips:
                 return clips
@@ -127,6 +137,7 @@ class GameplaySelector:
                     session, game_id, target_duration,
                     scene_duration=scene_duration, rng=rng,
                     user_id=user_id, public_only=True,
+                    max_uses=max_uses,
                 )
                 return clips
 
@@ -138,6 +149,7 @@ class GameplaySelector:
             session, game_id, target_duration,
             scene_duration=scene_duration, rng=rng,
             user_id=None, public_only=False,
+            max_uses=max_uses,
         )
 
     def _select_with_filters(
@@ -150,6 +162,7 @@ class GameplaySelector:
         rng: random.Random,
         user_id: Optional[int],
         public_only: bool,
+        max_uses: int = 1,
     ) -> list[SelectedClip]:
         """Internal: select clips with user/public filters applied."""
         # Build query for assets
@@ -185,6 +198,8 @@ class GameplaySelector:
         # gameplay usage by user A doesn't block user B from the same segment.
         source_cache: dict[int, GameplaySource] = {}
         used_ranges_cache: dict[int, list] = {}
+        # V3: preload GameplayEvent boundaries for event-aware fallback selection
+        event_boundaries_cache: dict[int, list[tuple[float, float]]] = {}
         for a in assets:
             if a.source_id not in source_cache:
                 src = session.get(GameplaySource, a.source_id)
@@ -192,16 +207,29 @@ class GameplaySelector:
                 used_ranges_cache[a.source_id] = get_used_ranges(
                     session, a.source_id, consumer_user_id=user_id,
                 )
+                # Load event boundaries for this source (for coherent cuts)
+                from gpcg.domain.models import GameplayEvent
+                evs = session.execute(
+                    select(GameplayEvent.start_time, GameplayEvent.end_time)
+                    .where(GameplayEvent.source_id == a.source_id)
+                    .where(GameplayEvent.interesting_score >= 0.3)
+                    .order_by(GameplayEvent.start_time)
+                ).all()
+                event_boundaries_cache[a.source_id] = [(r[0], r[1]) for r in evs]
 
         if scene_duration > 0:
             clips = self._select_scene_based(
                 assets, source_cache, target_duration, scene_duration, rng,
                 used_ranges_cache=used_ranges_cache,
+                event_boundaries_cache=event_boundaries_cache,
+                max_uses=max_uses,
             )
         else:
             clips = self._select_legacy(
                 assets, source_cache, target_duration, rng,
                 used_ranges_cache=used_ranges_cache,
+                event_boundaries_cache=event_boundaries_cache,
+                max_uses=max_uses,
             )
 
         total = sum(c.duration for c in clips)
@@ -221,15 +249,19 @@ class GameplaySelector:
         target_duration: float,
         rng: random.Random,
         used_ranges_cache: Optional[dict[int, list]] = None,
+        event_boundaries_cache: Optional[dict[int, list[tuple[float, float]]]] = None,
+        max_uses: int = 1,
     ) -> list[SelectedClip]:
         """Legacy mode: each clip = one asset, accumulate until target.
 
         V2: Uses find_available_segment to avoid already-used time ranges.
+        V3: Passes event_boundaries for coherent cuts + max_uses for reuse policy.
         Used ranges are in absolute source coordinates; we convert to
         asset-local coordinates for the availability check.
         """
-        from gpcg.application.clip_usage_service import UsedRange
+        from gpcg.application.clip_usage_service import UsedRange, count_overlapping_uses
         used_ranges_cache = used_ranges_cache or {}
+        event_boundaries_cache = event_boundaries_cache or {}
         weights = [1.0 / (a.used_count + 1) for a in assets]
         selected: list[SelectedClip] = []
         total = 0.0
@@ -265,18 +297,35 @@ class GameplaySelector:
 
             needed = min(asset.duration, target_duration - total)
 
+            # V3: Convert event boundaries to asset-local coordinates
+            abs_events = event_boundaries_cache.get(asset.source_id, [])
+            local_events = []
+            for ev_start, ev_end in abs_events:
+                ls = ev_start - asset.start_sec
+                le = ev_end - asset.start_sec
+                if le <= 0 or ls >= asset.duration:
+                    continue
+                local_events.append((max(0.0, ls), min(asset.duration, le)))
+
             # V2: If no used ranges, use full asset (legacy behavior).
             # Only use find_available_segment when there are used ranges to avoid.
-            if not local_used:
+            if not local_used and max_uses <= 1:
                 start_offset = 0.0
                 end_offset = asset.duration  # full asset, may overshoot target
             else:
                 seg = find_available_segment(
                     asset.duration, needed, local_used, rng=rng,
+                    event_boundaries=local_events if local_events else None,
+                    max_uses=max_uses,
                 )
                 if seg is None:
                     continue
                 start_offset, end_offset = seg
+
+            # V3: Auditability — count existing uses for this region
+            n_uses = count_overlapping_uses(abs_used, asset.start_sec + start_offset,
+                                            asset.start_sec + end_offset)
+            reason = "event_aligned_fallback" if local_events else "random_fallback"
 
             clip = SelectedClip(
                 asset=asset,
@@ -285,6 +334,8 @@ class GameplaySelector:
                 end_sec=asset.start_sec + end_offset,
                 duration=end_offset - start_offset,
                 scene_index=len(selected),
+                selection_reason=reason,
+                usage_count_at_selection=n_uses,
             )
             selected.append(clip)
             total += clip.duration
@@ -307,6 +358,8 @@ class GameplaySelector:
         scene_duration: float,
         rng: random.Random,
         used_ranges_cache: Optional[dict[int, list]] = None,
+        event_boundaries_cache: Optional[dict[int, list[tuple[float, float]]]] = None,
+        max_uses: int = 1,
     ) -> list[SelectedClip]:
         """Scene-based mode: group clips into scenes of scene_duration each.
 
@@ -317,11 +370,13 @@ class GameplaySelector:
         4. If overflow: take available portion, chain another for remainder
 
         V2: Uses find_available_segment to avoid already-used time ranges.
+        V3: Passes event_boundaries for coherent cuts + max_uses for reuse policy.
         Used ranges are in absolute source coordinates; we convert to
         asset-local coordinates for the availability check.
         """
-        from gpcg.application.clip_usage_service import UsedRange
+        from gpcg.application.clip_usage_service import UsedRange, count_overlapping_uses
         used_ranges_cache = used_ranges_cache or {}
+        event_boundaries_cache = event_boundaries_cache or {}
         weights = [1.0 / (a.used_count + 1) for a in assets]
         all_clips: list[SelectedClip] = []
         remaining_total = target_duration
@@ -367,10 +422,22 @@ class GameplaySelector:
                         end_sec=min(asset.duration, local_end),
                     ))
 
+                # V3: Convert event boundaries to asset-local coordinates
+                abs_events = event_boundaries_cache.get(asset.source_id, [])
+                local_events = []
+                for ev_start, ev_end in abs_events:
+                    ls = ev_start - asset.start_sec
+                    le = ev_end - asset.start_sec
+                    if le <= 0 or ls >= asset.duration:
+                        continue
+                    local_events.append((max(0.0, ls), min(asset.duration, le)))
+
                 available = asset.duration
                 needed = min(available, scene_remaining)
                 seg = find_available_segment(
                     available, needed, local_used, rng=rng,
+                    event_boundaries=local_events if local_events else None,
+                    max_uses=max_uses,
                 )
                 if seg is None:
                     consecutive_failures += 1
@@ -380,6 +447,11 @@ class GameplaySelector:
                 start_offset, end_offset = seg
                 take = end_offset - start_offset
 
+                # V3: Auditability
+                n_uses = count_overlapping_uses(abs_used, asset.start_sec + start_offset,
+                                                asset.start_sec + end_offset)
+                reason = "event_aligned_fallback" if local_events else "random_fallback"
+
                 clip = SelectedClip(
                     asset=asset,
                     source_path=source.file_path,
@@ -387,6 +459,8 @@ class GameplaySelector:
                     end_sec=asset.start_sec + end_offset,
                     duration=take,
                     scene_index=scene_idx,
+                    selection_reason=reason,
+                    usage_count_at_selection=n_uses,
                 )
                 scene_clips.append(clip)
                 scene_remaining -= take

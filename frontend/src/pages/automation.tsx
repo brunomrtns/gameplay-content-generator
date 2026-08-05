@@ -62,6 +62,10 @@ interface AutomationConfig extends VideoCustomization {
   youtube_privacy?: string;
   youtube_category_id?: string;
   auto_publish?: boolean;
+  // V3: Reuse policy + public gameplay fallback
+  max_clip_uses?: number;
+  fallback_policy?: string;
+  accept_public_gameplays?: boolean;
 }
 
 function SectionTitle({ icon: Icon, title, desc }: { icon: any; title: string; desc?: string }) {
@@ -229,20 +233,55 @@ export function AutomationPage() {
           {/* Section 1: Conteúdo */}
           <Card>
             <SectionTitle icon={Film} title="Conteúdo" desc="Qual gameplay usar como fonte" />
-            <div>
-              <Label>Jogo</Label>
-              <Select
-                value={config.game_id ? String(config.game_id) : ""}
-                onChange={(v) => update("game_id", v ? Number(v) : null)}
-              >
-                <option value="">Qualquer jogo (aleatório)</option>
-                {games?.map((g: any) => (
-                  <option key={g.id} value={g.id}>{g.canonical_name}</option>
-                ))}
-              </Select>
-              <p className="mt-1.5 text-xs text-text-muted">
-                Escolha um jogo específico ou deixe o sistema escolher aleatoriamente
-              </p>
+            <div className="space-y-4">
+              <div>
+                <Label>Jogo</Label>
+                <Select
+                  value={config.game_id ? String(config.game_id) : ""}
+                  onChange={(v) => update("game_id", v ? Number(v) : null)}
+                >
+                  <option value="">Qualquer jogo (aleatório)</option>
+                  {games?.map((g: any) => (
+                    <option key={g.id} value={g.id}>{g.canonical_name}</option>
+                  ))}
+                </Select>
+                <p className="mt-1.5 text-xs text-text-muted">
+                  Escolha um jogo específico ou deixe o sistema escolher aleatoriamente
+                </p>
+              </div>
+
+              {/* V3: Reuse policy */}
+              <div>
+                <Label>Reutilização de cenas</Label>
+                <Select
+                  value={String(config.max_clip_uses ?? 1)}
+                  onChange={(v) => update("max_clip_uses", Number(v))}
+                >
+                  <option value="1">1 vez (cada trecho aparece em apenas 1 vídeo)</option>
+                  <option value="2">2 vezes (permite uma reutilização)</option>
+                  <option value="3">3 vezes (permite duas reutilizações)</option>
+                  <option value="0">Ilimitado (sem bloqueio por quota)</option>
+                </Select>
+                <p className="mt-1.5 text-xs text-text-muted">
+                  Máximo de vídeos em que uma mesma região de gameplay pode aparecer.
+                  O histórico sempre é registrado para análise de diversidade.
+                </p>
+              </div>
+
+              {/* V3: Fallback policy for public gameplays */}
+              <div>
+                <Label>Gameplay pública</Label>
+                <Select
+                  value={config.fallback_policy || (config.accept_public_gameplays ? "allow_public" : "stop")}
+                  onChange={(v) => update("fallback_policy", v)}
+                >
+                  <option value="stop">Apenas minhas gameplays</option>
+                  <option value="allow_public">Permitir gameplays públicas como fallback</option>
+                </Select>
+                <p className="mt-1.5 text-xs text-text-muted">
+                  Quando suas gameplays se esgotarem, usar gameplays públicas de outros usuários?
+                </p>
+              </div>
             </div>
           </Card>
 

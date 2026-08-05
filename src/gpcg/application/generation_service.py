@@ -546,6 +546,14 @@ class GenerationService:
 
         # ── Stage: tts ──────────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.tts)
+        # Unload all Ollama models from VRAM before TTS — XTTS needs the full
+        # GPU memory. Ollama keeps models loaded for 5min after use by default,
+        # which would cause TTS to fail with OOM on GPUs with limited VRAM.
+        try:
+            from gpcg.infrastructure.llm import get_llm
+            get_llm().unload_all_models()
+        except Exception as e:
+            log.warning(f"could not unload Ollama models before TTS: {e}")
         script_id = self._get_artifact(job_id, "script_id")
         # Read voice override from job artifacts (absolute path to uploaded voice)
         # NOTE: The voice_path sent by the VPS is an absolute path inside the
@@ -662,6 +670,24 @@ class GenerationService:
                     else:
                         # Legacy boolean field
                         accept_public = auto.config.get("accept_public_gameplays", False)
+                    # V3: Read max_clip_uses from automation config (default=1)
+                    max_clip_uses = auto.config.get("max_clip_uses", 1)
+                else:
+                    max_clip_uses = 1
+
+            # V3: Read gameplay preference + reuse override from job artifacts
+            gameplay_preference = job.artifacts.get("gameplay_preference")
+            reuse_override = job.artifacts.get("reuse_override")
+
+            # V3: Determine effective max_uses for this job
+            # Precedence: override explícito da ideia > configuração do usuário > default
+            if reuse_override == "allow_reuse":
+                effective_max_uses = max(max_clip_uses, 2)  # at least allow 2
+            elif reuse_override == "skip":
+                effective_max_uses = max_clip_uses  # strict, no override
+            else:
+                effective_max_uses = max_clip_uses
+
             clips = self.gameplay_retriever.retrieve(
                 session, select_game_id, target_duration=narration_dur,
                 creative_plan=creative_plan,
@@ -670,6 +696,8 @@ class GenerationService:
                 user_id=user_id,
                 accept_public=accept_public,
                 narrative_beats=job.artifacts.get("creative_plan", {}).get("narrative_beats", []),
+                max_uses=effective_max_uses,
+                gameplay_preference_game_id=gameplay_preference,
             )
             if not clips:
                 bg_name = session.get(Game, select_game_id).canonical_name if select_game_id else "N/A"
@@ -679,6 +707,7 @@ class GenerationService:
                 )
             # Stash clip info (asset ids + ranges + scene_index) for the plan builder
             # V2: also include source_id for clip usage tracking
+            # V3: include event_id + selection_reason + usage_count for auditability
             job.artifacts = {
                 **job.artifacts,
                 "selected_clips": [
@@ -690,9 +719,15 @@ class GenerationService:
                         "end": c.end_sec,
                         "duration": c.duration,
                         "scene_index": c.scene_index,
+                        "event_id": c.event_id,
+                        "selection_reason": c.selection_reason,
+                        "usage_count_at_selection": c.usage_count_at_selection,
                     }
                     for c in clips
                 ],
+                "max_uses_configured": max_clip_uses,
+                "max_uses_effective": effective_max_uses,
+                "reuse_override": reuse_override,
             }
             session.flush()
 
