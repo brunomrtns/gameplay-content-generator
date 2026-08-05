@@ -371,7 +371,7 @@ def _reconcile_idea_queue(
     Returns the new queue entries (list[dict] with ki_id, gameplay_preference,
     reuse_override). Returns empty list if no fresh KIs are available.
     """
-    from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
+    from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus, Job, JobStatus
     from gpcg.domain.visibility import visible_to_user
 
     max_size = limit if limit is not None else (config.get("max_queue_size") or 10)
@@ -382,6 +382,23 @@ def _reconcile_idea_queue(
     )
     if exclude_ids:
         query = query.filter(~KnowledgeItem.id.in_(exclude_ids))
+
+    # V3: Also exclude KIs that have an active job (running/queued) for this
+    # user. Without this, the reconciler re-adds a KI to the queue right after
+    # it was consumed (job created, KI removed from queue) but before the job
+    # completes and marks the KI as "used".
+    active_ki_ids = set()
+    active_jobs = db.query(Job).filter(
+        Job.user_id == user_id,
+        Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
+    ).all()
+    for aj in active_jobs:
+        ki_id = (aj.artifacts or {}).get("queued_knowledge_item_id")
+        if ki_id:
+            active_ki_ids.add(ki_id)
+    if active_ki_ids:
+        query = query.filter(~KnowledgeItem.id.in_(active_ki_ids))
+
     kis = query.order_by(KnowledgeItem.editorial_score.desc()).limit(max_size).all()
 
     if not kis:
