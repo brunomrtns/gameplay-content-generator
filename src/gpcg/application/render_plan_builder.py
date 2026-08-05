@@ -202,6 +202,42 @@ class RenderPlanBuilder:
         if not scene_timeline:
             raise ValueError("no clips could be extracted — cannot build render plan")
 
+        # V3: Padding — if total scene duration < narration duration, extend
+        # the last scene by duplicating it to cover the gap. This prevents the
+        # video from ending before the narration finishes (abrupt cut).
+        # The gameplay selector may not always fill the exact target duration
+        # (e.g. single-source GENERAL_TOPIC with limited available segments).
+        gap = narration_duration - cumulative
+        if gap > 0.5:
+            import shutil as _shutil
+            last_scene = scene_timeline[-1]
+            last_scene_num = len(scene_timeline)
+            source_scene_file = scene_dir / f"scene_{last_scene_num:03d}.mp4"
+            if source_scene_file.exists():
+                last_scene_dur = last_scene["duration"]
+                padding_added = 0.0
+                pad_scene_num = last_scene_num + 1
+                while padding_added < gap - 0.5:
+                    pad_file = scene_dir / f"scene_{pad_scene_num:03d}.mp4"
+                    _shutil.copy2(source_scene_file, pad_file)
+                    pad_dur = min(last_scene_dur, gap - padding_added)
+                    scene_timeline.append({
+                        "scene_id": pad_scene_num,
+                        "start_time": round(cumulative + padding_added, 3),
+                        "end_time": round(cumulative + padding_added + pad_dur, 3),
+                        "duration": round(pad_dur, 3),
+                        "block_name": f"gameplay_clip_{pad_scene_num}",
+                        "narrative_intent": last_scene["narrative_intent"],
+                    })
+                    padding_added += pad_dur
+                    pad_scene_num += 1
+                cumulative += padding_added
+                log.info(
+                    f"padding: added {padding_added:.1f}s by duplicating last scene "
+                    f"to cover narration gap (was {cumulative - padding_added:.1f}s, "
+                    f"now {cumulative:.1f}s, narration={narration_duration:.1f}s)"
+                )
+
         # Build the request_data for video-generate
         request_data: dict[str, Any] = {
             "audio_principal": str(narration_wav),
