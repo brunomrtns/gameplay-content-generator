@@ -332,8 +332,16 @@ class GameplaySelector:
             scene_target = min(scene_duration, remaining_total)
             scene_clips: list[SelectedClip] = []
             scene_remaining = scene_target
+            consecutive_failures = 0
+            max_failures = len(assets) * 3  # give up after exhausting all assets multiple times
 
             while scene_remaining > 0.01:
+                if consecutive_failures >= max_failures:
+                    log.warning(
+                        f"scene {scene_idx}: no available segments after {consecutive_failures} attempts "
+                        f"(all clips may be USED), stopping scene fill"
+                    )
+                    break
                 # Pick a random asset (avoid back-to-back same source)
                 candidates = list(range(len(assets)))
                 if last_source_id is not None and len(assets) > 1:
@@ -365,8 +373,10 @@ class GameplaySelector:
                     available, needed, local_used, rng=rng,
                 )
                 if seg is None:
+                    consecutive_failures += 1
                     continue
 
+                consecutive_failures = 0  # reset on success
                 start_offset, end_offset = seg
                 take = end_offset - start_offset
 
@@ -388,6 +398,13 @@ class GameplaySelector:
                     )
                 )
 
+            if not scene_clips:
+                # Couldn't fill even one clip for this scene — all assets exhausted
+                log.warning(
+                    f"scene {scene_idx}: no clips available, stopping selection "
+                    f"({remaining_total:.1f}s unfilled)"
+                )
+                break
             all_clips.extend(scene_clips)
             remaining_total -= scene_target
             scene_idx += 1
