@@ -550,7 +550,6 @@ class GenerationService:
         # GPU memory. Ollama keeps models loaded for 5min after use by default,
         # which would cause TTS to fail with OOM on GPUs with limited VRAM.
         try:
-            from gpcg.infrastructure.llm import get_llm
             get_llm().unload_all_models()
         except Exception as e:
             log.warning(f"could not unload Ollama models before TTS: {e}")
