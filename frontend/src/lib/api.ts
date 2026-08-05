@@ -294,6 +294,7 @@ export const api = {
 
   // ── Dashboard ───────────────────────────────────────────────────────────
   getDashboard: () => request<any>("/dashboard"),
+  getCurrentJob: () => request<{ job: any }>("/automation/current-job"),
 
   // ── Games ──────────────────────────────────────────────────────────────
   listGames: () => request<any[]>("/games"),

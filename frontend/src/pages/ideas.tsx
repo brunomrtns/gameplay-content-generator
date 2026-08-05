@@ -89,6 +89,8 @@ export function IdeasPage() {
   const [queueModalItem, setQueueModalItem] = useState<KnowledgeItem | null>(null);
   const [selectedGameplay, setSelectedGameplay] = useState<number | null>(null);
   const [selectedReuseOverride, setSelectedReuseOverride] = useState<string | null>(null);
+  // V3: Currently processing job
+  const [currentJob, setCurrentJob] = useState<any>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -96,7 +98,7 @@ export function IdeasPage() {
     try {
       // "manual" is a source_type filter, not item_type — handle specially
       const isManualFilter = filterType === "manual";
-      const [itemsRes, statsRes, queueRes, availRes] = await Promise.all([
+      const [itemsRes, statsRes, queueRes, availRes, jobRes] = await Promise.all([
         api.listKnowledgeItems({
           item_type: isManualFilter ? undefined : filterType || undefined,
           status: filterStatus || undefined,
@@ -105,6 +107,7 @@ export function IdeasPage() {
         api.getKnowledgeItemStats(),
         api.getIdeaQueue(),
         api.getGameplayAvailability(),
+        api.getCurrentJob(),
       ]);
       let allItems = itemsRes.items || [];
       if (isManualFilter) {
@@ -118,6 +121,7 @@ export function IdeasPage() {
       const qIds = qData.map((q: any) => (typeof q === "object" ? q.ki_id : q));
       setQueueIds(new Set(qIds));
       setAvailability(availRes.games || []);
+      setCurrentJob(jobRes.job);
     } catch (e: any) {
       setError(e.message || "Failed to load content ideas");
     } finally {
@@ -128,6 +132,20 @@ export function IdeasPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // V3: Poll current job every 10s when a job is running (stage updates)
+  useEffect(() => {
+    if (!currentJob) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await api.getCurrentJob();
+        setCurrentJob(res.job);
+      } catch {
+        // non-fatal
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [currentJob?.id]);
 
   const handleReject = async (id: number) => {
     try {
@@ -369,6 +387,62 @@ export function IdeasPage() {
       {error && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
           {error}
+        </div>
+      )}
+
+      {/* V3: Currently Processing — show above the queue when a job is running */}
+      {currentJob && (
+        <div className="rounded-lg border border-teal-500/40 bg-teal-500/10 p-4">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="relative flex h-3 w-3">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-400 opacity-75"></span>
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-teal-400"></span>
+            </div>
+            <h2 className="text-lg font-semibold text-text">Em Processamento</h2>
+            <span className="text-sm text-text-muted">
+              Job #{currentJob.id}
+            </span>
+          </div>
+          <div className="flex items-center gap-3 rounded-lg border border-teal-500/20 bg-surface p-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-teal-500/20">
+              <svg className="h-5 w-5 text-teal-300 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ animationDuration: "3s" }}>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m6 6h2m-6 4h2m-6-4H4m12 8a8 8 0 100-16 8 8 0 000 16z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              {currentJob.ki_title ? (
+                <>
+                  <p className="text-sm font-medium text-text line-clamp-1">
+                    {currentJob.ki_title}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    {currentJob.ki_item_type && (
+                      <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+                        TYPE_COLORS[currentJob.ki_item_type] || "bg-gray-500/20 text-gray-300 border-gray-500/30"
+                      }`}>
+                        {TYPE_LABELS[currentJob.ki_item_type] || currentJob.ki_item_type}
+                      </span>
+                    )}
+                    <span className="text-xs text-teal-300 font-medium">
+                      {currentJob.stage_label}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm font-medium text-text">
+                  {currentJob.stage_label || "Processando..."}
+                </p>
+              )}
+            </div>
+            {currentJob.progress > 0 && (
+              <div className="shrink-0 text-right">
+                <div className="text-xs text-text-muted">Progresso</div>
+                <div className="text-sm font-medium text-teal-300">
+                  {Math.round(currentJob.progress * 100)}%
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

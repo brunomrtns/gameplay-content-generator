@@ -119,6 +119,76 @@ def get_automation(
     }
 
 
+@router.get("/automation/current-job")
+def get_current_job(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get the currently running job for the user, including which idea (KI)
+    is being processed.
+
+    Returns null if no job is running. Used by the ideas page to show
+    "currently processing" above the queue.
+    """
+    from gpcg.domain.models import Job, JobStatus, KnowledgeItem
+    from sqlalchemy import select
+
+    job = db.execute(
+        select(Job).where(
+            Job.user_id == user.id,
+            Job.status == JobStatus.running.value,
+        ).order_by(Job.created_at.desc()).limit(1)
+    ).scalars().first()
+
+    if not job:
+        return {"job": None}
+
+    artifacts = job.artifacts or {}
+    ki_id = artifacts.get("queued_knowledge_item_id")
+    ki_title = None
+    ki_item_type = None
+    if ki_id:
+        ki = db.get(KnowledgeItem, ki_id)
+        if ki:
+            ki_title = ki.title
+            ki_item_type = ki.item_type
+
+    # Map stage to user-friendly Portuguese label
+    STAGE_LABELS = {
+        "content_planning": "Planejando conteúdo",
+        "story_finding": "Encontrando narrativa",
+        "editorial_planning": "Planejamento editorial",
+        "creative_engine": "Motor criativo",
+        "script": "Escrevendo roteiro",
+        "humanization": "Humanizando texto",
+        "script_review": "Revisando roteiro",
+        "tts": "Sintetizando voz",
+        "gameplay_selection": "Selecionando gameplay",
+        "music_selection": "Escolhendo música",
+        "render_plan": "Preparando renderização",
+        "render": "Renderizando vídeo",
+        "output": "Enviando vídeo",
+        "done": "Finalizando",
+        "content_collection": "Coletando conteúdo",
+        "mapping": "Mapeando gameplay",
+    }
+
+    return {
+        "job": {
+            "id": job.id,
+            "type": job.type,
+            "stage": job.stage,
+            "stage_label": STAGE_LABELS.get(job.stage or "", job.stage or ""),
+            "progress": job.progress,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "ki_id": ki_id,
+            "ki_title": ki_title,
+            "ki_item_type": ki_item_type,
+            "idea_source": artifacts.get("idea_source"),
+        }
+    }
+
+
 class UpdateAutomationRequest(BaseModel):
     name: Optional[str] = None
     config: Optional[dict] = None
