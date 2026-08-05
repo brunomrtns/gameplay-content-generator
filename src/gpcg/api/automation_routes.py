@@ -1078,12 +1078,17 @@ def create_job_from_automation(user_id: int) -> int | None:
                     return None
             else:
                 # General idea → curiosity_short with background gameplay
-                # V3: If gameplay_preference was set, use it as background_game_id
-                # instead of the auto-selected bg_game.
-                chosen_bg_game_id = bg_game.id
-                if gameplay_preference and bg_game and bg_game.id == gameplay_preference:
+                # V3: If gameplay_preference was set and validated (bg_game found
+                # for that specific game), use it as background_game_id.
+                # Otherwise fall back to auto-selected bg_game.
+                if gameplay_preference and bg_game:
                     chosen_bg_game_id = bg_game.id
                     log.info(f"automation: using user-selected gameplay game #{chosen_bg_game_id} for KI #{ki_id}")
+                elif bg_game:
+                    chosen_bg_game_id = bg_game.id
+                else:
+                    log.warning("automation: no background game available for curiosity_short")
+                    return None
                 job = service.create_curiosity_job(
                     background_game_id=chosen_bg_game_id,
                     fact_id=None,
