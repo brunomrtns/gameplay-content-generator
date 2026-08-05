@@ -328,9 +328,12 @@ def get_idea_queue(
     # Fetch the actual items (preserve order)
     items = []
     for entry in queue:
-        ki = db.get(KnowledgeItem, entry["ki_id"])
+        ki_id = entry.get("ki_id")
+        if ki_id is None:
+            continue
+        ki = db.get(KnowledgeItem, ki_id)
         if ki:
-            item_out = _item_to_out(ki)
+            item_out = _item_to_out(ki).model_dump()
             item_out["gameplay_preference"] = entry.get("gameplay_preference")
             item_out["reuse_override"] = entry.get("reuse_override")
             items.append(item_out)
