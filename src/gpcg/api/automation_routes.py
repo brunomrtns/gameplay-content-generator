@@ -258,29 +258,14 @@ def check_automation(
 
         cfg = auto.config or {}
         # V3: Reconciliador — auto-fill queue with fresh KIs up to max_queue_size
-        # Only in automatic mode (manual mode = user curates everything)
+        # Runs on VPS, independent of worker. Also triggered after content
+        # collection and when user opens the ideas page.
+        reconcile_user_queue(db, auto.user_id)
+        db.flush()
+        # Re-read config after reconcile may have updated it
+        cfg = auto.config or {}
         queue_mode = cfg.get("queue_mode", "automatic")
         idea_queue = cfg.get("idea_queue", [])
-        if queue_mode == "automatic" and cfg.get("auto_fill_queue", False):
-            max_size = int(cfg.get("max_queue_size", 10))
-            if len(idea_queue) < max_size:
-                new_entries = _reconcile_idea_queue(
-                    db, auto.user_id, cfg,
-                    exclude_ids={e.get("ki_id") for e in idea_queue},
-                    limit=max_size - len(idea_queue),
-                )
-                if new_entries:
-                    idea_queue = list(idea_queue) + new_entries
-                    from sqlalchemy.orm.attributes import flag_modified
-                    cfg2 = dict(cfg)
-                    cfg2["idea_queue"] = idea_queue
-                    auto.config = cfg2
-                    flag_modified(auto, "config")
-                    db.flush()
-                    log.info(
-                        f"Reconciliador: auto-filled queue for user {auto.user_id} "
-                        f"with {len(new_entries)} KIs (now {len(idea_queue)}/{max_size})"
-                    )
 
         pending.append({
             "user_id": auto.user_id,
@@ -337,6 +322,77 @@ def _reconcile_idea_queue(
         }
         for ki in kis
     ]
+
+
+def reconcile_user_queue(db: Session, user_id: int) -> int:
+    """V3: Reconcile a user's idea queue — auto-fill up to max_queue_size.
+
+    This is the public entry point that can be called from anywhere:
+    - check_automation (worker poll)
+    - sync_knowledge_items (after new KIs arrive from collection)
+    - GET /idea-queue (when user opens the ideas page)
+    - POST /automation/reconcile-queue (manual trigger)
+
+    Only runs when:
+    - queue_mode == "automatic"
+    - auto_fill_queue == True
+    - queue length < max_queue_size
+
+    Returns the number of new entries added (0 if nothing changed).
+    """
+    from gpcg.domain.models import Automation
+    from sqlalchemy.orm.attributes import flag_modified
+
+    auto = db.query(Automation).filter(Automation.user_id == user_id).first()
+    if not auto:
+        return 0
+
+    cfg = dict(auto.config or {})
+    queue_mode = cfg.get("queue_mode", "automatic")
+    if queue_mode != "automatic" or not cfg.get("auto_fill_queue", False):
+        return 0
+
+    idea_queue = _normalize_idea_queue(cfg.get("idea_queue", []))
+    max_size = int(cfg.get("max_queue_size", 10))
+    if len(idea_queue) >= max_size:
+        return 0
+
+    new_entries = _reconcile_idea_queue(
+        db, user_id, cfg,
+        exclude_ids={e.get("ki_id") for e in idea_queue},
+        limit=max_size - len(idea_queue),
+    )
+    if not new_entries:
+        return 0
+
+    idea_queue = list(idea_queue) + new_entries
+    cfg["idea_queue"] = idea_queue
+    auto.config = cfg
+    flag_modified(auto, "config")
+    db.flush()
+    log.info(
+        f"Reconciliador: auto-filled queue for user {user_id} "
+        f"with {len(new_entries)} KIs (now {len(idea_queue)}/{max_size})"
+    )
+    return len(new_entries)
+
+
+def reconcile_all_users(db: Session) -> int:
+    """V3: Reconcile queues for ALL users with auto_fill_queue enabled.
+
+    Called after content collection syncs new KIs to the VPS.
+    Returns the total number of entries added across all users.
+    """
+    from gpcg.domain.models import Automation
+    autos = db.query(Automation).all()
+    total = 0
+    for auto in autos:
+        cfg = auto.config or {}
+        if cfg.get("auto_fill_queue", False) and cfg.get("queue_mode", "automatic") == "automatic":
+            total += reconcile_user_queue(db, auto.user_id)
+    if total > 0:
+        db.commit()
+    return total
 
 
 @router.post("/automation/consume-queue")

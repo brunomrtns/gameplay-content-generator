@@ -2168,6 +2168,19 @@ def sync_knowledge_items(
         f"Content collection synced: {inserted} new items, {skipped} duplicates skipped, "
         f"{req.cleaned_count} old news cleaned (job #{job_id})"
     )
+
+    # V3: Reconcile idea queues — if new KIs were inserted, auto-fill queues
+    # for users with auto_fill_queue enabled. This runs on the VPS, not the
+    # worker, so queues are filled immediately after collection completes.
+    if inserted > 0:
+        try:
+            from gpcg.api.automation_routes import reconcile_all_users
+            added = reconcile_all_users(db)
+            if added > 0:
+                log.info(f"Reconciliador: auto-filled {added} queue entries across all users after content collection")
+        except Exception as e:
+            log.warning(f"Reconciliador failed after content collection: {e}")
+
     return {"ok": True, "inserted": inserted, "skipped": skipped, "cleaned": req.cleaned_count}
 
 

@@ -319,8 +319,22 @@ def get_idea_queue(
         - ki_id: KnowledgeItem ID
         - gameplay_preference: null (auto) or game_id (user chose specific game)
         - reuse_override: null (use global config), "allow_reuse", or "skip"
+
+    V3: Also triggers the reconciliador — if auto_fill_queue is enabled and
+    the queue is below max_queue_size, fresh KIs are added automatically.
+    This runs on the VPS when the user opens the ideas page, so the queue
+    is filled immediately without waiting for the worker to poll.
     """
     from gpcg.domain.models import Automation, KnowledgeItem
+    # V3: Reconcile before returning — fill queue if auto_fill_queue is on
+    try:
+        from gpcg.api.automation_routes import reconcile_user_queue
+        added = reconcile_user_queue(db, user.id)
+        if added > 0:
+            db.commit()
+    except Exception:
+        pass  # non-fatal — just return the queue as-is
+
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     if not auto:
         return {"queue": [], "items": []}
