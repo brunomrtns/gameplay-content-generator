@@ -304,7 +304,7 @@ def _reconcile_idea_queue(
     from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
     from gpcg.domain.visibility import visible_to_user
 
-    max_size = limit if limit is not None else int(config.get("max_queue_size", 10))
+    max_size = limit if limit is not None else (config.get("max_queue_size") or 10)
     vis = visible_to_user(KnowledgeItem.user_id, KnowledgeItem.is_public, user_id)
     query = db.query(KnowledgeItem).filter(
         KnowledgeItem.status == KnowledgeItemStatus.fresh.value,
@@ -356,7 +356,7 @@ def reconcile_user_queue(db: Session, user_id: int) -> int:
         return 0
 
     idea_queue = _normalize_idea_queue(cfg.get("idea_queue", []))
-    max_size = int(cfg.get("max_queue_size", 10))
+    max_size = cfg.get("max_queue_size") or 10
     if len(idea_queue) >= max_size:
         return 0
 

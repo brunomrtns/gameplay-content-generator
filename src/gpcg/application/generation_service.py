@@ -656,7 +656,12 @@ class GenerationService:
             # V3: Prefer config_snapshot from job.artifacts (deterministic for
             # retry) over the live automation config (which may have changed).
             config_snapshot = job.artifacts.get("config_snapshot") or {}
-            max_clip_uses = config_snapshot.get("max_clip_uses") or 1
+            # V3: max_clip_uses=None means "not configured" → default to 0
+            # (unlimited reuse). This prevents clip exhaustion when the user
+            # hasn't explicitly set a reuse policy.
+            max_clip_uses = config_snapshot.get("max_clip_uses")
+            if max_clip_uses is None:
+                max_clip_uses = 0  # unlimited
             fallback_policy = config_snapshot.get("fallback_policy")
             if user_id is not None:
                 # Fall back to live config only if snapshot is missing
@@ -667,12 +672,13 @@ class GenerationService:
                     ).scalars().first()
                     if auto and isinstance(auto.config, dict):
                         fallback_policy = auto.config.get("fallback_policy")
-                        max_clip_uses = auto.config.get("max_clip_uses", 1)
+                        mcu = auto.config.get("max_clip_uses")
+                        max_clip_uses = mcu if mcu is not None else 0
                         if not fallback_policy:
                             # Legacy boolean field
                             accept_public = auto.config.get("accept_public_gameplays", False)
                     else:
-                        max_clip_uses = 1
+                        max_clip_uses = 0
                 # Resolve fallback_policy to accept_public boolean
                 if fallback_policy == "allow_public":
                     accept_public = True
