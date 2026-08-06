@@ -42,7 +42,7 @@
 - **Risco**: Médio — precisa garantir que jobs em andamento não quebrem se a gameplay for deletada
 
 ### [P0-03] Privacy enforcement — isolamento total entre usuários
-- **Status**: 🔲 Não implementado (parcial)
+- **Status**: ✅ Implementado (v0.3.15)
 - **Problema**: O editorial system pode estar vendo sources de outros usuários. Queries de GameplaySource nem sempre filtram por `user_id` ou `is_public`. Um usuário pode acabar usando gameplay de outro sem saber.
 - **Gaps identificados** (auditoria completa):
   - ⚠️ **CRÍTICO**: `POST /sources/{source_id}/assign-game` (`routes.py:248-267`) — não verifica `user_id`. Qualquer usuário pode atribuir game a source de outro.
@@ -195,6 +195,16 @@
   - Worker handler _process_cleanup_gameplay_job apaga arquivos do HD
   - Frontend botão Trash2 com confirmação dupla
   - Filtro: list_sources não retorna sources deletadas
+
+### [DONE-05] Privacy enforcement — isolamento entre usuários
+- **Versão**: v0.3.15
+- **Data**: 2026-08-06
+- **Itens**:
+  - Fix POST /sources/{source_id}/assign-game: adicionado auth + ownership check
+  - Fix IngestionService._ingest_file: dedup agora respeita user_id
+  - IngestionService.scan_once e _ingest_file aceitam user_id opcional
+  - Endpoint /inbox/scan passa user_id para IngestionService
+  - Endpoint /gameplays/upload passa user_id para IngestionService
 
 ---
 
