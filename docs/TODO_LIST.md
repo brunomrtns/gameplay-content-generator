@@ -59,7 +59,7 @@
 - **Risco**: Alto — mudança que pode quebrar fluxos existentes se não for bem testada
 
 ### [P0-04] Auto-detecção de problemas no sistema
-- **Status**: 🔲 Não implementado
+- **Status**: ✅ Implementado (v0.3.16)
 - **Problema**: Problemas como "source sem clips", "KI sem jogo", "gameplay órfã" só são detectados quando o sistema tenta usar e falha. Deveria haver detecção proativa.
 - **Escopo**:
   - [ ] Job periódico de health-check que detecta:
@@ -121,7 +121,7 @@
 - **Descrição**: Antes a fila era 100% news. Agora com queries expandidas, o coletor busca curiosity/lore/fact também. A proporção depende do `content_type_affinity` do ChannelProfile.
 
 ### [P1-06] Limpeza automática da fila (KIs rejeitadas/inválidas)
-- **Status**: 🔲 Não implementado (parcial)
+- **Status**: ✅ Implementado (v0.3.16)
 - **Problema**: KIs rejeitadas continuam na fila até serem consumidas e falharem. O reconciliador deveria limpar KIs inválidas da fila proativamente.
 - **Escopo**:
   - [ ] Reconciliador: ao auto-preencher fila, remover KIs com status=rejected
@@ -205,6 +205,14 @@
   - IngestionService.scan_once e _ingest_file aceitam user_id opcional
   - Endpoint /inbox/scan passa user_id para IngestionService
   - Endpoint /gameplays/upload passa user_id para IngestionService
+
+### [DONE-06] Auto-detecção de problemas + limpeza de fila
+- **Versão**: v0.3.16
+- **Data**: 2026-08-06
+- **Itens**:
+  - P0-04: ProblemDetectorService detecta sources sem clips, sources sem events, jobs presos, KIs rejeitadas na fila, KIs sem gameplay
+  - Endpoint GET /api/health/problems retorna diagnóstico completo
+  - P1-06: Endpoint POST /api/idea-queue/cleanup remove KIs inválidas da fila
 
 ---
 
