@@ -1315,6 +1315,36 @@ def create_job_from_automation(user_id: int) -> int | None:
             if ki.game_id:
                 game = session.get(Game, ki.game_id)
                 if game:
+                    # CRITICAL: Verify that the user has usable clips for this game
+                    # BEFORE creating the job. Without this check, the system would
+                    # spend GPU time on script/TTS only to fail at render with
+                    # "no gameplay assets available".
+                    from gpcg.domain.models import GameplayAsset
+                    user_clips = session.query(GameplayAsset).join(
+                        GameplaySource, GameplayAsset.source_id == GameplaySource.id
+                    ).filter(
+                        GameplaySource.game_id == ki.game_id,
+                        GameplaySource.ingestion_status == IngestionStatus.ready.value,
+                        ((GameplaySource.user_id == user_id) |
+                         (GameplaySource.is_public == True)),
+                    ).count()
+                    if user_clips == 0:
+                        log.warning(
+                            f"automation: queued KI #{ki_id} references game '{game.canonical_name}' "
+                            f"but user #{user_id} has no usable clips — skipping"
+                        )
+                        # Remove from queue and return None (will retry next cycle)
+                        from sqlalchemy.orm.attributes import flag_modified
+                        auto2 = session.query(Automation).filter(Automation.user_id == user_id).first()
+                        cfg2 = dict(auto2.config or {})
+                        q2 = _normalize_idea_queue(cfg2.get("idea_queue", []))
+                        q2 = [e for e in q2 if e.get("ki_id") != ki_id]
+                        cfg2["idea_queue"] = q2
+                        auto2.config = cfg2
+                        flag_modified(auto2, "config")
+                        session.commit()
+                        return None
+
                     job = service.create_job(
                         game.id,
                         user_id=user_id,
