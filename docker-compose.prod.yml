@@ -25,6 +25,12 @@ services:
       GPCG_HOST: 0.0.0.0
       GPCG_PORT: 8787
       BI_IDENTITY_URL: http://bi-api:3300
+      # ── Editorial Intelligence V2 ────────────────────────────────────────
+      GPCG_EDITORIAL_BRIEF_ENABLED: "true"
+      GPCG_COMPOSITE_SCORING_ENABLED: "true"
+      GPCG_DIVERSITY_ENGINE_ENABLED: "true"
+      GPCG_FEEDBACK_LOOP_ENABLED: "true"
+      GPCG_EDITORIAL_EXPLORATION_FACTOR: "0.1"
     expose:
       - "8787"
     volumes:
@@ -55,6 +61,12 @@ services:
     env_file: .env
     environment:
       GPCG_ENV: production
+      # ── Editorial Intelligence V2 ────────────────────────────────────────
+      GPCG_EDITORIAL_BRIEF_ENABLED: "true"
+      GPCG_COMPOSITE_SCORING_ENABLED: "true"
+      GPCG_DIVERSITY_ENGINE_ENABLED: "true"
+      GPCG_FEEDBACK_LOOP_ENABLED: "true"
+      GPCG_EDITORIAL_EXPLORATION_FACTOR: "0.1"
     volumes:
       - gpcg-data:/app/data
     networks:
