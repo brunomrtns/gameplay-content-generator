@@ -764,6 +764,7 @@ class RemoteWorker:
                     game_name=inv_data["game_name"],
                 )
                 inv.gameplay_sources_ready = inv_data.get("gameplay_sources_ready", 0)
+                inv.gameplay_clips_available = inv_data.get("gameplay_clips_available", 0)
                 inv.total_gameplay_duration = inv_data.get("total_gameplay_duration", 0.0)
                 inv.gameplay_sources_total = inv_data.get("gameplay_sources_total", 0)
                 inv.facts_available = inv_data.get("facts_available", 0)

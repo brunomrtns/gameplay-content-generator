@@ -682,7 +682,7 @@ def get_editorial_data(
     EditorialStrategyService locally (with LLM) and then creates the job
     via POST /api/automation/create-job.
     """
-    from gpcg.domain.models import Fact, KnowledgeChunk, KnowledgeItem, KnowledgeItemStatus, ChannelProfile
+    from gpcg.domain.models import Fact, KnowledgeChunk, KnowledgeItem, KnowledgeItemStatus, ChannelProfile, GameplayAsset
     from sqlalchemy import select, func, desc
     from datetime import datetime, timezone, timedelta
 
@@ -746,6 +746,20 @@ def get_editorial_data(
         else:
             inv["gameplay_sources_ready"] = 0
             inv["total_gameplay_duration"] = 0.0
+
+        # Count usable clips (GameplayAsset) — only sources that are ready
+        # AND owned by user OR public. A source with status=ready but 0
+        # clips is NOT usable (render pipeline would fail).
+        inv["gameplay_clips_available"] = db.execute(
+            select(func.count(GameplayAsset.id))
+            .join(GameplaySource, GameplayAsset.source_id == GameplaySource.id)
+            .where(GameplaySource.game_id == game.id)
+            .where(GameplaySource.ingestion_status == IngestionStatus.ready.value)
+            .where(
+                (GameplaySource.user_id == user_id) |
+                (GameplaySource.is_public == True)
+            )
+        ).scalar() or 0
 
         inv["gameplay_sources_total"] = db.execute(
             select(func.count(GameplaySource.id))
@@ -1133,9 +1147,15 @@ def create_job_from_automation(user_id: int) -> int | None:
                     log.warning(f"automation: gameplay_preference game #{gameplay_preference} has no ready gameplay")
 
             # Fallback: automatic background game selection
+            # CRITICAL: only pick games that have usable clips (GameplayAsset),
+            # not just sources with status=ready. A source with 0 clips will
+            # cause the render pipeline to fail with "no gameplay assets available".
             if not bg_game:
+                from gpcg.domain.models import GameplayAsset
                 bg_game = session.query(Game).join(
                     GameplaySource, GameplaySource.game_id == Game.id
+                ).join(
+                    GameplayAsset, GameplayAsset.source_id == GameplaySource.id
                 ).filter(
                     GameplaySource.user_id == user_id,
                     GameplaySource.ingestion_status == IngestionStatus.ready.value,

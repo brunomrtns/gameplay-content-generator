@@ -34,6 +34,7 @@ from gpcg.domain.models import (
     ContentPlan,
     Fact,
     Game,
+    GameplayAsset,
     GameplaySource,
     IngestionStatus,
     Job,
@@ -82,6 +83,7 @@ class GameInventory:
     game_name: str
     gameplay_sources_ready: int = 0
     gameplay_sources_total: int = 0
+    gameplay_clips_available: int = 0
     total_gameplay_duration: float = 0.0
     facts_available: int = 0
     facts_unused: int = 0
@@ -92,7 +94,10 @@ class GameInventory:
 
     @property
     def has_gameplay(self) -> bool:
-        return self.gameplay_sources_ready > 0
+        # A game only has usable gameplay if it has clips/assets defined.
+        # A GameplaySource with status=ready but 0 clips is NOT usable —
+        # the render pipeline will fail with "no gameplay assets available".
+        return self.gameplay_clips_available > 0
 
     @property
     def has_knowledge(self) -> bool:
@@ -106,7 +111,7 @@ class GameInventory:
     def to_prompt_dict(self) -> dict:
         return {
             "game": self.game_name,
-            "gameplay_clips": self.gameplay_sources_ready,
+            "gameplay_clips": self.gameplay_clips_available,
             "total_duration_s": int(self.total_gameplay_duration),
             "facts": self.facts_available,
             "unused_facts": self.facts_unused,
@@ -246,6 +251,20 @@ class EditorialStrategyService:
                     inv.gameplay_sources_ready = count
                     inv.total_gameplay_duration = total_dur or 0.0
                     break
+
+            # Count usable clips (GameplayAsset) for this game — only sources
+            # that are ready AND owned by user OR public.
+            # A source with status=ready but 0 clips is NOT usable.
+            inv.gameplay_clips_available = session.execute(
+                select(func.count(GameplayAsset.id))
+                .join(GameplaySource, GameplayAsset.source_id == GameplaySource.id)
+                .where(GameplaySource.game_id == game.id)
+                .where(GameplaySource.ingestion_status == IngestionStatus.ready.value)
+                .where(
+                    (GameplaySource.user_id == user_id) |
+                    (GameplaySource.is_public == True)
+                )
+            ).scalar() or 0
 
             # Total gameplay sources (including non-ready)
             inv.gameplay_sources_total = session.execute(
