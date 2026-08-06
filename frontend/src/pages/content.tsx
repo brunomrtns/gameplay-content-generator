@@ -297,6 +297,21 @@ function MediaTab() {
     }
   };
 
+  const handleDeleteSource = async (sourceId: number, filename: string) => {
+    if (!window.confirm(
+      `Tem certeza que deseja deletar "${filename}"?\n\n` +
+      `Isso vai remover TODOS os clips, eventos e arquivos físicos ` +
+      `associados a esta gameplay. Esta ação não pode ser desfeita.`
+    )) return;
+    if (!window.confirm(`Confirma novamente? Os arquivos no HD serão apagados permanentemente.`)) return;
+    try {
+      await api.deleteSource(sourceId);
+      toast.success(`Gameplay "${filename}" deletada. Os arquivos físicos serão removidos pelo worker.`);
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao deletar gameplay");
+    }
+  };
+
   const processing = sources?.filter((s: any) =>
     ["discovered", "probing"].includes(s.ingestion_status)
   ).length || 0;
@@ -435,6 +450,15 @@ function MediaTab() {
                           {isMapping && <Server className="h-3 w-3 animate-pulse" />}
                           {procCfg.label}
                         </Badge>
+                      )}
+                      {!isProcessing && !isMapping && (
+                        <button
+                          onClick={() => handleDeleteSource(s.id, s.filename)}
+                          className="text-text-muted hover:text-red-400 transition-colors p-1 rounded"
+                          title="Deletar gameplay"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       )}
                     </div>
                   </div>

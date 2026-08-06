@@ -62,6 +62,7 @@ class IngestionStatus(str, enum.Enum):
     duplicate = "duplicate"
     error = "error"
     needs_review = "needs_review"
+    deleted = "deleted"
 
 
 class GameResolutionMethod(str, enum.Enum):
@@ -118,6 +119,7 @@ class JobType(str, enum.Enum):
     # V2: enrichment + content intelligence (run on VPS, no GPU)
     game_enrich = "game_enrich"  # enrich a Game with Wikidata + Wikipedia data
     content_collect = "content_collect"  # collect external content (RSS) into KnowledgeItems
+    cleanup_gameplay = "cleanup_gameplay"  # delete physical gameplay files from worker storage
 
 
 class JobStatus(str, enum.Enum):

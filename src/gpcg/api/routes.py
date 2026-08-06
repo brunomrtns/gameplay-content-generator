@@ -170,7 +170,10 @@ def list_sources(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    stmt = select(GameplaySource).where(GameplaySource.user_id == user.id).order_by(GameplaySource.created_at.desc())
+    stmt = select(GameplaySource).where(
+        GameplaySource.user_id == user.id,
+        GameplaySource.ingestion_status != IngestionStatus.deleted.value,
+    ).order_by(GameplaySource.created_at.desc())
     if game_id is not None:
         stmt = stmt.where(GameplaySource.game_id == game_id)
     if status:
@@ -400,6 +403,96 @@ def toggle_gameplay_visibility(
         "success": True,
         "source_id": source_id,
         "is_public": is_public,
+    }
+
+
+@router.delete("/sources/{source_id}")
+def delete_gameplay_source(
+    source_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a gameplay source and all associated data.
+
+    Performs a soft-delete on the GameplaySource (marks as deleted) and
+    removes all associated GameplayAssets, GameplayEvents, GameplayClipUsages,
+    and GameplayEventEmbeddings from the DB. A cleanup_gameplay job is
+    created so the worker deletes the physical files from its storage (HD).
+
+    Safety checks:
+    - Verifies ownership (user_id == requester)
+    - Refuses if there's an active job (queued/running) using this source
+    """
+    from gpcg.domain.models import (
+        GameplayClipUsage,
+        GameplayEvent,
+        GameplayEventEmbedding,
+        JobPriority,
+        WorkerCapability,
+    )
+    from gpcg.api.worker_routes import _generate_upload_token
+
+    source = db.get(GameplaySource, source_id)
+    if source is None:
+        raise HTTPException(404, "gameplay source not found")
+    if source.user_id != user.id:
+        raise HTTPException(403, "not your gameplay")
+
+    # Check for active jobs using this source
+    active_job = db.query(Job).filter(
+        Job.gameplay_source_id == source_id,
+        Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
+    ).first()
+    if active_job:
+        raise HTTPException(
+            409,
+            f"cannot delete: job #{active_job.id} is {active_job.status} using this gameplay",
+        )
+
+    # Collect event IDs for embedding cleanup
+    event_ids = [e.id for e in db.query(GameplayEvent).filter(
+        GameplayEvent.source_id == source_id
+    ).all()]
+
+    # Delete associated data
+    db.query(GameplayAsset).filter(GameplayAsset.source_id == source_id).delete()
+    db.query(GameplayClipUsage).filter(GameplayClipUsage.source_id == source_id).delete()
+    if event_ids:
+        db.query(GameplayEventEmbedding).filter(
+            GameplayEventEmbedding.event_id.in_(event_ids)
+        ).delete()
+    db.query(GameplayEvent).filter(GameplayEvent.source_id == source_id).delete()
+
+    # Soft-delete the source
+    source.ingestion_status = IngestionStatus.deleted.value
+    source.processing_status = None
+    source.is_public = False
+
+    # Create cleanup job so worker deletes physical files
+    cleanup_job = Job(
+        job_uuid=str(__import__("uuid").uuid4()),
+        type=JobType.cleanup_gameplay.value,
+        status=JobStatus.queued.value,
+        stage="cleanup",
+        gameplay_source_id=source.id,
+        user_id=source.user_id,
+        game_id=source.game_id,
+        priority=JobPriority.normal.value,
+        required_capabilities=[WorkerCapability.mapping.value],
+        artifacts={"source_id": source_id, "filename": source.filename},
+    )
+    db.add(cleanup_job)
+    db.flush()
+    db.commit()
+
+    log.info(
+        f"gameplay #{source_id} deleted by user #{user.id} — "
+        f"cleanup job #{cleanup_job.id} created for worker"
+    )
+    return {
+        "ok": True,
+        "source_id": source_id,
+        "cleanup_job_id": cleanup_job.id,
     }
 
 

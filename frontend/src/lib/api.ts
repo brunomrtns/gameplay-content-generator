@@ -386,6 +386,8 @@ export const api = {
     request<any>(`/videos/${id}?release_clips=${releaseClips}`, { method: "DELETE" }),
   toggleGameplayVisibility: (sourceId: number, isPublic: boolean) =>
     request<any>(`/gameplays/${sourceId}/visibility?is_public=${isPublic}`, { method: "PATCH" }),
+  deleteSource: (sourceId: number) =>
+    request<{ ok: boolean; source_id: number; cleanup_job_id: number }>(`/sources/${sourceId}`, { method: "DELETE" }),
 
   // ── Workers (Compute Plane) ─────────────────────────────────────────────
   listWorkers: () => request<{ workers: any[] }>("/workers"),

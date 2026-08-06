@@ -898,6 +898,8 @@ class RemoteWorker:
             self._process_game_enrich_job(job)
         elif job_type == "content_collect":
             self._process_content_collect_job(job)
+        elif job_type == "cleanup_gameplay":
+            self._process_cleanup_gameplay_job(job)
         else:
             log.warning(f"Unknown job type: {job_type} — marking as completed (no-op)")
             self.update_job_status(job_id, status="running", stage="done", progress=1.0)
@@ -1601,6 +1603,74 @@ class RemoteWorker:
             video=result.get("video"),
         )
         log.info(f"Generation job #{job_id} completed")
+
+    def _process_cleanup_gameplay_job(self, job: dict) -> None:
+        """Process a cleanup_gameplay job: delete physical files from local storage.
+
+        Removes the gameplay video file, analysis JSON, and any renders
+        associated with the source from the worker's HD.
+        """
+        job_id = job["id"]
+        artifacts = job.get("artifacts", {})
+        if isinstance(artifacts, str):
+            try:
+                import json as _json
+                artifacts = _json.loads(artifacts)
+            except Exception:
+                artifacts = {}
+        source_id = artifacts.get("source_id") or job.get("gameplay_source_id")
+        filename = artifacts.get("filename", "")
+
+        self.update_job_status(job_id, status="running", stage="cleanup", progress=0.1)
+        self.send_status("busy", f"Limpando gameplay #{source_id}", job_id=job_id)
+
+        deleted_files: list[str] = []
+
+        # 1. Delete gameplay video file: gameplays/{source_id}_{filename}
+        if source_id and filename:
+            gameplay_path = self.storage_root / "gameplays" / f"{source_id}_{filename}"
+            if gameplay_path.exists():
+                try:
+                    gameplay_path.unlink()
+                    deleted_files.append(str(gameplay_path))
+                    log.info(f"Deleted gameplay file: {gameplay_path}")
+                except OSError as e:
+                    log.warning(f"Failed to delete {gameplay_path}: {e}")
+
+        # 2. Delete analysis JSON: mapped/source_{source_id}_analysis.json
+        if source_id:
+            analysis_path = self.storage_root / "mapped" / f"source_{source_id}_analysis.json"
+            if analysis_path.exists():
+                try:
+                    analysis_path.unlink()
+                    deleted_files.append(str(analysis_path))
+                    log.info(f"Deleted analysis file: {analysis_path}")
+                except OSError as e:
+                    log.warning(f"Failed to delete {analysis_path}: {e}")
+
+        # 3. Delete any renders associated with this source
+        # Renders are named by job_id, but we can clean orphans matching source_id
+        renders_dir = self.storage_root / "renders"
+        if renders_dir.exists():
+            for render_file in renders_dir.glob(f"*source_{source_id}*"):
+                try:
+                    render_file.unlink()
+                    deleted_files.append(str(render_file))
+                    log.info(f"Deleted render file: {render_file}")
+                except OSError as e:
+                    log.warning(f"Failed to delete {render_file}: {e}")
+
+        log.info(
+            f"Cleanup job #{job_id} completed — deleted {len(deleted_files)} file(s) "
+            f"for gameplay source #{source_id}"
+        )
+
+        self.update_job_status(job_id, status="running", stage="done", progress=1.0)
+        self.submit_job_result(
+            job_id,
+            status="completed",
+            artifacts={"deleted_files": deleted_files, "source_id": source_id},
+        )
 
     # ── Shutdown ─────────────────────────────────────────────────────────────
 
