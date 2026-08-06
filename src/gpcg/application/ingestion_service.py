@@ -43,8 +43,13 @@ class IngestionService:
         self.settings = get_settings()
         self.llm = llm  # may be None to skip VLM (L3)
 
-    def scan_once(self) -> int:
-        """Scan the inbox directory once. Returns count of newly ingested files."""
+    def scan_once(self, user_id: Optional[int] = None) -> int:
+        """Scan the inbox directory once. Returns count of newly ingested files.
+
+        Args:
+            user_id: If provided, attributes ingested sources to this user
+                     and dedups only within this user's sources.
+        """
         inbox = self.settings.inbox_dir
         if not inbox.exists():
             log.warning(f"inbox dir does not exist: {inbox}")
@@ -57,14 +62,19 @@ class IngestionService:
             if entry.suffix.lower() not in VIDEO_EXTS:
                 continue
             try:
-                if self._ingest_file(entry):
+                if self._ingest_file(entry, user_id=user_id):
                     count += 1
             except Exception as e:
                 log.error(f"failed to ingest {entry.name}: {e}")
         return count
 
-    def _ingest_file(self, path: Path) -> bool:
-        """Ingest a single file. Returns True if newly ingested, False if skipped."""
+    def _ingest_file(self, path: Path, user_id: Optional[int] = None) -> bool:
+        """Ingest a single file. Returns True if newly ingested, False if skipped.
+
+        Args:
+            user_id: If provided, dedups only within this user's sources
+                     and attributes the new source to this user.
+        """
         # Check size threshold
         min_bytes = self.settings.gpcg_inbox_min_size_mb * 1024 * 1024
         try:
@@ -87,11 +97,12 @@ class IngestionService:
             log.error(f"cannot hash {path.name}: {e}")
             return False
 
-        # Idempotency: skip if already ingested
+        # Idempotency: skip if already ingested (dedup per user when user_id is set)
         with session_scope() as session:
-            existing = session.execute(
-                select(GameplaySource).where(GameplaySource.file_hash == fhash)
-            ).scalar_one_or_none()
+            dedup_query = select(GameplaySource).where(GameplaySource.file_hash == fhash)
+            if user_id is not None:
+                dedup_query = dedup_query.where(GameplaySource.user_id == user_id)
+            existing = session.execute(dedup_query).scalar_one_or_none()
             if existing:
                 log.debug(f"already ingested: {path.name} (source #{existing.id})")
                 return False
@@ -139,6 +150,7 @@ class IngestionService:
 
             source = GameplaySource(
                 game_id=game_id,
+                user_id=user_id,
                 file_path=str(path),
                 filename=path.name,
                 file_hash=fhash,

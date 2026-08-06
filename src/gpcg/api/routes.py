@@ -252,12 +252,15 @@ def get_source_events(
 def assign_game_to_source(
     source_id: int,
     game_id: int = Form(...),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Manually assign a game to a source (for needs_review cases)."""
     s = db.get(GameplaySource, source_id)
     if s is None:
         raise HTTPException(404, "source not found")
+    if s.user_id != user.id:
+        raise HTTPException(403, "not your gameplay")
     g = db.get(Game, game_id)
     if g is None:
         raise HTTPException(404, "game not found")
@@ -274,7 +277,7 @@ def assign_game_to_source(
 def scan_inbox(user: User = Depends(get_current_user)):
     """Trigger a one-shot inbox scan."""
     svc = IngestionService()
-    n = svc.scan_once()
+    n = svc.scan_once(user_id=user.id)
     return {"discovered": n}
 
 
@@ -365,7 +368,7 @@ def upload_gameplay(
         # Heavy analysis (VLM, ASR) is done by the worker, not the VPS.)
         try:
             svc = IngestionService()
-            svc._ingest_file(file_path)
+            svc._ingest_file(file_path, user_id=user.id)
         except Exception:
             pass  # Non-fatal — probing happens in background or on next scan
 
