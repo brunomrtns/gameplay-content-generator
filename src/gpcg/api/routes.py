@@ -43,6 +43,7 @@ from gpcg.domain.models import (
     GameplayAsset,
     GameplayEvent,
     GameplaySource,
+    IngestionStatus,
     Job,
     JobStatus,
     JobType,
