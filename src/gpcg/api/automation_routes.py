@@ -8,6 +8,8 @@ Endpoints:
   GET    /api/youtube/status           — check YouTube connection status
   POST   /api/youtube/disconnect       — revoke YouTube access
   GET    /api/dashboard                — dashboard stats for current user
+  GET    /api/health/problems          — detect inventory problems for current user
+  POST   /api/idea-queue/cleanup       — clean invalid KIs from idea queue
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from gpcg.domain.models import (
@@ -29,6 +31,8 @@ from gpcg.domain.models import (
     JobPriority,
     JobStatus,
     JobType,
+    KnowledgeItem,
+    KnowledgeItemStatus,
     User,
     Video,
     VideoStatus,
@@ -1698,4 +1702,88 @@ def dashboard(
         },
         "automation_status": auto_status,
         "recent_videos": recent_list,
+    }
+
+
+@router.get("/health/problems")
+def detect_health_problems(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Detect inventory problems for the current user.
+
+    Returns a structured report of issues that could cause failures:
+    - sources_without_clips: ready sources with 0 GameplayAssets
+    - sources_without_events: ready sources with 0 GameplayEvents (not mapped)
+    - stuck_jobs: jobs running for > 1h without update
+    - rejected_kis_in_queue: rejected KIs still in the idea queue
+    - kis_without_gameplay: fresh KIs with game_id but no clips for user
+    """
+    from gpcg.application.problem_detector import detect_problems
+    return detect_problems(db, user.id)
+
+
+@router.post("/idea-queue/cleanup")
+def cleanup_idea_queue(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Remove invalid KIs from the user's idea queue.
+
+    Removes:
+    - KIs that no longer exist (deleted)
+    - KIs with status=rejected
+    - KIs with game_id where user has no clips (would fail at render)
+    """
+    from gpcg.domain.models import GameplayAsset
+    from sqlalchemy.orm.attributes import flag_modified
+
+    auto = db.query(Automation).filter(Automation.user_id == user.id).first()
+    if not auto:
+        return {"removed": 0, "remaining": 0}
+
+    cfg = dict(auto.config or {})
+    raw_queue = cfg.get("idea_queue", [])
+    queue = _normalize_idea_queue(raw_queue)
+
+    removed = []
+    cleaned = []
+    for entry in queue:
+        ki_id = entry.get("ki_id") if isinstance(entry, dict) else entry
+        ki = db.get(KnowledgeItem, ki_id) if ki_id else None
+
+        if ki is None:
+            removed.append({"ki_id": ki_id, "reason": "not found"})
+            continue
+        if ki.status == KnowledgeItemStatus.rejected.value:
+            removed.append({"ki_id": ki_id, "title": ki.title[:60] if ki.title else "", "reason": "rejected"})
+            continue
+        if ki.game_id is not None:
+            user_clips = db.execute(
+                select(func.count(GameplayAsset.id))
+                .join(GameplaySource, GameplayAsset.source_id == GameplaySource.id)
+                .where(
+                    GameplaySource.game_id == ki.game_id,
+                    GameplaySource.ingestion_status == IngestionStatus.ready.value,
+                    GameplaySource.ingestion_status != IngestionStatus.deleted.value,
+                    ((GameplaySource.user_id == user.id) |
+                     (GameplaySource.is_public == True)),
+                )
+            ).scalar()
+            if user_clips == 0:
+                removed.append({"ki_id": ki_id, "title": ki.title[:60] if ki.title else "", "reason": "no clips for game"})
+                continue
+
+        cleaned.append(entry)
+
+    cfg["idea_queue"] = cleaned
+    auto.config = cfg
+    flag_modified(auto, "config")
+    db.commit()
+
+    log.info(f"idea queue cleanup: removed {len(removed)} invalid KIs for user #{user.id}")
+    return {
+        "removed": len(removed),
+        "remaining": len(cleaned),
+        "details": removed,
     }
