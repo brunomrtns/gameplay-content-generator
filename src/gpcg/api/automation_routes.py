@@ -26,6 +26,7 @@ from gpcg.domain.models import (
     GameplaySource,
     IngestionStatus,
     Job,
+    JobPriority,
     JobStatus,
     JobType,
     User,
