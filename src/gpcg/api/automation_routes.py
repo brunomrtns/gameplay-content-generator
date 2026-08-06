@@ -32,6 +32,7 @@ from gpcg.domain.models import (
     Video,
     VideoStatus,
 )
+from gpcg.config import get_settings
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db, session_scope
 from gpcg.infrastructure.google_integration_adapter import GoogleIntegrationAdapter
@@ -368,6 +369,11 @@ def _reconcile_idea_queue(
     Excludes KIs already in the queue (exclude_ids) and respects the limit
     (defaults to max_queue_size from config).
 
+    Editorial Intelligence V2: when gpcg_composite_scoring_enabled is True,
+    KIs are ranked by the 3-layer composite score (Editorial Quality ×
+    Production Fit × Editorial Timing) instead of editorial_score alone.
+    This makes the queue personalized per channel.
+
     Returns the new queue entries (list[dict] with ki_id, gameplay_preference,
     reuse_override). Returns empty list if no fresh KIs are available.
     """
@@ -399,6 +405,15 @@ def _reconcile_idea_queue(
     if active_ki_ids:
         query = query.filter(~KnowledgeItem.id.in_(active_ki_ids))
 
+    # V2: Exclude archived KIs (lifecycle_stage = archived)
+    query = query.filter(KnowledgeItem.lifecycle_stage != "archived")
+
+    # ── V2: Composite scoring path ────────────────────────────────────────
+    settings = get_settings()
+    if settings.gpcg_composite_scoring_enabled:
+        return _reconcile_with_composite_score(db, query, user_id, max_size)
+
+    # Legacy: sort by editorial_score descending
     kis = query.order_by(KnowledgeItem.editorial_score.desc()).limit(max_size).all()
 
     if not kis:
@@ -411,6 +426,100 @@ def _reconcile_idea_queue(
             "reuse_override": None,
         }
         for ki in kis
+    ]
+
+
+def _reconcile_with_composite_score(
+    db: Session,
+    query,
+    user_id: int,
+    max_size: int,
+) -> list[dict]:
+    """V2: Rank KIs by composite score (3 layers) for this channel.
+
+    Fetches a larger pool of candidates, scores each with CompositeScorer,
+    and returns the top-N by final_score.
+    """
+    from gpcg.application.composite_scorer import CompositeScorer
+    from gpcg.application.editorial_profile_service import get_or_create_profile
+    from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
+    from gpcg.application.editorial_brief_builder import EditorialBriefBuilder
+    from gpcg.application.embedding_service import get_knowledge_item_embedding
+    from gpcg.domain.models import ChannelProfile, KnowledgeItemEmbedding
+
+    # Fetch a larger pool to score (we need more than max_size to rank properly)
+    pool_size = max(max_size * 3, 20)
+    candidates = query.limit(pool_size).all()
+
+    if not candidates:
+        return []
+
+    # Build the brief for this channel (needed for scoring context)
+    try:
+        profile = get_or_create_profile(db, user_id)
+        intent = EditorialIntentBuilder().build(db, user_id, profile)
+        brief = EditorialBriefBuilder().build(db, user_id, profile, intent)
+    except Exception as e:
+        log.warning(f"Composite scoring: failed to build brief for user {user_id}: {e}, falling back to editorial_score")
+        # Fallback to legacy
+        candidates.sort(key=lambda ki: ki.editorial_score, reverse=True)
+        return [
+            {"ki_id": ki.id, "gameplay_preference": None, "reuse_override": None}
+            for ki in candidates[:max_size]
+        ]
+
+    # Get channel embedding (if available)
+    channel_embedding = None
+    try:
+        from gpcg.domain.models import ChannelProfileEmbedding
+        emb_row = db.query(ChannelProfileEmbedding).filter_by(user_id=user_id).first()
+        if emb_row:
+            from gpcg.application.embedding_service import deserialize_embedding
+            channel_embedding = deserialize_embedding(emb_row.embedding)
+    except Exception:
+        pass  # channel embeddings not yet implemented — neutral affinity
+
+    scorer = CompositeScorer()
+    scored: list[tuple[float, int]] = []
+
+    for ki in candidates:
+        ki_embedding = None
+        try:
+            ki_embedding = get_knowledge_item_embedding(db, ki.id)
+        except Exception:
+            pass
+
+        try:
+            cs = scorer.score(ki, brief, db, user_id, channel_embedding, ki_embedding)
+            scored.append((cs.final_score, ki.id))
+        except Exception as e:
+            log.warning(f"Composite scoring failed for KI {ki.id}: {e}, using editorial_score")
+            scored.append((ki.editorial_score / 100.0, ki.id))
+
+    # Sort by composite score descending
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    # V2 Phase 3: Exploration factor — reserve a fraction of slots for random
+    # KIs (outside the channel niche) to avoid filter bubbles.
+    settings = get_settings()
+    exploration_factor = settings.gpcg_editorial_exploration_factor
+    exploration_slots = int(max_size * exploration_factor) if exploration_factor > 0 else 0
+    top_slots = max_size - exploration_slots
+
+    result_ids = [ki_id for _, ki_id in scored[:top_slots]]
+
+    # Fill exploration slots with random KIs from the remaining pool
+    if exploration_slots > 0 and len(scored) > top_slots:
+        import random
+        remaining = scored[top_slots:]
+        # Sample min(exploration_slots, len(remaining)) random KIs
+        sample_size = min(exploration_slots, len(remaining))
+        sampled = random.sample(remaining, sample_size)
+        result_ids.extend(ki_id for _, ki_id in sampled)
+
+    return [
+        {"ki_id": ki_id, "gameplay_preference": None, "reuse_override": None}
+        for ki_id in result_ids
     ]
 
 

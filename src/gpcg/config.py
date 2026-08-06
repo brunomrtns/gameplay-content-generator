@@ -323,6 +323,32 @@ class Settings(BaseSettings):
     # Retention period for news KnowledgeItems in days (items older than this are deleted).
     gpcg_news_retention_days: int = 30
 
+    # ── Editorial Intelligence V2 ───────────────────────────────────────────
+    # Master switch for the channel-driven editorial pipeline (Editorial
+    # Profile → Intent → Brief → Goal-Oriented Collector). When false, the
+    # legacy source-driven collector runs (GENERAL_GAMING_FEEDS + Google News
+    # by game name). When true, collection is personalized per channel.
+    # See docs/EDITORIAL_INTELLIGENCE_V2_PROPOSAL.md §19 Fase 1.
+    gpcg_editorial_brief_enabled: bool = False
+    # Master switch for the 3-layer composite scorer (Editorial Quality ×
+    # Production Fit × Editorial Timing). When false, the reconciler ranks
+    # KIs by editorial_score alone (legacy). When true, ranks by composite.
+    gpcg_composite_scoring_enabled: bool = False
+    # Master switch for diversity engine (cooldown + format rotation).
+    gpcg_diversity_engine_enabled: bool = False
+    # Master switch for feedback loop (rejection penalty, manual-add boost,
+    # production history). YouTube Analytics sync is a separate future flag.
+    gpcg_feedback_loop_enabled: bool = False
+    # Exploration factor (0.0–1.0): fraction of queue slots reserved for
+    # random KIs outside the channel niche to avoid filter bubbles.
+    gpcg_editorial_exploration_factor: float = 0.1
+    # Similarity threshold for feedback propagation via embeddings (0.0–1.0).
+    # KIs with cosine similarity above this to a rejected/favorited KI receive
+    # a penalty/boost. Conservative default to avoid false positives.
+    gpcg_feedback_similarity_threshold: float = 0.85
+    # Boost factor for feedback propagation (max ±adjustment to editorial_score).
+    gpcg_feedback_boost_factor: float = 20.0
+
     # ── V2: Public Gameplay Fallback ────────────────────────────────────────
     # When true (per-user via automation config `accept_public_gameplays`),
     # the gameplay selector falls back to public gameplays from other users

@@ -959,11 +959,34 @@ class Video(Base):
 class ChannelProfile(Base):
     """Per-user channel identity and editorial direction.
 
-    This is the semantic context that tells the AI WHAT kind of channel the
-    user is building and HOW videos should be narrated. It flows into every
-    LLM call in the pipeline (content planning, editorial planning, script
-    generation) so that generated videos are personalized to the channel
-    rather than generic.
+    The Editorial Profile is the persisted identity of a channel. It is
+    organized into four conceptual groups with distinct lifecycles and
+    ownership:
+
+    ┌──────────────────────────────────────────────────────────────────┐
+    │ GROUP          │ WHO WRITES    │ LIFECYCLE     │ EXAMPLES        │
+    ├──────────────────────────────────────────────────────────────────┤
+    │ Configuration  │ User / preset │ Permanent     │ niche, tone,    │
+    │                │               │ (until changed│ affinity, feeds │
+    │                │               │  by user)     │                 │
+    ├──────────────────────────────────────────────────────────────────┤
+    │ Learning       │ Feedback loop │ Adaptive      │ preferred_games,│
+    │                │ (system)      │ (grows +      │ avoided_topics,  │
+    │                │               │  decays)      │ preferred_styles│
+    ├──────────────────────────────────────────────────────────────────┤
+    │ Statistics     │ System        │ Continuously  │ total_videos,   │
+    │                │ (auto)        │ recomputed    │ top_games,      │
+    │                │               │               │ avg_performance │
+    ├──────────────────────────────────────────────────────────────────┤
+    │ Caches         │ System        │ Ephemeral     │ metadata_json   │
+    │                │ (auto)        │ (can rebuild) │ (extensible)    │
+    └──────────────────────────────────────────────────────────────────┘
+
+    This separation ensures that:
+    - User intent (Configuration) is never silently overwritten by the system
+    - System learning (Learning) is bounded and decays (no unbounded growth)
+    - Statistics are always derivable from source data (no stale snapshots)
+    - Caches can be dropped without data loss
 
     One per user (unique user_id).
     """
@@ -972,23 +995,62 @@ class ChannelProfile(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # GROUP 1: Configuration (user-defined, permanent until changed)
+    # ═══════════════════════════════════════════════════════════════════════
+    # These fields define the channel's editorial identity. They are set by
+    # the user (or by applying a preset) and persist until explicitly changed.
+    # The system NEVER modifies these fields automatically.
+
     # Free-form channel description — the "elevator pitch" of the channel.
-    # Example: "Meu canal é focado em análises de partidas competitivas de FPS.
-    # Quero vídeos com tom educativo, destacando estratégias, erros dos
-    # jogadores e momentos decisivos."
     channel_description: Mapped[str] = mapped_column(Text, default="")
 
-    # Structured fields (optional but recommended)
-    niche: Mapped[str] = mapped_column(String(200), default="")          # e.g. "FPS competitivo"
-    target_audience: Mapped[str] = mapped_column(String(300), default="")  # e.g. "Jogadores casuais que querem melhorar"
-    tone_of_voice: Mapped[str] = mapped_column(String(100), default="")   # e.g. "educativo, analítico"
-    narrative_style: Mapped[str] = mapped_column(String(100), default="")  # e.g. "storytelling", "análise direta"
-    content_goals: Mapped[str] = mapped_column(Text, default="")          # what the channel wants to achieve
-    special_rules: Mapped[str] = mapped_column(Text, default="")          # specific rules/preferences for the AI
+    # Structured identity fields (optional but recommended)
+    niche: Mapped[str] = mapped_column(String(200), default="")
+    target_audience: Mapped[str] = mapped_column(String(300), default="")
+    tone_of_voice: Mapped[str] = mapped_column(String(100), default="")
+    narrative_style: Mapped[str] = mapped_column(String(100), default="")
+    content_goals: Mapped[str] = mapped_column(Text, default="")
+    special_rules: Mapped[str] = mapped_column(Text, default="")
 
-    # Additional metadata (extensible)
+    # Structured collection parameters (drive the deterministic pipeline)
+    content_type_affinity: Mapped[dict] = mapped_column(JSON, default=dict)
+    editorial_keywords: Mapped[list] = mapped_column(JSON, default=list)
+    custom_feeds: Mapped[list] = mapped_column(JSON, default=list)
+    gameplay_driven_collection: Mapped[bool] = mapped_column(Boolean, default=True)
+    diversity_strictness: Mapped[float] = mapped_column(Float, default=0.5)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # GROUP 2: Learning (system-acquired, adaptive with decay)
+    # ═══════════════════════════════════════════════════════════════════════
+    # These fields are populated by the feedback loop, NOT by the user.
+    # They grow with usage but are capped (FIFO eviction) and decay over time
+    # to prevent unbounded growth and allow the system to re-explore.
+    # See editorial_profile_service.py: decay_learned_preferences()
+
+    # {preferred_games: [...], avoided_topics: [...], preferred_styles: [...]}
+    learned_preferences: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # GROUP 3: Statistics (aggregated metrics, continuously recomputed)
+    # ═══════════════════════════════════════════════════════════════════════
+    # These fields are derived from source data (videos, jobs) and recomputed
+    # after each production. They are NOT authoritative — they can always be
+    # reconstructed by querying the source tables.
+
+    # {total_videos: N, top_games: [...], avg_performance: X}
+    production_history_summary: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # GROUP 4: Caches (ephemeral, can be dropped without data loss)
+    # ═══════════════════════════════════════════════════════════════════════
+    # Extensible metadata for any transient data. Not critical for operation.
+
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # Timestamps
+    # ═══════════════════════════════════════════════════════════════════════
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -1167,6 +1229,22 @@ class KnowledgeItem(Base):
     # Deduplication: SHA256(normalize(title) + normalize(content[:500]))
     content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
+    # ── Editorial Intelligence V2 — lifecycle ──────────────────────────────
+    # freshness_score decays over time based on item_type (news decays fast,
+    # lore is evergreen). Computed by LifecycleManager. 0.0–1.0.
+    # See docs/EDITORIAL_INTELLIGENCE_V2_PROPOSAL.md §10.
+    freshness_score: Mapped[float] = mapped_column(Float, default=1.0, index=True)
+    # lifecycle_stage is ORTHOGONAL to status. status tracks fresh/used/rejected
+    # (the editorial state). lifecycle_stage tracks fresh/aging/archived (the
+    # temporal state). A KI can be status=fresh + lifecycle_stage=aging.
+    lifecycle_stage: Mapped[str] = mapped_column(String(20), default="fresh", index=True)
+
+    # ── Editorial Intelligence V2 — feedback adjustment ────────────────────
+    # Cumulative per-user feedback adjustment to editorial_score. Capped at
+    # ±MAX_CUMULATIVE_ADJUSTMENT to prevent death spirals. Decays over time.
+    # See docs/CONVERGENCE_RISK_ANALYSIS.md Risk 4.
+    feedback_adjustment: Mapped[float] = mapped_column(Float, default=0.0)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -1240,3 +1318,52 @@ class GameplayEventEmbedding(Base):
 
     def __repr__(self) -> str:
         return f"<GameplayEventEmbedding event={self.event_id} model={self.model}>"
+
+
+class ChannelProfileEmbedding(Base):
+    """Embedding vector for a ChannelProfile, in a separate table.
+
+    Generated from niche + channel_description + content_goals.
+    Used by CompositeScorer to compute channel_affinity (Layer 2).
+    Same pattern as KnowledgeItemEmbedding (BLOB, separate table).
+    See docs/EDITORIAL_INTELLIGENCE_V2_PROPOSAL.md §14.3.
+    """
+    __tablename__ = "channel_profile_embeddings"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    def __repr__(self) -> str:
+        return f"<ChannelProfileEmbedding user={self.user_id} model={self.model}>"
+
+
+class EditorialSignal(Base):
+    """Editorial feedback signal — records a learning event for the channel.
+
+    Populated by the feedback loop (rejections, manual additions, production
+    history, future: YouTube Analytics). Used to propagate adjustments to
+    similar KIs via embeddings.
+
+    See docs/EDITORIAL_INTELLIGENCE_V2_PROPOSAL.md §13.4.
+    """
+    __tablename__ = "editorial_signals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ki_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("knowledge_items.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
+    signal_type: Mapped[str] = mapped_column(String(50))  # rejection_penalty, manual_add_boost, etc.
+    signal_value: Mapped[float] = mapped_column(Float, default=0.0)
+    source_ki_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    source_video_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    def __repr__(self) -> str:
+        return f"<EditorialSignal #{self.id} type={self.signal_type} value={self.signal_value}>"

@@ -156,9 +156,22 @@ def reject_knowledge_item(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Reject a KnowledgeItem (mark as rejected)."""
+    """Reject a KnowledgeItem (mark as rejected).
+
+    V2: When the feedback loop is enabled, the rejection is propagated to
+    similar KIs via embeddings (penalty) and recorded in editorial_signals.
+    """
     if not reject_item(db, item_id):
         raise HTTPException(status_code=404, detail="KnowledgeItem not found")
+
+    # V2: Propagate rejection feedback
+    try:
+        from gpcg.application.feedback_propagator import FeedbackPropagator
+        FeedbackPropagator().propagate_rejection(db, user.id, item_id)
+    except Exception as e:
+        # Non-fatal — rejection still succeeds
+        pass
+
     db.commit()
     return {"message": "KnowledgeItem rejected"}
 
@@ -259,6 +272,14 @@ def create_manual_knowledge_item(
     db.add(item)
     db.commit()
     db.refresh(item)
+
+    # V2: Propagate manual-add boost feedback
+    try:
+        from gpcg.application.feedback_propagator import FeedbackPropagator
+        FeedbackPropagator().propagate_manual_add(db, user.id, item.id)
+        db.commit()
+    except Exception:
+        pass  # non-fatal
 
     return _item_to_out(item)
 

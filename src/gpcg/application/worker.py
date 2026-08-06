@@ -349,11 +349,17 @@ def _process_content_collect_job(job_id: int) -> None:
     V2: runs on the VPS (Control Plane). See ARCHITECTURE_V2.md §7, §13.1.
     Collects RSS for all games with gameplay available, scores new items,
     and cleans up old news.
+
+    Editorial Intelligence V2: when gpcg_editorial_brief_enabled is True,
+    collection is channel-driven (Editorial Profile → Intent → Brief →
+    Goal-Oriented Collector) instead of source-driven. Each user with
+    gameplay gets a personalized collection cycle. See
+    docs/EDITORIAL_INTELLIGENCE_V2_PROPOSAL.md §9.
     """
     from gpcg.application.content_collectors import collect_rss, cleanup_old_news
     from gpcg.application.knowledge_item_service import score_all_fresh
     from gpcg.infrastructure.llm import get_llm
-    from gpcg.domain.models import Game, GameplaySource
+    from gpcg.domain.models import Game, GameplaySource, User
     from sqlalchemy import distinct, select as sa_select
 
     log.info(f"processing content_collect job #{job_id}")
@@ -375,21 +381,40 @@ def _process_content_collect_job(job_id: int) -> None:
             return
 
         try:
-            # Get all games that have gameplay sources (only collect for games in use)
-            game_ids = session.execute(
-                sa_select(distinct(GameplaySource.game_id)).where(GameplaySource.game_id.isnot(None))
-            ).scalars().all()
+            settings = get_settings()
 
-            for game_id in game_ids:
-                count = collect_rss(session, game_id)
-                total_collected += count
+            # ── Editorial Intelligence V2: channel-driven collection ──────
+            if settings.gpcg_editorial_brief_enabled:
+                total_collected = _collect_with_editorial_brief(session, llm)
+            else:
+                # Legacy: source-driven collection (one RSS per game)
+                game_ids = session.execute(
+                    sa_select(distinct(GameplaySource.game_id)).where(GameplaySource.game_id.isnot(None))
+                ).scalars().all()
 
-            # Score new fresh items
+                for game_id in game_ids:
+                    count = collect_rss(session, game_id)
+                    total_collected += count
+
+            # Score new fresh items (shared by both paths)
             if llm:
                 total_scored = score_all_fresh(session, llm, limit=50)
 
+            # V2: Update lifecycle (freshness decay + stage transitions)
+            if settings.gpcg_composite_scoring_enabled:
+                from gpcg.application.lifecycle_manager import LifecycleManager
+                LifecycleManager().update_all_fresh(session)
+
+            # V2: Decay feedback adjustments + cleanup old signals
+            # These run regardless of composite_scoring flag because they
+            # affect the feedback loop which can be enabled independently.
+            if settings.gpcg_feedback_loop_enabled:
+                from gpcg.application.feedback_propagator import FeedbackPropagator
+                fp = FeedbackPropagator()
+                fp.decay_feedback_adjustments(session)
+                fp.cleanup_old_signals(session)
+
             # Cleanup old news
-            settings = get_settings()
             total_cleaned = cleanup_old_news(session, days=settings.gpcg_news_retention_days)
 
             job.status = JobStatus.completed.value
@@ -400,6 +425,7 @@ def _process_content_collect_job(job_id: int) -> None:
                 "collected": total_collected,
                 "scored": total_scored,
                 "cleaned": total_cleaned,
+                "mode": "editorial_brief" if settings.gpcg_editorial_brief_enabled else "legacy",
             }
             log.info(
                 f"content_collect job #{job_id} completed: "
@@ -408,6 +434,52 @@ def _process_content_collect_job(job_id: int) -> None:
         except Exception as e:
             log.exception(f"content_collect job #{job_id} error: {e}")
             _fail_job(session, job, str(e))
+
+
+def _collect_with_editorial_brief(session, llm) -> int:
+    """V2: channel-driven collection using Editorial Brief for each user.
+
+    Iterates over users that have gameplay sources, builds a Brief for each,
+    and runs the Goal-Oriented Collector. Returns total KIs collected.
+    """
+    from gpcg.application.editorial_profile_service import get_or_create_profile
+    from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
+    from gpcg.application.editorial_brief_builder import EditorialBriefBuilder
+    from gpcg.application.goal_oriented_collector import GoalOrientedCollector
+    from gpcg.domain.models import GameplaySource
+
+    # Find all users that have gameplay sources
+    user_ids = session.execute(
+        sa_select(distinct(GameplaySource.user_id)).where(
+            GameplaySource.user_id.isnot(None)
+        )
+    ).scalars().all()
+
+    if not user_ids:
+        log.info("Editorial Brief: no users with gameplay sources, skipping")
+        return 0
+
+    intent_builder = EditorialIntentBuilder()
+    brief_builder = EditorialBriefBuilder()
+    collector = GoalOrientedCollector()
+
+    total_collected = 0
+    for user_id in user_ids:
+        try:
+            profile = get_or_create_profile(session, user_id)
+            intent = intent_builder.build(session, user_id, profile)
+            brief = brief_builder.build(session, user_id, profile, intent)
+            result = collector.collect(session, brief, user_id)
+            total_collected += result.total
+            log.info(
+                f"Editorial Brief for user {user_id}: "
+                f"collected={result.total}, remaining={result.remaining}"
+            )
+        except Exception as e:
+            log.warning(f"Editorial Brief failed for user {user_id}: {e}")
+            continue
+
+    return total_collected
 
 
 def _fail_job(session, job, error: str) -> None:
