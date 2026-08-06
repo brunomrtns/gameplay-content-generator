@@ -131,7 +131,7 @@ def get_current_job(
     Returns null if no job is running. Used by the ideas page to show
     "currently processing" above the queue.
     """
-    from gpcg.domain.models import Job, JobStatus, KnowledgeItem
+    from gpcg.domain.models import Job, JobStatus, KnowledgeItem, Game
     from sqlalchemy import select
 
     job = db.execute(
@@ -153,6 +153,21 @@ def get_current_job(
         if ki:
             ki_title = ki.title
             ki_item_type = ki.item_type
+
+    # If no KI title (job created via editorial decision, not queue),
+    # fall back to editorial decision info or content plan topic.
+    if not ki_title:
+        editorial = artifacts.get("editorial_decision", {})
+        if editorial:
+            ki_title = editorial.get("topic_hint") or editorial.get("reason") or None
+            # Try to get the game name
+            game_id = editorial.get("game_id") or editorial.get("background_game_id")
+            if game_id:
+                game = db.get(Game, game_id)
+                if game:
+                    ki_title = ki_title or f"Vídeo sobre {game.canonical_name}"
+                    if not ki_item_type:
+                        ki_item_type = "game_related"
 
     # Map stage to user-friendly Portuguese label
     STAGE_LABELS = {
@@ -334,9 +349,15 @@ def check_automation(
         # V3: Reconciliador — auto-fill queue with fresh KIs up to max_queue_size
         # Runs on VPS, independent of worker. Also triggered after content
         # collection and when user opens the ideas page.
+        # CRITICAL: must commit so that create_job_from_automation (which opens
+        # its own session_scope) can see the reconciled queue. Without commit,
+        # the queue is only visible in this request's transaction and
+        # create_job_from_automation sees an empty queue, falling through to
+        # the editorial decision path instead of consuming the queue.
         reconcile_user_queue(db, auto.user_id)
-        db.flush()
+        db.commit()
         # Re-read config after reconcile may have updated it
+        db.refresh(auto)
         cfg = auto.config or {}
         queue_mode = cfg.get("queue_mode", "automatic")
         idea_queue = cfg.get("idea_queue", [])

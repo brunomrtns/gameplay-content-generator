@@ -520,6 +520,9 @@ export function IdeasPage() {
                     )}
                   </div>
                   <p className="text-sm text-text line-clamp-1">{item.title}</p>
+                  {item.content && (
+                    <p className="text-xs text-text-muted line-clamp-2 mt-0.5">{item.content}</p>
+                  )}
                 </div>
                 <button
                   onClick={() => handleRemoveFromQueue(item.id)}
