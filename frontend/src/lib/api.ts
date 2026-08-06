@@ -303,10 +303,14 @@ export const api = {
   getGame: (id: number) => request<any>(`/games/${id}`),
 
   // ── Sources / Gameplays ────────────────────────────────────────────────
-  listSources: (game_id?: number, status?: string) =>
-    request<any[]>(
-      `/sources${game_id ? `?game_id=${game_id}` : ""}${status ? `${game_id ? "&" : "?"}status=${status}` : ""}`
-    ),
+  listSources: (game_id?: number, status?: string, include_public?: boolean) => {
+    const params = new URLSearchParams();
+    if (game_id) params.set("game_id", String(game_id));
+    if (status) params.set("status", status);
+    if (include_public) params.set("include_public", "true");
+    const qs = params.toString();
+    return request<any[]>(qs ? `/sources?${qs}` : "/sources");
+  },
   getSourceEvents: (source_id: number) =>
     request<any>(`/sources/${source_id}/events`),
   assignGame: (source_id: number, game_id: number) =>

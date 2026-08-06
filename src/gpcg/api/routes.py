@@ -167,9 +167,11 @@ def get_game(game_id: int, db: Session = Depends(get_db)):
 def list_sources(
     game_id: Optional[int] = Query(None),
     status: Optional[str] = Query(None),
+    include_public: bool = Query(False, description="Include public gameplays from other users"),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # User's own sources (exclude deleted)
     stmt = select(GameplaySource).where(
         GameplaySource.user_id == user.id,
         GameplaySource.ingestion_status != IngestionStatus.deleted.value,
@@ -179,6 +181,21 @@ def list_sources(
     if status:
         stmt = stmt.where(GameplaySource.ingestion_status == status)
     sources = db.execute(stmt).scalars().all()
+
+    # Public sources from other users (if requested)
+    public_sources = []
+    if include_public:
+        pub_stmt = select(GameplaySource).where(
+            GameplaySource.is_public == True,
+            GameplaySource.user_id != user.id,
+            GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            GameplaySource.ingestion_status != IngestionStatus.deleted.value,
+        ).order_by(GameplaySource.created_at.desc())
+        if game_id is not None:
+            pub_stmt = pub_stmt.where(GameplaySource.game_id == game_id)
+        public_sources = db.execute(pub_stmt).scalars().all()
+
+    all_sources = sources + public_sources
     return [
         {
             "id": s.id,
@@ -201,8 +218,11 @@ def list_sources(
             "file_size": s.file_size,
             "downloaded_at": s.downloaded_at.isoformat() if s.downloaded_at else None,
             "analysis_status": s.analysis_status,
+            "is_public": s.is_public,
+            "owner_user_id": s.user_id,
+            "is_own": s.user_id == user.id,
         }
-        for s in sources
+        for s in all_sources
     ]
 
 

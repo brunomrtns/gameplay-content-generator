@@ -26,6 +26,7 @@ import {
   ChevronRight,
   Eye,
   Activity,
+  Users,
 } from "lucide-react";
 
 const STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string }> = {
@@ -228,11 +229,15 @@ function MappingTimeline({ sourceId, filename }: { sourceId: number; filename: s
 // ── Media Tab (gameplay upload + list) ───────────────────────────────────────
 
 function MediaTab() {
-  const { data: sources, loading } = usePoll(() => api.listSources(), 5000);
+  const { data: allSources, loading } = usePoll(() => api.listSources(undefined, undefined, true), 5000);
   const { uploads, addUpload, updateUpload, removeUpload } = useUploadStore();
   const [scanning, setScanning] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // Separate own vs public gameplays
+  const sources = (allSources || []).filter((s: any) => s.is_own !== false);
+  const publicSources = (allSources || []).filter((s: any) => s.is_own === false);
 
   const activeUploads = uploads.filter((u) => u.kind === "gameplay" && (u.status === "preparing" || u.status === "uploading" || u.status === "processing"));
   const hasActiveUploads = activeUploads.length > 0;
@@ -309,6 +314,15 @@ function MediaTab() {
       toast.success(`Gameplay "${filename}" deletada. Os arquivos físicos serão removidos pelo worker.`);
     } catch (err: any) {
       toast.error(err.message || "Erro ao deletar gameplay");
+    }
+  };
+
+  const handleToggleVisibility = async (sourceId: number, isPublic: boolean, filename: string) => {
+    try {
+      await api.toggleGameplayVisibility(sourceId, isPublic);
+      toast.success(`"${filename}" agora é ${isPublic ? "pública" : "privada"}.`);
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao alterar visibilidade");
     }
   };
 
@@ -452,13 +466,22 @@ function MediaTab() {
                         </Badge>
                       )}
                       {!isProcessing && !isMapping && (
-                        <button
-                          onClick={() => handleDeleteSource(s.id, s.filename)}
-                          className="text-text-muted hover:text-red-400 transition-colors p-1 rounded"
-                          title="Deletar gameplay"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleToggleVisibility(s.id, !s.is_public, s.filename)}
+                            className={`transition-colors p-1 rounded ${s.is_public ? "text-accent" : "text-text-muted hover:text-accent"}`}
+                            title={s.is_public ? "Pública — clique para tornar privada" : "Privada — clique para tornar pública"}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSource(s.id, s.filename)}
+                            className="text-text-muted hover:text-red-400 transition-colors p-1 rounded"
+                            title="Deletar gameplay"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -493,6 +516,55 @@ function MediaTab() {
           </div>
         )}
       </div>
+
+      {/* Public gameplays from community */}
+      {publicSources.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-text-muted" />
+            <h2 className="text-sm font-semibold">Gameplays públicas da comunidade</h2>
+            <Badge variant="default">{publicSources.length}</Badge>
+          </div>
+          <div className="grid gap-3">
+            {publicSources.map((s: any) => {
+              const isReady = s.processing_status === "ready" || s.processing_status === "mapped";
+              return (
+                <Card key={s.id} className="!p-4 opacity-80">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-surface-elevated border border-border">
+                      <CheckCircle2 className="h-5 w-5 text-accent" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium font-mono">{s.filename}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-muted">
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" /> {fmtDuration(s.duration)}
+                        </span>
+                        {s.width > 0 && (
+                          <span className="flex items-center gap-1">
+                            <Monitor className="h-3 w-3" /> {s.width}×{s.height}
+                          </span>
+                        )}
+                        {s.game_name && (
+                          <span className="text-text-secondary">{s.game_name}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1.5">
+                      <Badge variant="default">
+                        <Eye className="h-3 w-3" /> Pública
+                      </Badge>
+                    </div>
+                  </div>
+                  {isReady && (
+                    <MappingTimeline sourceId={s.id} filename={s.filename} />
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
