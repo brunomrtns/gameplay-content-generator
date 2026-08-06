@@ -81,7 +81,7 @@
 ## P1 — Melhorias Importantes
 
 ### [P1-01] Separar gameplays: minhas vs públicas da comunidade
-- **Status**: 🔲 Não implementado
+- **Status**: ✅ Implementado (v0.3.17)
 - **Problema**: A tela de upload/listagem de gameplays mostra tudo misturado. O usuário não sabe quais são suas gameplays e quais são públicas de outros usuários.
 - **Estado atual** (auditoria frontend):
   - ❌ `GET /api/sources` (`routes.py:179-201`) NÃO retorna campo `is_public` na resposta
@@ -213,6 +213,16 @@
   - P0-04: ProblemDetectorService detecta sources sem clips, sources sem events, jobs presos, KIs rejeitadas na fila, KIs sem gameplay
   - Endpoint GET /api/health/problems retorna diagnóstico completo
   - P1-06: Endpoint POST /api/idea-queue/cleanup remove KIs inválidas da fila
+
+### [DONE-07] Separar gameplays: minhas vs públicas
+- **Versão**: v0.3.17
+- **Data**: 2026-08-06
+- **Itens**:
+  - Backend: GET /api/sources agora retorna is_public, owner_user_id, is_own
+  - Backend: parâmetro include_public=true inclui gameplays públicas de outros usuários
+  - Frontend: seção separada "Gameplays públicas da comunidade"
+  - Frontend: botão Eye para toggle pública/privada nos cards próprios
+  - Frontend: badge "Pública" nos cards de gameplays públicas
 
 ---
 
