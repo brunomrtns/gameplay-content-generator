@@ -642,12 +642,23 @@ class RemoteWorker:
         self.start_heartbeat()
         self.send_status("online", "Idle")
 
-        log.info(f"Worker '{self.config.worker_id}' started. Polling every {self.config.poll_interval}s...")
+        # Auto content collection scheduler
+        self._last_collection_time = 0.0
+        from gpcg.config import get_settings
+        settings = get_settings()
+        self._collection_interval_sec = settings.gpcg_content_collection_interval_hours * 3600
+        log.info(
+            f"Worker '{self.config.worker_id}' started. Polling every {self.config.poll_interval}s. "
+            f"Auto content collection every {settings.gpcg_content_collection_interval_hours}h."
+        )
 
         while self._running:
             try:
                 # Check if any automation needs a new job created
                 self._check_automations()
+
+                # Auto content collection (every N hours)
+                self._maybe_auto_collect()
 
                 job = self.claim_job()
                 if job is None:
@@ -673,6 +684,45 @@ class RemoteWorker:
             except Exception as e:
                 log.error(f"Main loop error: {e}", exc_info=True)
                 time.sleep(self.config.poll_interval)
+
+    def _maybe_auto_collect(self) -> None:
+        """Auto-trigger content collection every N hours if no collection job is active.
+
+        Uses gpcg_content_collection_interval_hours from config (default: 6h).
+        Creates a content_collect job on the VPS via the worker-auth endpoint.
+        The VPS deduplicates (blocks if a content_collect job is already queued/running).
+        """
+        import time as _time
+        now = _time.time()
+        if now - self._last_collection_time < self._collection_interval_sec:
+            return
+
+        # Check if there's already a content_collect job queued/running on VPS
+        try:
+            resp = self.client.get("/api/jobs?type=content_collect&status=queued,running&limit=1")
+            if resp.status_code == 200:
+                data = resp.json()
+                jobs = data if isinstance(data, list) else data.get("jobs", [])
+                if jobs:
+                    # Already collecting — wait
+                    self._last_collection_time = now  # reset timer to avoid spamming
+                    return
+        except Exception:
+            pass  # non-fatal — try to create the job anyway
+
+        # Trigger content collection via worker-auth endpoint
+        try:
+            resp = self.client.post("/api/automation/trigger-content-collection")
+            if resp.status_code == 200:
+                log.info(f"Auto content collection triggered (interval={self._collection_interval_sec/3600:.0f}h)")
+                self._last_collection_time = now
+            elif resp.status_code == 409:
+                # Already queued — reset timer
+                self._last_collection_time = now
+            else:
+                log.warning(f"Auto content collection failed: {resp.status_code} {resp.text}")
+        except Exception as e:
+            log.warning(f"Auto content collection error: {e}")
 
     def _check_automations(self) -> None:
         """Check if any running automation needs a new job created.
@@ -1317,11 +1367,33 @@ class RemoteWorker:
         except Exception as e:
             log.warning(f"Could not fetch game list from VPS: {e}")
 
-        log.info(f"Collecting RSS for games: {game_names}")
+        # V2: Try to get editorial brief (expanded search queries) from VPS
+        # This replaces basic "{game} game" queries with editorial queries
+        # like "Bully hidden secrets", "Bully easter egg", "Bully story lore"
+        search_queries = None
+        user_id = job.get("user_id")
+        if user_id:
+            try:
+                resp = self.client.get(f"/api/automation/editorial-brief/{user_id}")
+                if resp.status_code == 200:
+                    brief_data = resp.json()
+                    search_queries = brief_data.get("search_queries", [])
+                    if search_queries:
+                        log.info(f"Editorial brief: {len(search_queries)} expanded queries "
+                                 f"(templates={brief_data.get('active_templates', [])})")
+                    else:
+                        log.info("Editorial brief empty — falling back to basic game queries")
+            except Exception as e:
+                log.warning(f"Could not fetch editorial brief: {e}")
+
+        log.info(f"Collecting RSS for games: {game_names} (editorial_queries={len(search_queries) if search_queries else 0})")
 
         # Collect RSS feeds locally (headless, no DB)
         try:
-            items = collect_rss_items(game_names=game_names if game_names else None)
+            items = collect_rss_items(
+                game_names=game_names if game_names else None,
+                search_queries=search_queries if search_queries else None,
+            )
             log.info(f"Collected {len(items)} items from RSS feeds")
         except Exception as e:
             log.exception(f"RSS collection failed: {e}")
@@ -1335,32 +1407,42 @@ class RemoteWorker:
             self.submit_job_result(job_id, status="completed", artifacts={"collected": 0})
             return
 
-        # Score items with local LLM
+        # Score items with local LLM (5 editorial dimensions)
         self.update_job_status(job_id, status="running", stage="scoring", progress=0.3)
+        from gpcg.application.knowledge_item_service import score_rss_item_headless
         try:
             llm = LLMClient()
         except Exception as e:
-            log.warning(f"LLM init failed for scoring (using default scores): {e}")
+            log.warning(f"LLM init failed for scoring (using heuristic): {e}")
             llm = None
 
         scored_items = []
+        rejected_count = 0
         for i, item in enumerate(items):
-            if llm:
-                try:
-                    # TODO: implement headless scoring (score_knowledge_item needs DB)
-                    # For now, use heuristic score based on title length and source
-                    item.editorial_score = _heuristic_score(item)
-                except Exception as e:
-                    log.warning(f"Scoring failed for item '{item.title[:50]}': {e}")
-                    item.editorial_score = 50.0
-            else:
-                item.editorial_score = _heuristic_score(item)
+            score, rejection_reason = score_rss_item_headless(
+                title=item.title,
+                content=item.content,
+                item_type=item.item_type,
+                source_type=item.source_name or item.source_type,
+                llm=llm,
+            )
+            item.editorial_score = score
+            if rejection_reason:
+                # Skip rejected items (clickbait/promotion/rumor) — don't sync to VPS
+                rejected_count += 1
+                if (i + 1) % 10 == 0:
+                    progress = 0.3 + (i + 1) / len(items) * 0.5
+                    self.update_job_status(job_id, status="running", stage="scoring", progress=progress)
+                continue
 
             scored_items.append(item)
 
             if (i + 1) % 10 == 0 or i + 1 == len(items):
                 progress = 0.3 + (i + 1) / len(items) * 0.5
                 self.update_job_status(job_id, status="running", stage="scoring", progress=progress)
+
+        if rejected_count > 0:
+            log.info(f"Content collection: {rejected_count} items rejected by quality gate (not synced)")
 
         # Sync items back to VPS (VPS handles cleanup of old news)
         self.update_job_status(job_id, status="running", stage="sync", progress=0.9)

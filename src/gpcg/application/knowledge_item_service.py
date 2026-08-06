@@ -392,6 +392,113 @@ def _parse_score_response(response: str) -> float:
     return 30.0
 
 
+# ── Headless Scoring (for remote worker — no DB needed) ───────────────────────
+
+
+def score_rss_item_headless(
+    title: str,
+    content: str,
+    item_type: str,
+    source_type: str,
+    llm: Optional[LLMClient] = None,
+) -> tuple[float, Optional[str]]:
+    """Score an RSS item for editorial potential WITHOUT a DB session.
+
+    This is the headless version of score_knowledge_item(), designed for
+    the remote worker which collects RSS items before they become
+    KnowledgeItem rows in the DB.
+
+    Returns (editorial_score, rejection_reason).
+    rejection_reason is None if the item passed the quality gate.
+    """
+    # 1. Deterministic quality gate (regex, no LLM)
+    text = f"{title} {content[:300]}"
+    for p in _CLICKBAIT_PATTERNS:
+        if p.search(text):
+            return 15.0, "clickbait"
+    for p in _PROMOTION_PATTERNS:
+        if p.search(text):
+            return 10.0, "promotion"
+    for p in _RUMOR_PATTERNS:
+        if p.search(text):
+            return 20.0, "rumor"
+
+    # 2. LLM scoring (5 editorial dimensions)
+    if llm is None:
+        # No LLM available — use heuristic as last resort
+        return _heuristic_score_simple(title, content, item_type, source_type), None
+
+    prompt = (
+        "Você é um editor de conteúdo gaming. Avalie o potencial editorial "
+        "desta ideia de conteúdo em uma escala de 0-100.\n\n"
+        f"Título: {title}\n"
+        f"Conteúdo: {content[:500]}\n"
+        f"Tipo: {item_type}\n"
+        f"Fonte: {source_type}\n\n"
+        "Considere:\n"
+        "- Curiosidade: Esta ideia cria um gap de informação que o espectador quer preencher?\n"
+        "- Surpresa: O conteúdo tem potencial de surpreender o espectador?\n"
+        "- Retenção: O conteúdo consegue segurar a atenção até o final?\n"
+        "- Familiaridade: O tema é reconhecível para o público gaming?\n"
+        "- Insight: O conteúdo oferece uma perspectiva nova ou reveladora?\n\n"
+        "GATE DE QUALIDADE FACTUAL:\n"
+        "- CLICKBAIT: O título promete algo que o conteúdo não entrega? Se sim, score ≤ 15.\n"
+        "- PROMOÇÃO: O conteúdo é primariamente promocional/comercial? Se sim, score ≤ 10.\n"
+        "- RUMOR: O conteúdo apresenta informação não verificada como fato? Se sim, score ≤ 20.\n"
+        "- LEAK NÃO CONFIRMADO: Baseado em vazamentos não confirmados? Se sim, score ≤ 25.\n"
+        "- Se o conteúdo passa no gate factual, avalie normalmente (0-100).\n\n"
+        "Responda APENAS com um número de 0 a 100, sem texto adicional."
+    )
+
+    try:
+        response = llm.generate(prompt, temperature=0.3, max_tokens=512)
+        score = _parse_score_response(response)
+        return score, None
+    except (LLMError, Exception) as e:
+        log.warning(f"Headless scoring failed for '{title[:50]}': {e}")
+        return _heuristic_score_simple(title, content, item_type, source_type), None
+
+
+def _heuristic_score_simple(
+    title: str, content: str, item_type: str, source_type: str
+) -> float:
+    """Simple heuristic score (fallback when LLM is unavailable).
+
+    Less dumb than the previous _heuristic_score in remote_worker.py —
+    at least considers item_type properly and penalizes very short content.
+    """
+    score = 40.0  # lower baseline than before (was 50)
+
+    title_len = len(title)
+    if 30 <= title_len <= 80:
+        score += 8
+    elif title_len < 15:
+        score -= 12  # too short, likely clickbait
+    elif title_len > 120:
+        score -= 5
+
+    content_len = len(content)
+    if content_len > 500:
+        score += 8
+    elif content_len < 100:
+        score -= 10  # too little to work with
+
+    # Curiosity/lore items have higher editorial value (evergreen)
+    if item_type == "curiosity":
+        score += 12
+    elif item_type == "lore":
+        score += 10
+    elif item_type == "news":
+        score += 0  # news is default, no bonus
+
+    # Reputable sources get a small bonus
+    reputable = {"IGN", "GameSpot", "Polygon", "Eurogamer", "Rock Paper Shotgun"}
+    if source_type in reputable:
+        score += 5
+
+    return max(0.0, min(100.0, score))
+
+
 # ── Content Ideas Query (unified Facts + KnowledgeItems) ──────────────────────
 
 

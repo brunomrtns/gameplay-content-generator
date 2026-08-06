@@ -78,18 +78,25 @@ def collect_rss_items(
     *,
     max_per_game: int = 15,
     max_general: int = 30,
+    search_queries: list[dict] | None = None,
 ) -> list[RSSItem]:
     """Collect RSS items headlessly (no DB session).
 
     Collects from:
     1. Google News RSS for each game name (game-specific news)
     2. General gaming news feeds (IGN, Kotaku, Polygon, Reddit, etc.)
+    3. If search_queries provided: expanded editorial queries (curiosity/lore/etc.)
 
     Args:
         game_names: List of game canonical names to collect for.
                     If None, only collects general gaming news.
         max_per_game: Max items per game feed
         max_general: Max items per general feed
+        search_queries: Optional list of {text, game_id, template_name, item_type}
+                        from the Editorial Brief. Each query is searched on
+                        Google News. Replaces the basic "{game} game" query
+                        when provided, producing curiosity/lore items, not
+                        just news.
 
     Returns:
         List of RSSItem dicts (deduped by content_hash).
@@ -105,7 +112,36 @@ def collect_rss_items(
     seen_hashes: set[str] = set()
 
     # 1. Game-specific feeds (Google News RSS)
-    if game_names:
+    # If search_queries provided, use those instead of basic "{game} game"
+    if search_queries:
+        for sq in search_queries:
+            query_text = sq.get("text", "")
+            item_type = sq.get("item_type", "news")
+            template_name = sq.get("template_name", "")
+            game_id = sq.get("game_id")
+            if not query_text:
+                continue
+            query = quote(query_text)
+            feed_url = settings.gpcg_rss_feed_url.format(query=query)
+            log.info(f"collect_rss_items: editorial query '{query_text}' (type={item_type}, template={template_name})")
+
+            try:
+                feed = feedparser.parse(feed_url)
+            except Exception as e:
+                log.warning(f"collect_rss_items: failed to fetch '{query_text}': {e}")
+                continue
+
+            for entry in feed.entries[:max_per_game]:
+                item = _entry_to_rss_item(entry, item_type=item_type)
+                if item and item.content_hash not in seen_hashes:
+                    # Attach game_id from the search query so the KI is
+                    # associated with the right game on the VPS
+                    if game_id:
+                        item.game_id = game_id
+                    seen_hashes.add(item.content_hash)
+                    all_items.append(item)
+    elif game_names:
+        # Legacy: basic "{game} game" query (news only)
         for game_name in game_names:
             query = quote(f"{game_name} game")
             feed_url = settings.gpcg_rss_feed_url.format(query=query)

@@ -633,6 +633,52 @@ def consume_idea_queue(
     return {"job_id": job_id, "source": "idea_queue"}
 
 
+@router.post("/automation/trigger-content-collection")
+def trigger_content_collection_worker(
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Worker-auth endpoint to trigger content collection automatically.
+
+    Called by the remote worker's auto-collection scheduler every N hours.
+    Creates a content_collect job for the first user with an active automation.
+    Deduplicates: returns 409 if a content_collect job is already queued/running.
+    """
+    import uuid
+    from sqlalchemy import select as _sel
+
+    # Dedup: check for existing queued/running content_collect job
+    existing = db.execute(
+        _sel(Job).where(
+            Job.type == JobType.content_collect.value,
+            Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
+        )
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail="Content collection already queued or running")
+
+    # Find the first user with a running automation
+    auto = db.query(Automation).filter(Automation.status == "running").first()
+    if not auto:
+        raise HTTPException(status_code=404, detail="No running automation found")
+
+    job = Job(
+        job_uuid=str(uuid.uuid4()),
+        type=JobType.content_collect.value,
+        status=JobStatus.queued.value,
+        stage="content_collection",
+        priority=JobPriority.normal.value,
+        required_capabilities=["content_intelligence"],
+        user_id=auto.user_id,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    log.info(f"Auto content collection: created job #{job.id} for user {auto.user_id}")
+    return {"job_id": job.id, "message": "Content collection job created"}
+
+
 class EnqueueRequest(BaseModel):
     user_id: int
     knowledge_item_ids: list[int]
@@ -901,6 +947,56 @@ def get_editorial_data(
         "channel_context": channel_context,
         "general_ideas": general_ideas,
     }
+
+
+@router.get("/automation/editorial-brief/{user_id}")
+def get_editorial_brief(
+    user_id: int,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Return the Editorial Brief (search queries) for content collection.
+
+    Called by the remote worker's content_collect job to get expanded
+    search queries (curiosity/lore/news) based on the channel's profile
+    and gameplay inventory. This replaces the basic "{game} game" query
+    with editorial queries like "Bully hidden secrets", "Bully easter egg",
+    "Bully story lore", etc.
+
+    Falls back to basic game names if the Brief cannot be built.
+    """
+    from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
+    from gpcg.application.editorial_brief_builder import EditorialBriefBuilder
+    from gpcg.domain.models import ChannelProfile
+
+    try:
+        profile = db.query(ChannelProfile).filter(
+            ChannelProfile.user_id == user_id
+        ).first()
+        if not profile:
+            # No profile — return empty (worker falls back to basic queries)
+            return {"search_queries": [], "fallback": True}
+
+        intent = EditorialIntentBuilder().build(db, user_id, profile)
+        brief = EditorialBriefBuilder().build(db, user_id, profile, intent)
+
+        return {
+            "search_queries": [
+                {
+                    "text": sq.text,
+                    "game_id": sq.game_id,
+                    "template_name": sq.template_name,
+                    "item_type": sq.item_type,
+                }
+                for sq in brief.search_queries
+            ],
+            "active_templates": brief.active_templates,
+            "collection_targets": brief.collection_targets,
+            "fallback": False,
+        }
+    except Exception as e:
+        log.warning(f"Failed to build editorial brief for user {user_id}: {e}")
+        return {"search_queries": [], "fallback": True, "error": str(e)}
 
 
 class CreateJobRequest(BaseModel):
