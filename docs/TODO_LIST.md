@@ -15,7 +15,7 @@
 - **Comportamento**: Se não tem clips → remove KI da fila → retorna None → próximo ciclo pega próxima KI.
 
 ### [P0-02] Deletar gameplay (frontend + backend + worker)
-- **Status**: 🔲 Não implementado
+- **Status**: ✅ Implementado (v0.3.14)
 - **Problema**: Não existe forma de deletar uma gameplay. O usuário não pode remover gameplay que não quer mais usar, e os arquivos físicos no HD Toshiba ficam acumulando como lixo.
 - **Estado atual** (auditoria):
   - ❌ NÃO existe endpoint `DELETE /api/sources/{id}` ou `DELETE /api/gameplays/{id}`
@@ -186,6 +186,15 @@
   - P1-04: Coleta orientada por profile
   - P1-05: Diversidade de tipos
   - P0-01: Verificar clips antes de criar job
+
+### [DONE-04] Deletar gameplay (backend + worker + frontend)
+- **Versão**: v0.3.14
+- **Data**: 2026-08-06
+- **Itens**:
+  - P0-02: Endpoint DELETE /api/sources/{id} com soft-delete + cleanup job
+  - Worker handler _process_cleanup_gameplay_job apaga arquivos do HD
+  - Frontend botão Trash2 com confirmação dupla
+  - Filtro: list_sources não retorna sources deletadas
 
 ---
 
