@@ -1142,7 +1142,7 @@ def list_videos(
         if v.game_id:
             g = db.get(Game, v.game_id)
             if g:
-                game_name = g.name
+                game_name = g.canonical_name
 
         # KnowledgeItem (the idea that originated this video)
         ki_info = None
@@ -1182,10 +1182,10 @@ def list_videos(
             if src and src.game_id:
                 sg = db.get(Game, src.game_id)
                 if sg:
-                    src_game_name = sg.name
+                    src_game_name = sg.canonical_name
             clips_used.append({
                 "source_id": cu.source_id,
-                "source_name": src.display_name if src else None,
+                "source_name": src.filename if src else None,
                 "source_game": src_game_name,
                 "start_sec": round(cu.start_sec, 1),
                 "end_sec": round(cu.end_sec, 1),
