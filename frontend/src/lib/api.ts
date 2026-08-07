@@ -498,17 +498,23 @@ export const api = {
     request<{ games: any[]; max_uses: number }>("/gameplay-availability"),
 
   // ── Catalog (IGDB) ──────────────────────────────────────────────────────
-  // These go to the catalog service, not the main API.
-  searchCatalog: (q: string, limit = 10) => {
+  // These go to the catalog service, not the main API — so we can't use the
+  // request() helper which prepends API_BASE. We use fetch directly with the
+  // same credential/refresh logic.
+  searchCatalog: async (q: string, limit = 10) => {
     const base = import.meta.env.PROD ? "/gpcg/api/catalog" : "/catalog-api";
-    return request<{ results: any[]; count: number }>(
-      `${base}/search?q=${encodeURIComponent(q)}&limit=${limit}`,
-    );
+    const res = await fetch(`${base}/search?q=${encodeURIComponent(q)}&limit=${limit}`, {
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error(res.statusText);
+    return res.json() as Promise<{ results: any[]; count: number }>;
   },
-  autocompleteCatalog: (q: string, limit = 8) => {
+  autocompleteCatalog: async (q: string, limit = 8) => {
     const base = import.meta.env.PROD ? "/gpcg/api/catalog" : "/catalog-api";
-    return request<{ results: any[]; count: number }>(
-      `${base}/autocomplete?q=${encodeURIComponent(q)}&limit=${limit}`,
-    );
+    const res = await fetch(`${base}/autocomplete?q=${encodeURIComponent(q)}&limit=${limit}`, {
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error(res.statusText);
+    return res.json() as Promise<{ results: any[]; count: number }>;
   },
 };
