@@ -452,16 +452,12 @@ export const api = {
     knowledgeItemId: number,
     gameplayPreference?: number | null,
     reuseOverride?: string | null,
-    gameplayGameName?: string | null,
-    gameplaySlug?: string | null,
   ) =>
     request<{ queue: any[]; message: string }>("/idea-queue/add", {
       method: "POST",
       body: JSON.stringify({
         knowledge_item_id: knowledgeItemId,
         gameplay_preference: gameplayPreference ?? null,
-        gameplay_game_name: gameplayGameName ?? null,
-        gameplay_slug: gameplaySlug ?? null,
         reuse_override: reuseOverride ?? null,
       }),
     }),
@@ -478,8 +474,6 @@ export const api = {
   updateIdeaQueueItem: (
     knowledgeItemId: number,
     gameplayPreference?: number | null,
-    gameplayGameName?: string | null,
-    gameplaySlug?: string | null,
     reuseOverride?: string | null,
   ) =>
     request<{ queue: any[]; message: string }>("/idea-queue/update", {
@@ -487,8 +481,6 @@ export const api = {
       body: JSON.stringify({
         knowledge_item_id: knowledgeItemId,
         gameplay_preference: gameplayPreference ?? null,
-        gameplay_game_name: gameplayGameName ?? null,
-        gameplay_slug: gameplaySlug ?? null,
         reuse_override: reuseOverride ?? null,
       }),
     }),

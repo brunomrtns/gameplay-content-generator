@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { Spinner } from "@/components/ui";
-import { GameSearchModal, type CatalogGame } from "@/components/game-search-modal";
 
 interface KnowledgeItem {
   id: number;
@@ -92,11 +91,9 @@ export function IdeasPage() {
   const [selectedReuseOverride, setSelectedReuseOverride] = useState<string | null>(null);
   // V3: Currently processing job
   const [currentJob, setCurrentJob] = useState<any>(null);
-  // Edit game for existing queue item
+  // Edit game for existing queue item — shows only games with gameplay available
   const [editQueueGameItem, setEditQueueGameItem] = useState<KnowledgeItem | null>(null);
-  // Catalog search for the "add to queue" modal
-  const [catalogSearchOpen, setCatalogSearchOpen] = useState(false);
-  const [catalogSelectedGame, setCatalogSelectedGame] = useState<{ name: string; slug: string } | null>(null);
+  const [editSelectedGameplay, setEditSelectedGameplay] = useState<number | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -209,7 +206,6 @@ export function IdeasPage() {
     setQueueModalItem(item);
     setSelectedGameplay(null);
     setSelectedReuseOverride(null);
-    setCatalogSelectedGame(null);
   };
 
   const handleAddToQueue = async () => {
@@ -219,20 +215,17 @@ export function IdeasPage() {
         queueModalItem.id,
         selectedGameplay,
         selectedReuseOverride,
-        catalogSelectedGame?.name ?? null,
-        catalogSelectedGame?.slug ?? null,
       );
       setQueueIds((prev) => new Set(prev).add(queueModalItem.id));
       // Update queue display
       setQueue((prev) => [...prev, {
         ...queueModalItem,
-        gameplay_preference: selectedGameplay || (catalogSelectedGame ? -1 : null),
+        gameplay_preference: selectedGameplay,
         reuse_override: selectedReuseOverride,
       }]);
       setQueueModalItem(null);
       setSelectedGameplay(null);
       setSelectedReuseOverride(null);
-      setCatalogSelectedGame(null);
     } catch (e: any) {
       setError(e.message);
     }
@@ -252,46 +245,34 @@ export function IdeasPage() {
     }
   };
 
-  // Update game for an existing queue item (find-or-create by slug)
-  const handleUpdateQueueGame = async (game: CatalogGame) => {
+  // Update game for an existing queue item (only games with gameplay available)
+  const handleUpdateQueueGame = async () => {
     if (!editQueueGameItem) return;
     try {
       await api.updateIdeaQueueItem(
         editQueueGameItem.id,
-        null, // gameplay_preference (null since we're using name+slug)
-        game.name,
-        game.slug,
+        editSelectedGameplay, // null = auto, game_id = specific
         editQueueGameItem.reuse_override ?? null,
       );
       // Update local state
       setQueue((prev) =>
         prev.map((i) =>
           i.id === editQueueGameItem.id
-            ? { ...i, gameplay_preference: -1, game_id: -1 } // will be refreshed by next poll
+            ? { ...i, gameplay_preference: editSelectedGameplay }
             : i,
         ),
       );
       setEditQueueGameItem(null);
-      // Reload to get the actual game_id from backend
-      loadData();
+      setEditSelectedGameplay(null);
     } catch (e: any) {
       setError(e.message);
     }
   };
 
-  // Clear game preference for a queue item (set to auto)
-  const handleClearQueueGame = async (item: KnowledgeItem) => {
-    try {
-      await api.updateIdeaQueueItem(item.id, null, null, null, item.reuse_override ?? null);
-      setQueue((prev) =>
-        prev.map((i) =>
-          i.id === item.id ? { ...i, gameplay_preference: null } : i,
-        ),
-      );
-      setEditQueueGameItem(null);
-    } catch (e: any) {
-      setError(e.message);
-    }
+  // Open edit modal — preselect current game
+  const openEditQueueGame = (item: KnowledgeItem) => {
+    setEditQueueGameItem(item);
+    setEditSelectedGameplay(item.gameplay_preference ?? null);
   };
 
   const handleMoveQueueItem = async (index: number, direction: "up" | "down") => {
@@ -553,7 +534,7 @@ export function IdeasPage() {
                     {/* V3: Show gameplay preference — clickable to change */}
                     {item.gameplay_preference && item.gameplay_preference > 0 && (
                       <button
-                        onClick={() => setEditQueueGameItem(item)}
+                        onClick={() => openEditQueueGame(item)}
                         className="flex items-center gap-1 rounded-full border border-teal-500/30 bg-teal-500/10 px-2 py-0.5 text-xs font-medium text-teal-300 transition-colors hover:bg-teal-500/20"
                         title="Alterar jogo"
                       >
@@ -565,7 +546,7 @@ export function IdeasPage() {
                     )}
                     {!item.gameplay_preference && !item.game_id && (
                       <button
-                        onClick={() => setEditQueueGameItem(item)}
+                        onClick={() => openEditQueueGame(item)}
                         className="flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-text-muted transition-colors hover:border-teal-500/40 hover:text-teal-300"
                         title="Definir jogo específico"
                       >
@@ -746,60 +727,21 @@ export function IdeasPage() {
             <label className="block text-sm font-medium text-text mb-2">
               Gameplay de fundo
             </label>
-            {/* If a catalog game was selected, show it with option to clear */}
-            {catalogSelectedGame ? (
-              <div className="mb-3 flex items-center justify-between rounded-lg border border-teal-500/30 bg-teal-500/10 px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <svg className="h-4 w-4 text-teal-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                  <span className="text-sm font-medium text-teal-300">{catalogSelectedGame.name}</span>
-                  <span className="text-xs text-text-muted">(catálogo IGDB)</span>
-                </div>
-                <button
-                  onClick={() => setCatalogSelectedGame(null)}
-                  className="text-text-muted hover:text-text"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            ) : (
-              <>
-                <select
-                  value={selectedGameplay ?? ""}
-                  onChange={(e) => {
-                    setSelectedGameplay(e.target.value ? Number(e.target.value) : null);
-                    setSelectedReuseOverride(null);
-                  }}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40 mb-2"
-                >
-                  <option value="">Automático (sistema escolhe)</option>
-                  {availability.map((g) => (
-                    <option key={g.game_id} value={g.game_id}>
-                      {g.game_name} · {ownershipLabel(g.ownership)} · {availabilityLabel(g.availability)}
-                    </option>
-                  ))}
-                </select>
-                {/* Divider */}
-                <div className="flex items-center gap-2 my-2">
-                  <div className="h-px flex-1 bg-border" />
-                  <span className="text-xs text-text-muted">ou</span>
-                  <div className="h-px flex-1 bg-border" />
-                </div>
-                {/* Catalog search button */}
-                <button
-                  onClick={() => setCatalogSearchOpen(true)}
-                  className="w-full rounded-lg border border-dashed border-border px-3 py-2 text-sm text-text-muted transition-colors hover:border-teal-500/40 hover:text-teal-300 mb-3"
-                >
-                  <svg className="inline h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                  Buscar no catálogo (12.800+ jogos)
-                </button>
-              </>
-            )}
+            <select
+              value={selectedGameplay ?? ""}
+              onChange={(e) => {
+                setSelectedGameplay(e.target.value ? Number(e.target.value) : null);
+                setSelectedReuseOverride(null);
+              }}
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40 mb-3"
+            >
+              <option value="">Automático (sistema escolhe)</option>
+              {availability.map((g) => (
+                <option key={g.game_id} value={g.game_id}>
+                  {g.game_name} · {ownershipLabel(g.ownership)} · {availabilityLabel(g.availability)}
+                </option>
+              ))}
+            </select>
 
             {/* Availability badges for selected game */}
             {selectedGameplay && (() => {
@@ -881,28 +823,72 @@ export function IdeasPage() {
         </div>
       )}
 
-      {/* Edit game for existing queue item */}
-      <GameSearchModal
-        open={editQueueGameItem !== null}
-        onClose={() => setEditQueueGameItem(null)}
-        onSelect={handleUpdateQueueGame}
-        title="Alterar Jogo da Ideia"
-        subtitle="Busque pelo nome ou nome alternativo (GTA, Witcher, etc.)"
-        allowClear={editQueueGameItem?.gameplay_preference ? true : false}
-        onClear={() => editQueueGameItem && handleClearQueueGame(editQueueGameItem)}
-      />
+      {/* Edit game for existing queue item — only games with gameplay available */}
+      {editQueueGameItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => setEditQueueGameItem(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-border-bright bg-surface-elevated p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-text mb-1">Alterar Jogo</h3>
+            <p className="text-sm text-text-muted mb-4 line-clamp-2">
+              {editQueueGameItem.title}
+            </p>
 
-      {/* Catalog search for "add to queue" modal */}
-      <GameSearchModal
-        open={catalogSearchOpen}
-        onClose={() => setCatalogSearchOpen(false)}
-        onSelect={(game) => {
-          setCatalogSelectedGame({ name: game.name, slug: game.slug });
-          setSelectedGameplay(null); // clear the select if a catalog game is chosen
-        }}
-        title="Buscar no Catálogo"
-        subtitle="Busque pelo nome ou nome alternativo (GTA, Witcher, etc.)"
-      />
+            <label className="block text-sm font-medium text-text mb-2">
+              Gameplay de fundo
+            </label>
+            <select
+              value={editSelectedGameplay ?? ""}
+              onChange={(e) => setEditSelectedGameplay(e.target.value ? Number(e.target.value) : null)}
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40 mb-3"
+            >
+              <option value="">Automático (sistema escolhe)</option>
+              {availability.map((g) => (
+                <option key={g.game_id} value={g.game_id}>
+                  {g.game_name} · {ownershipLabel(g.ownership)} · {availabilityLabel(g.availability)}
+                </option>
+              ))}
+            </select>
+
+            {editSelectedGameplay && (() => {
+              const game = availability.find((g) => g.game_id === editSelectedGameplay);
+              if (!game) return null;
+              return (
+                <div className="mb-4 flex items-center gap-2 flex-wrap">
+                  <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${availabilityColor(game.availability)}`}>
+                    {availabilityLabel(game.availability)}
+                  </span>
+                  <span className="text-xs text-text-muted">
+                    {ownershipLabel(game.ownership)}
+                  </span>
+                  <span className="text-xs text-text-muted">
+                    {game.eligible_events}/{game.total_events} eventos
+                  </span>
+                </div>
+              );
+            })()}
+
+            <div className="flex gap-2 justify-end mt-4">
+              <button
+                onClick={() => setEditQueueGameItem(null)}
+                className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleUpdateQueueGame}
+                className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-500"
+              >
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
