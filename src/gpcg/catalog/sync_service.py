@@ -282,20 +282,22 @@ class SyncService:
         sync and are still valid alternative names.
         """
         added = 0
-        seen = set()  # Deduplicate within this batch (IGDB can return dupes)
+        seen: set[str] = set()  # Deduplicate within this batch
         for alias in aliases:
             alias = alias.strip()
             if not alias:
                 continue
-            key = alias.lower()
-            if key in seen:
+            if alias in seen:
                 continue
-            seen.add(key)
-            # Check if this alias already exists for this game (case-insensitive)
+            seen.add(alias)
+            # Check if this exact alias already exists for this game.
+            # Use exact match (not func.lower) because SQLite's lower() only
+            # handles ASCII, so it fails for Cyrillic/CJK/other non-ASCII names.
+            # The unique constraint is case-sensitive, so the check should be too.
             exists = session.execute(
                 select(CatalogAlias.id).where(
                     CatalogAlias.game_id == game_id,
-                    func.lower(CatalogAlias.alias) == alias.lower(),
+                    CatalogAlias.alias == alias,
                 )
             ).first()
             if exists:
