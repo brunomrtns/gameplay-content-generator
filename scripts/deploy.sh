@@ -248,18 +248,19 @@ if "upstream gpcg_api" not in content:
     content = content.replace("    log_format main", upstream_block + "\n    log_format main", 1)
 
 # ── Ensure upstream gpcg_catalog exists ──────────────────────────────────
-catalog_upstream_block = """    # ── GPCG Catalog Upstream ─────────────────────────────────────────────
-    upstream gpcg_catalog {
-        server gpcg-catalog:8788;
-        keepalive 16;
-    }
-"""
-if "upstream gpcg_catalog" not in content:
-    content = content.replace(
-        "    # ── GPCG Upstream",
-        catalog_upstream_block + "\n    # ── GPCG Upstream",
-        1,
-    )
+# NOTE: We DON'T use a static upstream for the catalog because nginx resolves
+# upstream hostnames at config-load time. If the catalog container is
+# restarting, nginx crashes. Instead, we use a resolver + variable in
+# proxy_pass (see the location block below), which resolves at request time.
+# So we intentionally do NOT add an upstream block for gpcg_catalog.
+
+# ── Remove stale gpcg_catalog upstream if it was added by a previous deploy ─
+content = re.sub(
+    r"\n    # ── GPCG Catalog Upstream.*?    \}\n",
+    "\n",
+    content,
+    flags=re.DOTALL,
+)
 
 # ── Replace (or add) the /gpcg/ location block ───────────────────────────
 # Always rewrite the full block so config stays consistent across deploys.
@@ -312,11 +313,14 @@ location_block = """    # ── GPCG (Gameplay Content Generator) ────�
         client_max_body_size 1024m;
     }
     # Game Catalog Service — proxied to the catalog container (port 8788).
-    # More specific than /gpcg/ so nginx matches this first.
+    # Uses resolver + variable so nginx resolves at request time (not startup).
+    # This prevents nginx from crashing if the catalog container is restarting.
     location /gpcg/api/catalog/ {
         limit_req zone=api_limit burst=30 nodelay;
+        resolver 127.0.0.11 valid=10s;
+        set $catalog_backend http://gpcg-catalog:8788;
         rewrite ^/gpcg/api/catalog/(.*)$ /api/$1 break;
-        proxy_pass         http://gpcg_catalog;
+        proxy_pass         $catalog_backend;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
