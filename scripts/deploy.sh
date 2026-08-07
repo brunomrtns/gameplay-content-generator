@@ -248,7 +248,7 @@ if "upstream gpcg_api" not in content:
     content = content.replace("    log_format main", upstream_block + "\n    log_format main", 1)
 
 # ── Ensure upstream gpcg_catalog exists ──────────────────────────────────
-# NOTE: We DON'T use a static upstream for the catalog because nginx resolves
+# NOTE: We DO NOT use a static upstream for the catalog because nginx resolves
 # upstream hostnames at config-load time. If the catalog container is
 # restarting, nginx crashes. Instead, we use a resolver + variable in
 # proxy_pass (see the location block below), which resolves at request time.
