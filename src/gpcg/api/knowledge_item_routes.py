@@ -379,6 +379,8 @@ class IdeaQueueAddRequest(BaseModel):
     """Add a KnowledgeItem to the queue with optional gameplay preference."""
     knowledge_item_id: int
     gameplay_preference: Optional[int] = None  # null=auto, game_id=user chose
+    gameplay_game_name: Optional[str] = None  # for find-or-create by slug
+    gameplay_slug: Optional[str] = None
     reuse_override: Optional[str] = None  # null, "allow_reuse", "skip"
 
 
@@ -393,9 +395,13 @@ def add_to_idea_queue(
     V3: Accepts gameplay_preference (null=auto, game_id=specific game) and
     reuse_override (null=use global config, "allow_reuse"=exceptional reuse,
     "skip"=don't generate without material).
+    Also accepts gameplay_game_name + gameplay_slug for find-or-create by slug
+    (used when selecting from the IGDB catalog search).
     """
     from sqlalchemy.orm.attributes import flag_modified
-    from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
+    from gpcg.domain.models import Automation, Game, KnowledgeItem, KnowledgeItemStatus
+    from sqlalchemy import select as sa_select
+
     ki = db.get(KnowledgeItem, req.knowledge_item_id)
     if not ki:
         raise HTTPException(404, "KnowledgeItem not found")
@@ -404,13 +410,30 @@ def add_to_idea_queue(
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     if not auto:
         raise HTTPException(404, "Automation not found")
+
+    # Resolve game_id: either direct, or find-or-create by slug
+    game_id = req.gameplay_preference
+    if req.gameplay_game_name and req.gameplay_slug:
+        g = db.execute(
+            sa_select(Game).where(Game.slug == req.gameplay_slug)
+        ).scalar_one_or_none()
+        if g is None:
+            g = Game(
+                canonical_name=req.gameplay_game_name,
+                slug=req.gameplay_slug,
+                user_id=user.id,
+            )
+            db.add(g)
+            db.flush()
+        game_id = g.id
+
     config = dict(auto.config or {})
     queue = _normalize_idea_queue(config.get("idea_queue", []))
     existing_ids = _queue_ki_ids(queue)
     if req.knowledge_item_id not in existing_ids:
         queue.append({
             "ki_id": req.knowledge_item_id,
-            "gameplay_preference": req.gameplay_preference,
+            "gameplay_preference": game_id,
             "reuse_override": req.reuse_override,
         })
         config["idea_queue"] = queue
@@ -473,3 +496,69 @@ def reorder_idea_queue(
     flag_modified(auto, "config")
     db.commit()
     return {"queue": new_queue, "message": "Queue reordered"}
+
+
+class IdeaQueueUpdateRequest(BaseModel):
+    """Update gameplay_preference and/or reuse_override for an existing queue item."""
+    knowledge_item_id: int
+    gameplay_preference: Optional[int] = None  # null=auto, game_id=user chose
+    gameplay_game_name: Optional[str] = None  # for find-or-create by slug
+    gameplay_slug: Optional[str] = None
+    reuse_override: Optional[str] = None  # null, "allow_reuse", "skip"
+
+
+@router.post("/idea-queue/update")
+def update_idea_queue_item(
+    req: IdeaQueueUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Update gameplay_preference and/or reuse_override for an existing queue item.
+
+    Accepts either:
+    - gameplay_preference: an existing GPCG Game ID (null = auto)
+    - gameplay_game_name + gameplay_slug: find-or-create a GPCG Game by slug
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+    from gpcg.domain.models import Automation, Game
+    from sqlalchemy import select as sa_select
+
+    auto = db.query(Automation).filter(Automation.user_id == user.id).first()
+    if not auto:
+        raise HTTPException(404, "Automation not found")
+    config = dict(auto.config or {})
+    queue = _normalize_idea_queue(config.get("idea_queue", []))
+
+    # Resolve game_id: either direct, or find-or-create by slug
+    game_id = req.gameplay_preference
+    if req.gameplay_game_name and req.gameplay_slug:
+        g = db.execute(
+            sa_select(Game).where(Game.slug == req.gameplay_slug)
+        ).scalar_one_or_none()
+        if g is None:
+            g = Game(
+                canonical_name=req.gameplay_game_name,
+                slug=req.gameplay_slug,
+                user_id=user.id,
+            )
+            db.add(g)
+            db.flush()
+        game_id = g.id
+
+    # Update the matching queue entry
+    updated = False
+    for entry in queue:
+        if entry.get("ki_id") == req.knowledge_item_id:
+            entry["gameplay_preference"] = game_id
+            entry["reuse_override"] = req.reuse_override
+            updated = True
+            break
+
+    if not updated:
+        raise HTTPException(404, "Item not found in queue")
+
+    config["idea_queue"] = queue
+    auto.config = config
+    flag_modified(auto, "config")
+    db.commit()
+    return {"queue": queue, "message": "Queue item updated"}

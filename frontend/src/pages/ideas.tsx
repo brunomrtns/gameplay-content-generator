@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { Spinner } from "@/components/ui";
+import { GameSearchModal, type CatalogGame } from "@/components/game-search-modal";
 
 interface KnowledgeItem {
   id: number;
@@ -91,6 +92,11 @@ export function IdeasPage() {
   const [selectedReuseOverride, setSelectedReuseOverride] = useState<string | null>(null);
   // V3: Currently processing job
   const [currentJob, setCurrentJob] = useState<any>(null);
+  // Edit game for existing queue item
+  const [editQueueGameItem, setEditQueueGameItem] = useState<KnowledgeItem | null>(null);
+  // Catalog search for the "add to queue" modal
+  const [catalogSearchOpen, setCatalogSearchOpen] = useState(false);
+  const [catalogSelectedGame, setCatalogSelectedGame] = useState<{ name: string; slug: string } | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -203,6 +209,7 @@ export function IdeasPage() {
     setQueueModalItem(item);
     setSelectedGameplay(null);
     setSelectedReuseOverride(null);
+    setCatalogSelectedGame(null);
   };
 
   const handleAddToQueue = async () => {
@@ -212,17 +219,20 @@ export function IdeasPage() {
         queueModalItem.id,
         selectedGameplay,
         selectedReuseOverride,
+        catalogSelectedGame?.name ?? null,
+        catalogSelectedGame?.slug ?? null,
       );
       setQueueIds((prev) => new Set(prev).add(queueModalItem.id));
       // Update queue display
       setQueue((prev) => [...prev, {
         ...queueModalItem,
-        gameplay_preference: selectedGameplay,
+        gameplay_preference: selectedGameplay || (catalogSelectedGame ? -1 : null),
         reuse_override: selectedReuseOverride,
       }]);
       setQueueModalItem(null);
       setSelectedGameplay(null);
       setSelectedReuseOverride(null);
+      setCatalogSelectedGame(null);
     } catch (e: any) {
       setError(e.message);
     }
@@ -237,6 +247,48 @@ export function IdeasPage() {
         return next;
       });
       setQueue((prev) => prev.filter((i) => i.id !== id));
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  // Update game for an existing queue item (find-or-create by slug)
+  const handleUpdateQueueGame = async (game: CatalogGame) => {
+    if (!editQueueGameItem) return;
+    try {
+      await api.updateIdeaQueueItem(
+        editQueueGameItem.id,
+        null, // gameplay_preference (null since we're using name+slug)
+        game.name,
+        game.slug,
+        editQueueGameItem.reuse_override ?? null,
+      );
+      // Update local state
+      setQueue((prev) =>
+        prev.map((i) =>
+          i.id === editQueueGameItem.id
+            ? { ...i, gameplay_preference: -1, game_id: -1 } // will be refreshed by next poll
+            : i,
+        ),
+      );
+      setEditQueueGameItem(null);
+      // Reload to get the actual game_id from backend
+      loadData();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  // Clear game preference for a queue item (set to auto)
+  const handleClearQueueGame = async (item: KnowledgeItem) => {
+    try {
+      await api.updateIdeaQueueItem(item.id, null, null, null, item.reuse_override ?? null);
+      setQueue((prev) =>
+        prev.map((i) =>
+          i.id === item.id ? { ...i, gameplay_preference: null } : i,
+        ),
+      );
+      setEditQueueGameItem(null);
     } catch (e: any) {
       setError(e.message);
     }
@@ -498,14 +550,30 @@ export function IdeasPage() {
                         jogo-specific
                       </span>
                     )}
-                    {/* V3: Show gameplay preference */}
-                    {item.gameplay_preference && (
-                      <span className="rounded-full border border-teal-500/30 bg-teal-500/10 px-2 py-0.5 text-xs font-medium text-teal-300">
+                    {/* V3: Show gameplay preference — clickable to change */}
+                    {item.gameplay_preference && item.gameplay_preference > 0 && (
+                      <button
+                        onClick={() => setEditQueueGameItem(item)}
+                        className="flex items-center gap-1 rounded-full border border-teal-500/30 bg-teal-500/10 px-2 py-0.5 text-xs font-medium text-teal-300 transition-colors hover:bg-teal-500/20"
+                        title="Alterar jogo"
+                      >
                         {availability.find((g) => g.game_id === item.gameplay_preference)?.game_name || `Jogo #${item.gameplay_preference}`}
-                      </span>
+                        <svg className="h-2.5 w-2.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
                     )}
                     {!item.gameplay_preference && !item.game_id && (
-                      <span className="text-xs text-text-muted">Automático</span>
+                      <button
+                        onClick={() => setEditQueueGameItem(item)}
+                        className="flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-text-muted transition-colors hover:border-teal-500/40 hover:text-teal-300"
+                        title="Definir jogo específico"
+                      >
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                        </svg>
+                        Definir jogo
+                      </button>
                     )}
                     {/* V3: Show reuse override */}
                     {item.reuse_override === "allow_reuse" && (
@@ -678,21 +746,60 @@ export function IdeasPage() {
             <label className="block text-sm font-medium text-text mb-2">
               Gameplay de fundo
             </label>
-            <select
-              value={selectedGameplay ?? ""}
-              onChange={(e) => {
-                setSelectedGameplay(e.target.value ? Number(e.target.value) : null);
-                setSelectedReuseOverride(null);
-              }}
-              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40 mb-3"
-            >
-              <option value="">Automático (sistema escolhe)</option>
-              {availability.map((g) => (
-                <option key={g.game_id} value={g.game_id}>
-                  {g.game_name} · {ownershipLabel(g.ownership)} · {availabilityLabel(g.availability)}
-                </option>
-              ))}
-            </select>
+            {/* If a catalog game was selected, show it with option to clear */}
+            {catalogSelectedGame ? (
+              <div className="mb-3 flex items-center justify-between rounded-lg border border-teal-500/30 bg-teal-500/10 px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <svg className="h-4 w-4 text-teal-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                  <span className="text-sm font-medium text-teal-300">{catalogSelectedGame.name}</span>
+                  <span className="text-xs text-text-muted">(catálogo IGDB)</span>
+                </div>
+                <button
+                  onClick={() => setCatalogSelectedGame(null)}
+                  className="text-text-muted hover:text-text"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ) : (
+              <>
+                <select
+                  value={selectedGameplay ?? ""}
+                  onChange={(e) => {
+                    setSelectedGameplay(e.target.value ? Number(e.target.value) : null);
+                    setSelectedReuseOverride(null);
+                  }}
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40 mb-2"
+                >
+                  <option value="">Automático (sistema escolhe)</option>
+                  {availability.map((g) => (
+                    <option key={g.game_id} value={g.game_id}>
+                      {g.game_name} · {ownershipLabel(g.ownership)} · {availabilityLabel(g.availability)}
+                    </option>
+                  ))}
+                </select>
+                {/* Divider */}
+                <div className="flex items-center gap-2 my-2">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="text-xs text-text-muted">ou</span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+                {/* Catalog search button */}
+                <button
+                  onClick={() => setCatalogSearchOpen(true)}
+                  className="w-full rounded-lg border border-dashed border-border px-3 py-2 text-sm text-text-muted transition-colors hover:border-teal-500/40 hover:text-teal-300 mb-3"
+                >
+                  <svg className="inline h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  Buscar no catálogo (12.800+ jogos)
+                </button>
+              </>
+            )}
 
             {/* Availability badges for selected game */}
             {selectedGameplay && (() => {
@@ -773,6 +880,29 @@ export function IdeasPage() {
           </div>
         </div>
       )}
+
+      {/* Edit game for existing queue item */}
+      <GameSearchModal
+        open={editQueueGameItem !== null}
+        onClose={() => setEditQueueGameItem(null)}
+        onSelect={handleUpdateQueueGame}
+        title="Alterar Jogo da Ideia"
+        subtitle="Busque pelo nome ou nome alternativo (GTA, Witcher, etc.)"
+        allowClear={editQueueGameItem?.gameplay_preference ? true : false}
+        onClear={() => editQueueGameItem && handleClearQueueGame(editQueueGameItem)}
+      />
+
+      {/* Catalog search for "add to queue" modal */}
+      <GameSearchModal
+        open={catalogSearchOpen}
+        onClose={() => setCatalogSearchOpen(false)}
+        onSelect={(game) => {
+          setCatalogSelectedGame({ name: game.name, slug: game.slug });
+          setSelectedGameplay(null); // clear the select if a catalog game is chosen
+        }}
+        title="Buscar no Catálogo"
+        subtitle="Busque pelo nome ou nome alternativo (GTA, Witcher, etc.)"
+      />
     </div>
   );
 }

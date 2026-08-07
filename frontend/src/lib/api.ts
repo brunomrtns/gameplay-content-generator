@@ -315,6 +315,11 @@ export const api = {
     request<any>(`/sources/${source_id}/events`),
   assignGame: (source_id: number, game_id: number) =>
     request<any>(`/sources/${source_id}/assign-game`, { method: "POST", body: form({ game_id }) }),
+  assignGameByName: (source_id: number, game_name: string, slug: string) =>
+    request<any>(`/sources/${source_id}/assign-game`, {
+      method: "POST",
+      body: form({ game_name, slug }),
+    }),
   scanInbox: () => request<any>("/inbox/scan", { method: "POST" }),
   uploadGameplay: (
     file: File,
@@ -447,12 +452,16 @@ export const api = {
     knowledgeItemId: number,
     gameplayPreference?: number | null,
     reuseOverride?: string | null,
+    gameplayGameName?: string | null,
+    gameplaySlug?: string | null,
   ) =>
     request<{ queue: any[]; message: string }>("/idea-queue/add", {
       method: "POST",
       body: JSON.stringify({
         knowledge_item_id: knowledgeItemId,
         gameplay_preference: gameplayPreference ?? null,
+        gameplay_game_name: gameplayGameName ?? null,
+        gameplay_slug: gameplaySlug ?? null,
         reuse_override: reuseOverride ?? null,
       }),
     }),
@@ -466,8 +475,40 @@ export const api = {
       method: "POST",
       body: JSON.stringify(newOrder),
     }),
+  updateIdeaQueueItem: (
+    knowledgeItemId: number,
+    gameplayPreference?: number | null,
+    gameplayGameName?: string | null,
+    gameplaySlug?: string | null,
+    reuseOverride?: string | null,
+  ) =>
+    request<{ queue: any[]; message: string }>("/idea-queue/update", {
+      method: "POST",
+      body: JSON.stringify({
+        knowledge_item_id: knowledgeItemId,
+        gameplay_preference: gameplayPreference ?? null,
+        gameplay_game_name: gameplayGameName ?? null,
+        gameplay_slug: gameplaySlug ?? null,
+        reuse_override: reuseOverride ?? null,
+      }),
+    }),
 
   // ── Gameplay Availability (V3) ────────────────────────────────────────
   getGameplayAvailability: () =>
     request<{ games: any[]; max_uses: number }>("/gameplay-availability"),
+
+  // ── Catalog (IGDB) ──────────────────────────────────────────────────────
+  // These go to the catalog service, not the main API.
+  searchCatalog: (q: string, limit = 10) => {
+    const base = import.meta.env.PROD ? "/gpcg/api/catalog" : "/catalog-api";
+    return request<{ results: any[]; count: number }>(
+      `${base}/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+    );
+  },
+  autocompleteCatalog: (q: string, limit = 8) => {
+    const base = import.meta.env.PROD ? "/gpcg/api/catalog" : "/catalog-api";
+    return request<{ results: any[]; count: number }>(
+      `${base}/autocomplete?q=${encodeURIComponent(q)}&limit=${limit}`,
+    );
+  },
 };

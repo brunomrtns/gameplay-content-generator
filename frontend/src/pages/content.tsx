@@ -27,7 +27,10 @@ import {
   Eye,
   Activity,
   Users,
+  Gamepad2,
+  Pencil,
 } from "lucide-react";
+import { GameSearchModal, type CatalogGame } from "@/components/game-search-modal";
 
 const STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string }> = {
   discovered: { variant: "info", label: "Descoberto" },
@@ -229,11 +232,13 @@ function MappingTimeline({ sourceId, filename }: { sourceId: number; filename: s
 // ── Media Tab (gameplay upload + list) ───────────────────────────────────────
 
 function MediaTab() {
-  const { data: allSources, loading } = usePoll(() => api.listSources(undefined, undefined, true), 5000);
+  const { data: allSources, loading, refetch } = usePoll(() => api.listSources(undefined, undefined, true), 5000);
   const { uploads, addUpload, updateUpload, removeUpload } = useUploadStore();
   const [scanning, setScanning] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  // Game assignment modal
+  const [gameModalSourceId, setGameModalSourceId] = useState<number | null>(null);
 
   // Separate own vs public gameplays
   const sources = (allSources || []).filter((s: any) => s.is_own !== false);
@@ -323,6 +328,17 @@ function MediaTab() {
       toast.success(`"${filename}" agora é ${isPublic ? "pública" : "privada"}.`);
     } catch (err: any) {
       toast.error(err.message || "Erro ao alterar visibilidade");
+    }
+  };
+
+  const handleAssignGame = async (game: CatalogGame) => {
+    if (gameModalSourceId === null) return;
+    try {
+      await api.assignGameByName(gameModalSourceId, game.name, game.slug);
+      toast.success(`Jogo definido: ${game.name}`);
+      refetch();
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao atribuir jogo");
     }
   };
 
@@ -449,8 +465,26 @@ function MediaTab() {
                         {s.file_size > 0 && (
                           <span>{fmtBytes(s.file_size)}</span>
                         )}
-                        {s.game_name && (
-                          <span className="text-text-secondary">{s.game_name}</span>
+                        {/* Game badge — clickable to change */}
+                        {s.game_name ? (
+                          <button
+                            onClick={() => setGameModalSourceId(s.id)}
+                            className="flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent transition-colors hover:bg-accent/20"
+                            title="Alterar jogo"
+                          >
+                            <Gamepad2 className="h-3 w-3" />
+                            {s.game_name}
+                            <Pencil className="h-2.5 w-2.5 opacity-60" />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setGameModalSourceId(s.id)}
+                            className="flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-text-muted transition-colors hover:border-accent/40 hover:text-accent"
+                            title="Definir jogo"
+                          >
+                            <Gamepad2 className="h-3 w-3" />
+                            Definir jogo
+                          </button>
                         )}
                       </div>
                     </div>
@@ -565,11 +599,18 @@ function MediaTab() {
           </div>
         </div>
       )}
+
+      {/* Game assignment modal */}
+      <GameSearchModal
+        open={gameModalSourceId !== null}
+        onClose={() => setGameModalSourceId(null)}
+        onSelect={handleAssignGame}
+        title="Definir Jogo da Gravação"
+        subtitle="Busque pelo nome ou nome alternativo (GTA, Witcher, etc.)"
+      />
     </div>
   );
 }
-
-// ── Channel Profile Form ─────────────────────────────────────────────────────
 
 function ChannelProfileSection() {
   const [profile, setProfile] = useState<any>(null);

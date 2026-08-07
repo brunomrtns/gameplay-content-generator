@@ -197,11 +197,20 @@ def list_sources(
         public_sources = db.execute(pub_stmt).scalars().all()
 
     all_sources = sources + public_sources
+    # Preload game names to avoid N+1 queries
+    game_ids = {s.game_id for s in all_sources if s.game_id}
+    games_map = {}
+    if game_ids:
+        games_map = {
+            g.id: g.canonical_name
+            for g in db.execute(select(Game).where(Game.id.in_(game_ids))).scalars().all()
+        }
     return [
         {
             "id": s.id,
             "filename": s.filename,
             "game_id": s.game_id,
+            "game_name": games_map.get(s.game_id) if s.game_id else None,
             "duration": s.duration,
             "width": s.width,
             "height": s.height,
@@ -272,26 +281,52 @@ def get_source_events(
 @router.post("/sources/{source_id}/assign-game")
 def assign_game_to_source(
     source_id: int,
-    game_id: int = Form(...),
+    game_id: Optional[int] = Form(None),
+    game_name: Optional[str] = Form(None),
+    slug: Optional[str] = Form(None),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Manually assign a game to a source (for needs_review cases)."""
+    """Manually assign a game to a source.
+
+    Accepts either:
+    - game_id: an existing GPCG Game ID
+    - game_name + slug: find-or-create a GPCG Game by slug (used when
+      selecting from the IGDB catalog search)
+    """
     s = db.get(GameplaySource, source_id)
     if s is None:
         raise HTTPException(404, "source not found")
     if s.user_id != user.id:
         raise HTTPException(403, "not your gameplay")
-    g = db.get(Game, game_id)
-    if g is None:
-        raise HTTPException(404, "game not found")
+
+    if game_id is not None:
+        g = db.get(Game, game_id)
+        if g is None:
+            raise HTTPException(404, "game not found")
+    elif game_name and slug:
+        # Find-or-create by slug
+        g = db.execute(
+            select(Game).where(Game.slug == slug)
+        ).scalar_one_or_none()
+        if g is None:
+            g = Game(
+                canonical_name=game_name,
+                slug=slug,
+                user_id=user.id,
+            )
+            db.add(g)
+            db.flush()
+    else:
+        raise HTTPException(400, "Provide either game_id or game_name + slug")
+
     s.game_id = g.id
     s.resolution_method = "manual"
     s.resolution_confidence = 1.0
     s.resolution_notes = "manually assigned"
     s.ingestion_status = "ready"
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "game_id": g.id, "game_name": g.canonical_name}
 
 
 @router.post("/inbox/scan")
