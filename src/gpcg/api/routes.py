@@ -41,12 +41,15 @@ from gpcg.domain.models import (
     Fact,
     Game,
     GameplayAsset,
+    GameplayClipUsage,
     GameplayEvent,
     GameplaySource,
     IngestionStatus,
     Job,
     JobStatus,
     JobType,
+    KnowledgeItem,
+    KnowledgeItemStatus,
     Script,
     User,
     Video,
@@ -1103,20 +1106,106 @@ def list_videos(
     result = []
     for v in videos:
         cp = db.get(ContentPlan, v.content_plan_id) if v.content_plan_id else None
-        # Fetch social_title from the job that produced this video
+        # Fetch social_title + creative_plan from the job that produced this video
         social_title = None
         social_description = None
         social_tags = None
+        creative_plan_summary = None
+        script_reviews = None
         if v.job_id:
             job = db.get(Job, v.job_id)
             if job and isinstance(job.artifacts, dict):
                 social_title = job.artifacts.get("social_title")
                 social_description = job.artifacts.get("social_description")
                 social_tags = job.artifacts.get("social_tags")
+                cp_art = job.artifacts.get("creative_plan")
+                if isinstance(cp_art, dict):
+                    creative_plan_summary = {
+                        "video_type": cp_art.get("video_type"),
+                        "humor_enabled": cp_art.get("humor", {}).get("enabled") if isinstance(cp_art.get("humor"), dict) else None,
+                        "humor_intensity": cp_art.get("humor", {}).get("intensity") if isinstance(cp_art.get("humor"), dict) else None,
+                        "narrative_beats": len(cp_art.get("narrative_beats", [])) if cp_art.get("narrative_beats") else 0,
+                        "gameplay_strategy": cp_art.get("gameplay_strategy"),
+                    }
+                sr = job.artifacts.get("script_reviews")
+                if isinstance(sr, list) and sr:
+                    last = sr[-1]
+                    if isinstance(last, dict):
+                        script_reviews = {
+                            "verdict": last.get("verdict"),
+                            "score": last.get("score"),
+                            "issues": last.get("issues"),
+                        }
+
+        # Game name
+        game_name = None
+        if v.game_id:
+            g = db.get(Game, v.game_id)
+            if g:
+                game_name = g.name
+
+        # KnowledgeItem (the idea that originated this video)
+        ki_info = None
+        ki = db.get(KnowledgeItem, v.knowledge_item_id) if v.knowledge_item_id else None
+        if ki:
+            ki_info = {
+                "id": ki.id,
+                "title": ki.title,
+                "tags": ki.tags or [],
+                "item_type": ki.item_type,
+                "source_name": ki.source_name,
+                "source_url": ki.source_url,
+            }
+        elif cp and cp.metadata_json:
+            # Fallback: KI linked via ContentPlan metadata
+            ki_id_meta = cp.metadata_json.get("knowledge_item_id")
+            if ki_id_meta:
+                ki_meta = db.get(KnowledgeItem, ki_id_meta)
+                if ki_meta:
+                    ki_info = {
+                        "id": ki_meta.id,
+                        "title": ki_meta.title,
+                        "tags": ki_meta.tags or [],
+                        "item_type": ki_meta.item_type,
+                        "source_name": ki_meta.source_name,
+                        "source_url": ki_meta.source_url,
+                    }
+
+        # Clips used (from GameplayClipUsage)
+        clips_used = []
+        clip_usages = db.execute(
+            select(GameplayClipUsage).where(GameplayClipUsage.video_id == v.id)
+        ).scalars().all()
+        for cu in clip_usages:
+            src = db.get(GameplaySource, cu.source_id)
+            src_game_name = None
+            if src and src.game_id:
+                sg = db.get(Game, src.game_id)
+                if sg:
+                    src_game_name = sg.name
+            clips_used.append({
+                "source_id": cu.source_id,
+                "source_name": src.display_name if src else None,
+                "source_game": src_game_name,
+                "start_sec": round(cu.start_sec, 1),
+                "end_sec": round(cu.end_sec, 1),
+                "duration": round(cu.duration, 1),
+            })
+
+        # Script final text
+        script_final = None
+        if cp:
+            script = db.execute(
+                select(Script).where(Script.content_plan_id == cp.id).order_by(Script.created_at.desc()).limit(1)
+            ).scalars().first()
+            if script:
+                script_final = script.final or script.optimized or script.draft
+
         result.append(
             {
                 "id": v.id,
                 "game_id": v.game_id,
+                "game_name": game_name,
                 "file_path": v.file_path,
                 "storage_key": v.storage_key,
                 "duration": v.duration,
@@ -1133,6 +1222,12 @@ def list_videos(
                 "youtube_url": v.youtube_url,
                 "youtube_video_id": v.youtube_video_id,
                 "created_at": v.created_at.isoformat() if v.created_at else None,
+                # Rich metadata
+                "knowledge_item": ki_info,
+                "clips_used": clips_used,
+                "script_final": script_final,
+                "creative_plan": creative_plan_summary,
+                "script_review": script_reviews,
             }
         )
     return result
@@ -1531,6 +1626,109 @@ def delete_video(
         "video_id": video_id,
         "clips_released": clips_released,
         "ki_released": ki_released,
+    }
+
+
+@router.post("/videos/{video_id}/regenerate")
+def regenerate_video(
+    video_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Regenerate a video from its original idea.
+
+    This does NOT delete the original video — both coexist in the gallery.
+    The flow:
+    1. Find the KnowledgeItem (idea) that originated this video.
+    2. Release the gameplay clips used by this video (so they're available
+       for the regeneration).
+    3. Revert the KI status from "used" to "fresh".
+    4. Add the KI to the END of the user's idea queue (preserving any
+       gameplay_preference from the original generation).
+
+    The user can then reorder/approve the queue to trigger generation.
+    """
+    from gpcg.application.clip_usage_service import release_clip_usage
+    from gpcg.api.knowledge_item_routes import _normalize_idea_queue, _queue_ki_ids
+    from gpcg.domain.models import Automation
+    from sqlalchemy.orm.attributes import flag_modified
+
+    v = db.get(Video, video_id)
+    if v is None:
+        raise HTTPException(404, "video not found")
+    if v.user_id != user.id:
+        raise HTTPException(403, "not your video")
+
+    # Find the KnowledgeItem
+    ki = None
+    ki_id = None
+    if v.knowledge_item_id:
+        ki = db.get(KnowledgeItem, v.knowledge_item_id)
+        ki_id = v.knowledge_item_id
+    else:
+        # Fallback: KI linked via ContentPlan metadata
+        if v.job_id:
+            job = db.get(Job, v.job_id)
+            if job and job.content_plan_id:
+                plan = db.get(ContentPlan, job.content_plan_id)
+                if plan and plan.metadata_json:
+                    ki_id_meta = plan.metadata_json.get("knowledge_item_id")
+                    if ki_id_meta:
+                        ki = db.get(KnowledgeItem, ki_id_meta)
+                        ki_id = ki_id_meta
+
+    if ki is None:
+        raise HTTPException(400, "Este vídeo não tem uma ideia associada — não é possível regenerar")
+
+    # Release clips used by this video
+    clips_released = release_clip_usage(db, video_id)
+
+    # Revert KI status to fresh
+    ki_was_used = ki.status == KnowledgeItemStatus.used.value
+    if ki_was_used:
+        ki.status = KnowledgeItemStatus.fresh.value
+
+    # Add KI to the end of the idea queue
+    auto = db.query(Automation).filter(Automation.user_id == user.id).first()
+    if not auto:
+        raise HTTPException(404, "Automation not found — cannot access idea queue")
+
+    config = dict(auto.config or {})
+    queue = _normalize_idea_queue(config.get("idea_queue", []))
+    existing_ids = _queue_ki_ids(queue)
+
+    # Try to recover the original gameplay_preference from the job artifacts
+    gameplay_preference = None
+    if v.job_id:
+        job = db.get(Job, v.job_id)
+        if job and isinstance(job.artifacts, dict):
+            gameplay_preference = job.artifacts.get("gameplay_preference")
+
+    if ki_id not in existing_ids:
+        queue.append({
+            "ki_id": ki_id,
+            "gameplay_preference": gameplay_preference,
+            "reuse_override": None,
+        })
+        config["idea_queue"] = queue
+        auto.config = config
+        flag_modified(auto, "config")
+
+    db.commit()
+
+    log.info(
+        f"regenerate video #{video_id}: ki=#{ki_id}, clips_released={clips_released}, "
+        f"ki_reverted={'yes' if ki_was_used else 'no'}, queued_at_end={'yes' if ki_id not in existing_ids else 'already_in_queue'}"
+    )
+    return {
+        "success": True,
+        "video_id": video_id,
+        "knowledge_item_id": ki_id,
+        "knowledge_item_title": ki.title,
+        "clips_released": clips_released,
+        "ki_reverted": ki_was_used,
+        "queued_at_end": ki_id not in existing_ids,
+        "gameplay_preference": gameplay_preference,
     }
 
 

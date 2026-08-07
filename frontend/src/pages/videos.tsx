@@ -17,6 +17,12 @@ import {
   Loader2,
   AlertCircle,
   Trash2,
+  RotateCcw,
+  Lightbulb,
+  Gamepad2,
+  Clapperboard,
+  FileText,
+  Sparkles,
 } from "lucide-react";
 
 const VIDEO_STATUS_CONFIG: Record<
@@ -45,6 +51,8 @@ export function VideosPage() {
   const [deleting, setDeleting] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [confirmRelease, setConfirmRelease] = useState<number | null>(null);
+  const [confirmRegenerate, setConfirmRegenerate] = useState<any | null>(null);
+  const [regenerating, setRegenerating] = useState<number | null>(null);
   // V3: Editable metadata in modal
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -141,6 +149,23 @@ export function VideosPage() {
         setPublishError(e.message || "Falha ao deletar vídeo");
       } finally {
         setDeleting(null);
+      }
+    },
+    [refetch]
+  );
+
+  const handleRegenerate = useCallback(
+    async (id: number) => {
+      setRegenerating(id);
+      setConfirmRegenerate(null);
+      try {
+        await api.regenerateVideo(id);
+        await refetch();
+        setPlaying(null);
+      } catch (e: any) {
+        setPublishError(e.message || "Falha ao regenerar vídeo");
+      } finally {
+        setRegenerating(null);
       }
     },
     [refetch]
@@ -294,6 +319,21 @@ export function VideosPage() {
                             <Upload className="h-3 w-3" />
                           )}
                           Publicar
+                        </button>
+                      )}
+                      {/* Regenerate button */}
+                      {v.knowledge_item && (
+                        <button
+                          onClick={() => setConfirmRegenerate(v)}
+                          disabled={regenerating === v.id}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-text-muted transition-all hover:border-accent/40 hover:text-accent disabled:opacity-50"
+                          title="Regenerar vídeo"
+                        >
+                          {regenerating === v.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          )}
                         </button>
                       )}
                       {/* Delete button */}
@@ -458,6 +498,148 @@ export function VideosPage() {
                 )}
               </div>
 
+              {/* Rich metadata: idea, game, clips, script */}
+              <div className="space-y-3 border-t border-border pt-3">
+                {/* Idea (KnowledgeItem) */}
+                {playing.knowledge_item && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-text-muted uppercase tracking-wide">
+                      <Lightbulb className="h-3 w-3" /> Ideia
+                    </div>
+                    <p className="text-xs text-text-secondary">
+                      {playing.knowledge_item.title}
+                    </p>
+                    {playing.knowledge_item.tags?.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {playing.knowledge_item.tags.map((tag: string, i: number) => (
+                          <span
+                            key={i}
+                            className="rounded-md bg-surface-elevated px-1.5 py-0.5 text-[9px] text-text-muted"
+                          >
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {playing.knowledge_item.source_name && (
+                      <p className="text-[10px] text-text-muted">
+                        Fonte: {playing.knowledge_item.source_name}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Game */}
+                {playing.game_name && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-text-muted uppercase tracking-wide">
+                      <Gamepad2 className="h-3 w-3" /> Jogo
+                    </div>
+                    <p className="text-xs text-text-secondary">{playing.game_name}</p>
+                  </div>
+                )}
+
+                {/* Creative plan summary */}
+                {playing.creative_plan && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-text-muted uppercase tracking-wide">
+                      <Sparkles className="h-3 w-3" /> Plano editorial
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <span className="rounded-md bg-surface-elevated px-2 py-0.5 text-[10px] text-text-muted">
+                        {playing.creative_plan.video_type === "GENERAL_TOPIC" ? "Tópico geral" : "Sobre o jogo"}
+                      </span>
+                      {playing.creative_plan.humor_enabled !== null && (
+                        <span className="rounded-md bg-surface-elevated px-2 py-0.5 text-[10px] text-text-muted">
+                          {playing.creative_plan.humor_enabled ? "Humor" : "Sem humor"}
+                          {playing.creative_plan.humor_enabled && playing.creative_plan.humor_intensity
+                            ? ` (${playing.creative_plan.humor_intensity})`
+                            : ""}
+                        </span>
+                      )}
+                      {playing.creative_plan.narrative_beats > 0 && (
+                        <span className="rounded-md bg-surface-elevated px-2 py-0.5 text-[10px] text-text-muted">
+                          {playing.creative_plan.narrative_beats} beats
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Script review */}
+                {playing.script_review && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-text-muted uppercase tracking-wide">
+                      <CheckCircle2 className="h-3 w-3" /> Script critic
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={playing.script_review.verdict === "PASS" ? "success" : "warning"}>
+                        {playing.script_review.verdict}
+                      </Badge>
+                      {playing.script_review.score != null && (
+                        <span className="text-[10px] text-text-muted">
+                          Score: {playing.script_review.score.toFixed(0)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Clips used */}
+                {playing.clips_used?.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-text-muted uppercase tracking-wide">
+                      <Clapperboard className="h-3 w-3" /> Trechos de gameplay ({playing.clips_used.length})
+                    </div>
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      {playing.clips_used.map((clip: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between text-[10px] text-text-muted bg-surface-elevated rounded-md px-2 py-1">
+                          <span className="truncate flex-1">
+                            {clip.source_game || clip.source_name || `Source #${clip.source_id}`}
+                          </span>
+                          <span className="shrink-0 ml-2 tabular-nums">
+                            {clip.start_sec.toFixed(0)}s–{clip.end_sec.toFixed(0)}s
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Script */}
+                {playing.script_final && (
+                  <details className="space-y-1">
+                    <summary className="flex cursor-pointer items-center gap-1.5 text-[10px] font-medium text-text-muted uppercase tracking-wide hover:text-text-secondary">
+                      <FileText className="h-3 w-3" /> Roteiro
+                    </summary>
+                    <p className="text-xs text-text-secondary whitespace-pre-wrap mt-1.5 p-2 bg-surface-elevated rounded-lg max-h-40 overflow-y-auto">
+                      {playing.script_final}
+                    </p>
+                  </details>
+                )}
+              </div>
+
+              {/* Regenerate button */}
+              {playing.knowledge_item && (
+                <button
+                  onClick={() => setConfirmRegenerate(playing)}
+                  disabled={regenerating === playing.id}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-4 py-2.5 text-sm font-medium text-accent transition-all hover:bg-accent/20 disabled:opacity-50"
+                >
+                  {regenerating === playing.id ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Regenerando...
+                    </>
+                  ) : (
+                    <>
+                      <RotateCcw className="h-4 w-4" />
+                      Regenerar vídeo
+                    </>
+                  )}
+                </button>
+              )}
+
               {/* Publish to YouTube button */}
               {canPublishModal(playing) && (
                 <button
@@ -571,6 +753,56 @@ export function VideosPage() {
                 className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 transition-colors"
               >
                 Sim, liberar trechos e ideia
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Regenerate confirmation modal */}
+      {confirmRegenerate && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in"
+          onClick={() => setConfirmRegenerate(null)}
+        >
+          <div
+            className="relative w-full max-w-md rounded-2xl border border-border bg-surface p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-accent">
+                <RotateCcw className="h-5 w-5" />
+              </div>
+              <h3 className="text-lg font-semibold">Regenerar vídeo?</h3>
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm text-text-secondary">
+                A ideia <strong>"{confirmRegenerate.knowledge_item?.title}"</strong> voltará
+                para o <strong>final da fila de ideias</strong>. Você poderá reorderá-la
+                antes de aprovar a geração.
+              </p>
+              <p className="text-sm text-text-secondary">
+                Os trechos de gameplay usados neste vídeo serão liberados e poderão
+                ser reutilizados na nova geração.
+              </p>
+              <p className="text-sm text-text-secondary">
+                O vídeo atual <strong>não será deletado</strong> — os dois coexistirão
+                na galeria.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setConfirmRegenerate(null)}
+                className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text-primary transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleRegenerate(confirmRegenerate.id)}
+                disabled={regenerating === confirmRegenerate.id}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
+              >
+                {regenerating === confirmRegenerate.id ? "Regenerando..." : "Sim, regenerar"}
               </button>
             </div>
           </div>

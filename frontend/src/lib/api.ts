@@ -393,6 +393,8 @@ export const api = {
     }),
   deleteVideo: (id: number, releaseClips: boolean = false) =>
     request<any>(`/videos/${id}?release_clips=${releaseClips}`, { method: "DELETE" }),
+  regenerateVideo: (id: number) =>
+    request<any>(`/videos/${id}/regenerate`, { method: "POST" }),
   toggleGameplayVisibility: (sourceId: number, isPublic: boolean) =>
     request<any>(`/gameplays/${sourceId}/visibility?is_public=${isPublic}`, { method: "PATCH" }),
   deleteSource: (sourceId: number) =>
