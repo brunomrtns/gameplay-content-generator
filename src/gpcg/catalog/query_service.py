@@ -35,7 +35,7 @@ class GameSummary:
     name: str
     slug: str
     cover_url: Optional[str]
-    rating: Optional[float]
+    total_rating: Optional[float]
     total_rating_count: Optional[int]
     release_year: Optional[int]
     genres: list[str]
@@ -47,7 +47,7 @@ class GameSummary:
             name=game.name,
             slug=game.slug,
             cover_url=game.cover_url,
-            rating=game.rating,
+            total_rating=game.total_rating,
             total_rating_count=game.total_rating_count,
             release_year=game.release_year,
             genres=game.genres or [],
@@ -59,7 +59,7 @@ class GameSummary:
             "name": self.name,
             "slug": self.slug,
             "cover_url": self.cover_url,
-            "rating": self.rating,
+            "total_rating": self.total_rating,
             "total_rating_count": self.total_rating_count,
             "release_year": self.release_year,
             "genres": self.genres,
@@ -74,25 +74,15 @@ class GameDetail:
     name: str
     slug: str
     summary: Optional[str]
-    storyline: Optional[str]
     first_release_date: Optional[int]
     release_year: Optional[int]
-    rating: Optional[float]
-    rating_count: Optional[int]
     total_rating: Optional[float]
     total_rating_count: Optional[int]
-    hypes: Optional[int]
     cover_url: Optional[str]
     screenshots: list[str]
     genres: list[str]
-    themes: list[str]
-    game_modes: list[str]
-    player_perspectives: list[str]
     platforms: list[str]
-    franchise: Optional[str]
     developer: Optional[str]
-    publisher: Optional[str]
-    igdb_url: Optional[str]
     aliases: list[str]
 
     def to_dict(self) -> dict:
@@ -101,25 +91,15 @@ class GameDetail:
             "name": self.name,
             "slug": self.slug,
             "summary": self.summary,
-            "storyline": self.storyline,
             "first_release_date": self.first_release_date,
             "release_year": self.release_year,
-            "rating": self.rating,
-            "rating_count": self.rating_count,
             "total_rating": self.total_rating,
             "total_rating_count": self.total_rating_count,
-            "hypes": self.hypes,
             "cover_url": self.cover_url,
             "screenshots": self.screenshots,
             "genres": self.genres,
-            "themes": self.themes,
-            "game_modes": self.game_modes,
-            "player_perspectives": self.player_perspectives,
             "platforms": self.platforms,
-            "franchise": self.franchise,
             "developer": self.developer,
-            "publisher": self.publisher,
-            "igdb_url": self.igdb_url,
             "aliases": self.aliases,
         }
 
@@ -213,25 +193,15 @@ class QueryService:
                 name=game.name,
                 slug=game.slug,
                 summary=game.summary,
-                storyline=game.storyline,
                 first_release_date=game.first_release_date,
                 release_year=game.release_year,
-                rating=game.rating,
-                rating_count=game.rating_count,
                 total_rating=game.total_rating,
                 total_rating_count=game.total_rating_count,
-                hypes=game.hypes,
                 cover_url=game.cover_url,
                 screenshots=game.screenshots or [],
                 genres=game.genres or [],
-                themes=game.themes or [],
-                game_modes=game.game_modes or [],
-                player_perspectives=game.player_perspectives or [],
                 platforms=game.platforms or [],
-                franchise=game.franchise,
                 developer=game.developer,
-                publisher=game.publisher,
-                igdb_url=game.igdb_url,
                 aliases=list(aliases),
             )
 

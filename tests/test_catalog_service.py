@@ -61,24 +61,14 @@ def _make_igdb_game(
         slug=slug,
         summary="An open world action-adventure game.",
         first_release_date=1209600000,  # 2008-05-01
-        rating=85.0,
-        rating_count=500,
         total_rating=85.0,
         total_rating_count=500,
-        hypes=None,
-        category=0,
         cover_image_id="abc123",
         screenshot_image_ids=["ss1", "ss2"],
         genres=["Action", "Adventure"],
-        themes=["Crime"],
-        game_modes=["Single player", "Multiplayer"],
-        player_perspectives=["Third person"],
         platforms=["PC", "PlayStation 3", "Xbox 360"],
-        franchise="Grand Theft Auto",
         developer="Rockstar North",
-        publisher="Rockstar Games",
         alternative_names=["GTA IV", "GTA 4", "GTAIV"],
-        igdb_url="https://www.igdb.com/games/grand-theft-auto-iv",
         updated_at=1700000000,
     )
     defaults.update(kwargs)
@@ -107,25 +97,17 @@ class TestIGDBClient:
             "slug": "test-game",
             "summary": "A test game.",
             "first_release_date": 1500000000,
-            "rating": 90.0,
-            "rating_count": 100,
             "total_rating": 90.0,
             "total_rating_count": 100,
-            "category": 0,
             "cover": {"image_id": "cover123"},
             "screenshots": [{"image_id": "ss1"}, {"image_id": "ss2"}],
             "genres": [{"name": "Action"}, {"name": "RPG"}],
-            "themes": [{"name": "Fantasy"}],
-            "game_modes": [{"name": "Single player"}],
-            "player_perspectives": [{"name": "Third person"}],
             "platforms": [{"name": "PC"}, {"name": "PlayStation 5"}],
-            "franchise": {"name": "Test Franchise"},
             "involved_companies": [
                 {"company": {"name": "Test Studio"}, "developer": True, "publisher": False},
                 {"company": {"name": "Test Publisher"}, "developer": False, "publisher": True},
             ],
             "alternative_names": [{"name": "TG", "comment": "abbreviation"}],
-            "url": "https://www.igdb.com/games/test-game",
             "updated_at": 1700000000,
         }
 
@@ -136,11 +118,8 @@ class TestIGDBClient:
         assert game.cover_image_id == "cover123"
         assert game.screenshot_image_ids == ["ss1", "ss2"]
         assert game.genres == ["Action", "RPG"]
-        assert game.themes == ["Fantasy"]
         assert game.platforms == ["PC", "PlayStation 5"]
-        assert game.franchise == "Test Franchise"
         assert game.developer == "Test Studio"
-        assert game.publisher == "Test Publisher"
         assert game.alternative_names == ["TG"]
         assert game.cover_url == "https://images.igdb.com/igdb/image/upload/t_cover_big/cover123.jpg"
         assert len(game.screenshot_urls) == 2
@@ -152,7 +131,6 @@ class TestIGDBClient:
             "id": 456,
             "name": "Minimal Game",
             "slug": "minimal-game",
-            "category": 0,
         }
 
         game = client._parse_game(raw)
@@ -163,7 +141,6 @@ class TestIGDBClient:
         assert game.screenshot_image_ids == []
         assert game.genres == []
         assert game.developer is None
-        assert game.publisher is None
 
     def test_rate_limiting(self):
         """Test that rate limiting enforces minimum sleep between requests."""
@@ -210,11 +187,11 @@ class TestSyncService:
         service = SyncService(client=MagicMock())
 
         # First insert
-        game1 = _make_igdb_game(id=1, name="Test Game", slug="test-game", rating=80.0)
+        game1 = _make_igdb_game(id=1, name="Test Game", slug="test-game", total_rating=80.0)
         service._upsert_batch([game1])
 
         # Now update with new data
-        game2 = _make_igdb_game(id=1, name="Test Game Updated", slug="test-game", rating=95.0)
+        game2 = _make_igdb_game(id=1, name="Test Game Updated", slug="test-game", total_rating=95.0)
         stats = service._upsert_batch([game2])
         assert stats["created"] == 0
         assert stats["updated"] == 1
@@ -222,7 +199,7 @@ class TestSyncService:
         with session_scope() as s:
             catalog_game = s.get(CatalogGame, 1)
             assert catalog_game.name == "Test Game Updated"
-            assert catalog_game.rating == 95.0
+            assert catalog_game.total_rating == 95.0
 
     def test_upsert_aliases_are_additive(self):
         """Test that aliases are additive — re-syncing doesn't duplicate."""
@@ -343,7 +320,6 @@ class TestQueryService:
                 slug="grand-theft-auto-iv",
                 summary="Open world action game",
                 first_release_date=1209600000,
-                rating=85.0,
                 total_rating=85.0,
                 total_rating_count=500,
                 genres=["Action", "Adventure"],
@@ -355,7 +331,6 @@ class TestQueryService:
                 slug="grand-theft-auto-v",
                 summary="Open world action game",
                 first_release_date=1380000000,
-                rating=95.0,
                 total_rating=95.0,
                 total_rating_count=2000,
                 genres=["Action", "Adventure"],
@@ -366,7 +341,6 @@ class TestQueryService:
                 slug="bully",
                 summary="School simulation",
                 first_release_date=1167609600,
-                rating=80.0,
                 total_rating=80.0,
                 total_rating_count=200,
                 genres=["Action", "Adventure"],

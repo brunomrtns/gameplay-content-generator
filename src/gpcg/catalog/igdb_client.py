@@ -28,14 +28,13 @@ log = logging.getLogger(__name__)
 _IGDB_API_BASE = "https://api.igdb.com/v4"
 _IGDB_AUTH_URL = "https://id.twitch.tv/oauth2/token"
 _IGDB_GAME_FIELDS = (
-    "id,name,slug,summary,storyline,first_release_date,"
-    "rating,rating_count,total_rating,total_rating_count,hypes,"
-    "category,cover.image_id,screenshots.image_id,"
-    "genres.name,themes.name,game_modes.name,player_perspectives.name,"
-    "platforms.name,franchise.name,involved_companies.company.name,"
-    "involved_companies.publisher,involved_companies.developer,"
-    "alternative_names.name,alternative_names.comment,"
-    "url,updated_at"
+    "id,name,slug,summary,first_release_date,"
+    "total_rating,total_rating_count,"
+    "cover.image_id,screenshots.image_id,"
+    "genres.name,platforms.name,"
+    "involved_companies.company.name,involved_companies.developer,"
+    "alternative_names.name,"
+    "updated_at"
 )
 
 
@@ -50,26 +49,15 @@ class IGDBGame:
     name: str
     slug: str
     summary: Optional[str] = None
-    storyline: Optional[str] = None
     first_release_date: Optional[int] = None
-    rating: Optional[float] = None
-    rating_count: Optional[int] = None
     total_rating: Optional[float] = None
     total_rating_count: Optional[int] = None
-    hypes: Optional[int] = None
-    category: int = 0
     cover_image_id: Optional[str] = None
     screenshot_image_ids: list[str] = field(default_factory=list)
     genres: list[str] = field(default_factory=list)
-    themes: list[str] = field(default_factory=list)
-    game_modes: list[str] = field(default_factory=list)
-    player_perspectives: list[str] = field(default_factory=list)
     platforms: list[str] = field(default_factory=list)
-    franchise: Optional[str] = None
     developer: Optional[str] = None
-    publisher: Optional[str] = None
     alternative_names: list[str] = field(default_factory=list)
-    igdb_url: Optional[str] = None
     updated_at: Optional[int] = None
 
     @property
@@ -304,24 +292,17 @@ class IGDBClient:
             if isinstance(ss, dict) and ss.get("image_id"):
                 screenshot_ids.append(ss["image_id"])
 
-        # Genres/themes/modes/perspectives/platforms — list of {"name": "..."}
+        # Genres/platforms — list of {"name": "..."}
         def _extract_names(items: Any) -> list[str]:
             if not items:
                 return []
             return [item["name"] for item in items if isinstance(item, dict) and "name" in item]
 
-        # Franchise — single {"name": "..."}
-        franchise = None
-        if raw.get("franchise") and isinstance(raw["franchise"], dict):
-            franchise = raw["franchise"].get("name")
-
         # Involved companies — list of {
         #   "company": {"name": "..."},
-        #   "publisher": bool,
         #   "developer": bool,
         # }
         developer = None
-        publisher = None
         for ic in raw.get("involved_companies", []) or []:
             if not isinstance(ic, dict):
                 continue
@@ -331,10 +312,9 @@ class IGDBClient:
                 continue
             if ic.get("developer") and developer is None:
                 developer = company_name
-            if ic.get("publisher") and publisher is None:
-                publisher = company_name
+                break  # First developer is enough
 
-        # Alternative names — list of {"name": "...", "comment": "..."}
+        # Alternative names — list of {"name": "..."}
         alt_names = []
         for alt in raw.get("alternative_names", []) or []:
             if isinstance(alt, dict) and alt.get("name"):
@@ -345,25 +325,14 @@ class IGDBClient:
             name=raw["name"],
             slug=raw["slug"],
             summary=raw.get("summary"),
-            storyline=raw.get("storyline"),
             first_release_date=raw.get("first_release_date"),
-            rating=raw.get("rating"),
-            rating_count=raw.get("rating_count"),
             total_rating=raw.get("total_rating"),
             total_rating_count=raw.get("total_rating_count"),
-            hypes=raw.get("hypes"),
-            category=raw.get("category", 0),
             cover_image_id=cover_id,
             screenshot_image_ids=screenshot_ids,
             genres=_extract_names(raw.get("genres")),
-            themes=_extract_names(raw.get("themes")),
-            game_modes=_extract_names(raw.get("game_modes")),
-            player_perspectives=_extract_names(raw.get("player_perspectives")),
             platforms=_extract_names(raw.get("platforms")),
-            franchise=franchise,
             developer=developer,
-            publisher=publisher,
             alternative_names=alt_names,
-            igdb_url=raw.get("url"),
             updated_at=raw.get("updated_at"),
         )

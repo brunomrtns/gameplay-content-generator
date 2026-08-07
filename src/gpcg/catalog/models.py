@@ -58,24 +58,14 @@ class CatalogGame(CatalogBase):
 
     # ── Descriptive ──────────────────────────────────────────────────────────
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    storyline: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # ── Release ──────────────────────────────────────────────────────────────
     first_release_date: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # ── Ratings (IGDB) ───────────────────────────────────────────────────────
-    # rating = user rating, total_rating = critics + users combined.
-    # Both 0-100 scale. NULL if not enough ratings.
-    rating: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    rating_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # total_rating = critics + users combined (0-100). NULL if not enough ratings.
     total_rating: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     total_rating_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    hypes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-
-    # ── Classification ───────────────────────────────────────────────────────
-    # category: 0=main_game, 1=dlc_addon, 2=expansion, etc (IGDB enum).
-    # We only sync category=0 (main_game).
-    category: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # ── Media URLs (IGDB CDN — we store URLs, not blobs) ────────────────────
     cover_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
@@ -83,18 +73,12 @@ class CatalogGame(CatalogBase):
 
     # ── Taxonomy (JSON arrays of IGDB names) ────────────────────────────────
     genres: Mapped[list] = mapped_column(JSON, default=list)
-    themes: Mapped[list] = mapped_column(JSON, default=list)
-    game_modes: Mapped[list] = mapped_column(JSON, default=list)
-    player_perspectives: Mapped[list] = mapped_column(JSON, default=list)
     platforms: Mapped[list] = mapped_column(JSON, default=list)
 
     # ── People ───────────────────────────────────────────────────────────────
-    franchise: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     developer: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
-    publisher: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
     # ── IGDB metadata ────────────────────────────────────────────────────────
-    igdb_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     igdb_updated_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # ── Sync tracking ────────────────────────────────────────────────────────
