@@ -1175,12 +1175,15 @@ def create_job_from_automation(user_id: int) -> int | None:
         if ready_count == 0:
             return None
 
-        # Check if there's already a running/queued job
-        active_jobs = session.query(Job).filter(
+        # Check if there's already a running/queued GENERATION job.
+        # NOTE: content_collect jobs run on the VPS (not the worker) and
+        # should NOT block generation — they're a different pipeline.
+        active_gen_jobs = session.query(Job).filter(
             Job.user_id == user_id,
             Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
+            Job.type != "content_collect",
         ).count()
-        if active_jobs > 0:
+        if active_gen_jobs > 0:
             return None
 
         # ── Idea queue: user-curated queue takes priority ───────────────

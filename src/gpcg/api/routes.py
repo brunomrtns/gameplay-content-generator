@@ -1688,6 +1688,11 @@ def regenerate_video(
     if ki_was_used:
         ki.status = KnowledgeItemStatus.fresh.value
 
+    # Remove KnowledgeItemUsage record so is_used_by_consumer returns False
+    # (otherwise the queue consumer will skip this idea)
+    from gpcg.application.knowledge_item_service import release_usage
+    usage_released = release_usage(db, ki_id, user.id)
+
     # Add KI to the end of the idea queue
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     if not auto:

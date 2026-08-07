@@ -121,6 +121,30 @@ def is_used_by_consumer(session: Session, item_id: int, consumer_user_id: int) -
     return found is not None
 
 
+def release_usage(session: Session, item_id: int, consumer_user_id: int) -> int:
+    """Remove the KnowledgeItemUsage record for a given consumer.
+
+    Called when regenerating a video: the idea goes back to the queue,
+    so the consumer's usage record must be removed, otherwise
+    is_used_by_consumer will still return True and the queue consumer
+    will skip the idea.
+
+    Returns the number of records deleted.
+    """
+    result = session.execute(
+        select(KnowledgeItemUsage).where(
+            KnowledgeItemUsage.knowledge_item_id == item_id,
+            KnowledgeItemUsage.consumer_user_id == consumer_user_id,
+        )
+    ).scalars().all()
+    count = len(result)
+    for usage in result:
+        session.delete(usage)
+    if count > 0:
+        session.flush()
+    return count
+
+
 def record_usage(
     session: Session,
     item_id: int,
