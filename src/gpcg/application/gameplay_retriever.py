@@ -193,7 +193,7 @@ class GameplayRetriever:
                 session, game_ids, target_duration, creative_plan, scene_duration, rng,
                 user_id=user_id, accept_public=accept_public,
                 narrative_beats=narrative_beats, recent_game_ids=recent_game_ids,
-                max_uses=max_uses,
+                max_uses=max_uses, video_type=video_type,
             )
             if clips:
                 return clips
@@ -412,6 +412,7 @@ class GameplayRetriever:
         narrative_beats: Optional[list] = None,
         recent_game_ids: Optional[list[int]] = None,
         max_uses: int = 1,
+        video_type: str = "GAME_RELATED",
     ) -> list[SelectedClip]:
         """Retrieve clips using the semantic index.
 
@@ -439,7 +440,10 @@ class GameplayRetriever:
         # can serve as background. Then score and pick the ONE best source.
         # For GAME_RELATED: keep filtering by game_ids (the video IS about
         # that game, so its gameplay is preferred).
-        if plan.video_type == "GENERAL_TOPIC":
+        # NOTE: we check the effective video_type (the parameter), not
+        # plan.video_type, because gameplay_preference may have overridden
+        # GENERAL_TOPIC → GAME_RELATED to force filtering by the chosen game.
+        if video_type == "GENERAL_TOPIC" and plan.video_type == "GENERAL_TOPIC":
             query = select(GameplaySource).where(
                 GameplaySource.ingestion_status == "ready",
             )
@@ -459,9 +463,9 @@ class GameplayRetriever:
             if not src.is_analysis_ready:
                 continue
             compat = src.compatibility
-            if plan.video_type == "GAME_RELATED" and not compat.get("game_related", True):
+            if video_type == "GAME_RELATED" and not compat.get("game_related", True):
                 continue
-            if plan.video_type == "GENERAL_TOPIC" and not compat.get("general_topic", True):
+            if video_type == "GENERAL_TOPIC" and not compat.get("general_topic", True):
                 continue
             compatible_sources.append(src)
 
@@ -471,7 +475,10 @@ class GameplayRetriever:
         # V3: For GENERAL_TOPIC, score each source and select the ONE best fit.
         # This implements intelligent source selection based on narrative fit
         # rather than treating all compatible sources equally.
-        if plan.video_type == "GENERAL_TOPIC" and len(compatible_sources) > 1:
+        # NOTE: only when the effective video_type is still GENERAL_TOPIC
+        # (gameplay_preference may have forced GAME_RELATED — in that case
+        # we already filtered to the chosen game's sources above).
+        if video_type == "GENERAL_TOPIC" and plan.video_type == "GENERAL_TOPIC" and len(compatible_sources) > 1:
             scored = []
             for src in compatible_sources:
                 fit = self._score_source_fit(
