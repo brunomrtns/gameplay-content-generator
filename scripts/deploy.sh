@@ -315,6 +315,37 @@ location_block = """    # ── GPCG (Gameplay Content Generator) ────�
     # Game Catalog Service — proxied to the catalog container (port 8788).
     # Uses resolver + variable so nginx resolves at request time (not startup).
     # This prevents nginx from crashing if the catalog container is restarting.
+    # Three location blocks: health (root), admin (/admin/*), query (/api/*).
+    location = /gpcg/api/catalog/health {
+        limit_req zone=api_limit burst=30 nodelay;
+        resolver 127.0.0.11 valid=10s;
+        set $catalog_backend http://gpcg-catalog:8788;
+        rewrite ^/gpcg/api/catalog/(.*)$ /$1 break;
+        proxy_pass         $catalog_backend;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_buffering    on;
+        proxy_read_timeout 30s;
+    }
+    location /gpcg/api/catalog/admin/ {
+        limit_req zone=api_limit burst=30 nodelay;
+        resolver 127.0.0.11 valid=10s;
+        set $catalog_backend http://gpcg-catalog:8788;
+        rewrite ^/gpcg/api/catalog/(.*)$ /$1 break;
+        proxy_pass         $catalog_backend;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_buffering    on;
+        proxy_read_timeout 30s;
+    }
     location /gpcg/api/catalog/ {
         limit_req zone=api_limit burst=30 nodelay;
         resolver 127.0.0.11 valid=10s;
