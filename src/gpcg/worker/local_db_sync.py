@@ -591,6 +591,8 @@ def run_generation_locally(
             if video:
                 result["video"] = {
                     "id": video.id,
+                    "content_plan_id": video.content_plan_id,
+                    "knowledge_item_id": video.knowledge_item_id,
                     "file_path": video.file_path,
                     "duration": video.duration,
                     "width": video.width,

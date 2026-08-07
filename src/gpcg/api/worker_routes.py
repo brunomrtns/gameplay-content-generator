@@ -1858,11 +1858,19 @@ def sync_job_result(
                 if k != "id" and hasattr(video, k):
                     setattr(video, k, v)
         if not video:
+            # Try to get knowledge_item_id from the video dict (worker sends it)
+            # Fall back to ContentPlan metadata_json
+            ki_id = req.video.get("knowledge_item_id")
+            if not ki_id and job.content_plan_id:
+                plan = db.query(ContentPlan).filter(ContentPlan.id == job.content_plan_id).first()
+                if plan and plan.metadata_json:
+                    ki_id = plan.metadata_json.get("knowledge_item_id")
             video = VideoModel(
                 user_id=job.user_id,
                 job_id=job.id,
                 content_plan_id=job.content_plan_id,
                 game_id=job.game_id,
+                knowledge_item_id=ki_id,
                 file_path=req.video.get("file_path", ""),
                 storage_key=req.video.get("storage_key"),
                 duration=req.video.get("duration", 0.0),
