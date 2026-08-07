@@ -405,3 +405,33 @@ def panel() -> None:
     from gpcg.cli.worker_panel import run_worker_panel
 
     run_worker_panel()
+
+
+def catalog() -> None:
+    """Run the Game Catalog Service (IGDB sync + query API on port 8788).
+
+    This is a standalone FastAPI service that syncs game data from IGDB
+    and serves catalog query endpoints for the GPCG API and frontend.
+    It runs as a separate process in the Docker stack (gpcg-catalog container).
+
+    Requires IGDB_CLIENT_ID and IGDB_CLIENT_SECRET in .env.
+    See docs/CATALOG_SERVICE_PLAN.md for architecture details.
+    """
+    configure_logging()
+    import uvicorn
+
+    settings = get_settings()
+    if not settings.igdb_client_id or not settings.igdb_client_secret:
+        console.print("[red]✗ IGDB credentials not configured.[/red]")
+        console.print("  Set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET in .env")
+        console.print("  Get them at: https://dev.twitch.tv/console/apps")
+        raise typer.Exit(1)
+
+    console.print(f"[cyan]Starting Game Catalog Service on port {settings.catalog_port}...[/cyan]")
+    uvicorn.run(
+        "gpcg.catalog.app:create_catalog_app",
+        factory=True,
+        host="0.0.0.0",
+        port=settings.catalog_port,
+        reload=False,
+    )

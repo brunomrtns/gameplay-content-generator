@@ -8,10 +8,13 @@
 - **Worker (legacy):** `./scripts/dev.sh worker` (inbox watcher + job processor — runs on VPS)
 - **Remote Worker (Compute Plane):** `gpcg remote-worker --vps-url <url> --worker-id <id> --api-key <secret>`
   (runs on local PC with GPU, connects to VPS API, processes mapping + generation jobs)
-- **Tests:** `.venv/bin/pytest tests/ -q` (462 tests, ~53s)
+- **Tests:** `.venv/bin/pytest tests/ -q` (611 tests, ~61s)
 - **Frontend build:** `cd frontend && npm run build`
 - **Frontend typecheck:** `cd frontend && npm run typecheck`
 - **Deploy:** `./scripts/deploy.sh` (syncs to VPS, builds Docker, updates nginx)
+- **Catalog Service:** `gpcg catalog` (runs the Game Catalog Service on port 8788,
+  syncs from IGDB, serves catalog query API. Requires IGDB_CLIENT_ID and
+  IGDB_CLIENT_SECRET in .env. See docs/CATALOG_SERVICE_PLAN.md)
 
 ## Control Plane + Compute Plane Architecture (v0.3.0)
 
@@ -372,6 +375,38 @@ GPCG is now a multi-user platform for automated YouTube channel video generation
 - L2 (prior): capture_source → game historical association — confidence 0.5
 - L3 (VLM): gemma3:12b frame analysis — confidence from LLM
 - Fallback: parsed candidate as `needs_review` — confidence 0.3
+
+## Game Catalog Service (v0.4.0)
+
+The Game Catalog Service is a standalone FastAPI service that runs as a
+separate process in the Docker stack (`gpcg-catalog` container, port 8788).
+It syncs game data from IGDB (the canonical source) and serves query
+endpoints for the GPCG API and frontend. See `docs/CATALOG_SERVICE_PLAN.md`.
+
+- **Process:** `gpcg catalog` (CLI command) → uvicorn on port 8788
+- **Docker:** Same image as API/worker (`gpcg-api:latest`), different command
+- **DB:** Separate SQLite (`data/catalog.db`) in the same volume — never
+  touches `gpcg.db`. Uses WAL mode for concurrent read access.
+- **Sync:** Background daemon thread. Full sync on first startup, then
+  incremental syncs every 24h (±10% jitter). Manual sync via
+  `POST /admin/sync`.
+- **IGDB auth:** OAuth2 (Twitch Developer Portal). Token auto-renewed.
+  Requires `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` in `.env`.
+- **Rate limit:** 4 req/s (250ms sleep between IGDB requests).
+- **Filter:** Only syncs main_game (category=0) with rating > 70 OR
+  total_rating_count > 20 OR hypes > 5, released after 2003. ~5-10k games.
+- **API:** Internal only (not exposed publicly). GPCG API proxies
+  `/gpcg/api/catalog/*` → `http://gpcg-catalog:8788/api/*` via nginx.
+- **No LLM:** The catalog service is "dumb" — it only syncs and serves data.
+  Game association intelligence lives in the worker (local Ollama).
+- **Key files:**
+  - `src/gpcg/catalog/app.py` — FastAPI app + background sync scheduler
+  - `src/gpcg/catalog/igdb_client.py` — IGDB API client (OAuth2 + fetch)
+  - `src/gpcg/catalog/sync_service.py` — Full + incremental sync logic
+  - `src/gpcg/catalog/query_service.py` — Search, autocomplete, get
+  - `src/gpcg/catalog/routes.py` — API endpoints (query, admin, health)
+  - `src/gpcg/catalog/models.py` — CatalogGame, CatalogAlias, SyncState
+  - `src/gpcg/catalog/database.py` — Separate engine for catalog.db
 
 ## Key File Paths
 

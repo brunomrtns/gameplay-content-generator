@@ -390,6 +390,33 @@ class Settings(BaseSettings):
     # LLM model for metadata generation (default: same as script generation).
     gpcg_metadata_llm_model: str = "llama3.1:8b"
 
+    # ── Game Catalog Service (IGDB sync) ─────────────────────────────────────
+    # The catalog service is a separate process (gpcg catalog) that syncs
+    # game data from IGDB and serves query endpoints on port 8788.
+    # See docs/CATALOG_SERVICE_PLAN.md
+    igdb_client_id: str = ""
+    igdb_client_secret: str = ""
+    catalog_port: int = 8788
+    catalog_db_path: str = "./data/catalog.db"
+    # Sync interval in seconds (default: 24h). The scheduler adds ±10% jitter
+    # to avoid predictable request patterns.
+    catalog_sync_interval_sec: int = 86400
+    # IGDB filter: minimum IGDB rating to include (0-100). 0 = no filter.
+    catalog_sync_filter_rating_min: int = 70
+    # IGDB filter: minimum total_rating_count to include (0 = no filter).
+    # Games with rating below catalog_sync_filter_rating_min MUST have
+    # total_rating_count above this OR hypes above catalog_sync_filter_hypes_min.
+    catalog_sync_filter_rating_count_min: int = 20
+    # IGDB filter: minimum hypes (pre-release interest) to include.
+    catalog_sync_filter_hypes_min: int = 5
+    # IGDB filter: only games released after this unix timestamp.
+    # 1041379200 = 2003-01-01 (filters out pre-2003 games).
+    catalog_sync_filter_year_min: int = 1041379200
+    # IGDB page size (max 500 per request).
+    catalog_sync_batch_size: int = 500
+    # Rate limit: minimum seconds between IGDB API requests (4 req/s = 0.25s).
+    catalog_igdb_rate_limit_sec: float = 0.25
+
     # ── Derived helpers ──────────────────────────────────────────────────────
     @property
     def data_dir(self) -> Path:
@@ -410,6 +437,19 @@ class Settings(BaseSettings):
     @property
     def db_url(self) -> str:
         return f"sqlite:///{self.db_path}"
+
+    @property
+    def catalog_db_path_resolved(self) -> Path:
+        """Resolved path for the catalog SQLite database."""
+        p = Path(self.catalog_db_path)
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+
+    @property
+    def catalog_db_url(self) -> str:
+        return f"sqlite:///{self.catalog_db_path_resolved}"
 
     @property
     def inbox_dir(self) -> Path:

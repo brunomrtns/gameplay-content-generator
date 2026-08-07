@@ -4,11 +4,16 @@
 # Usage:   docker compose -f docker-compose.prod.yml up -d
 # VPS path: /opt/gpcg/docker-compose.prod.yml
 #
-# Services: api (serves both API + frontend on port 8787)
+# Services:
+#   api     — GPCG API + frontend (port 8787)
+#   worker  — Background job processor (inbox watcher + job runner)
+#   catalog — Game Catalog Service (IGDB sync + query API, port 8788)
 #
-# No postgres — uses SQLite (data/gpcg.db) for simplicity.
+# No postgres — uses SQLite (data/gpcg.db + data/catalog.db) for simplicity.
 # No nginx — trivestia-nginx handles reverse proxying via /gpcg/ prefix.
 # The api container connects to trivestia-net so trivestia-nginx can reach it.
+# The catalog container is internal-only (not exposed publicly); the api
+# proxies /gpcg/api/catalog/* to it.
 # =============================================================================
 
 services:
@@ -81,6 +86,43 @@ services:
         reservations:
           cpus: "0.10"
           memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  catalog:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gpcg-api:latest
+    container_name: gpcg-catalog
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      GPCG_ENV: production
+      # IGDB credentials are read from .env (IGDB_CLIENT_ID, IGDB_CLIENT_SECRET)
+      CATALOG_DB_PATH: /app/data/catalog.db
+    volumes:
+      - gpcg-data:/app/data
+    networks:
+      - trivestia-net
+      - bi-net
+    command: ["gpcg", "catalog"]
+    expose:
+      - "8788"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://127.0.0.1:8788/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
     logging:
       driver: json-file
       options:

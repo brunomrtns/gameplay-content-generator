@@ -247,6 +247,20 @@ upstream_block = """    # ── GPCG Upstream ───────────
 if "upstream gpcg_api" not in content:
     content = content.replace("    log_format main", upstream_block + "\n    log_format main", 1)
 
+# ── Ensure upstream gpcg_catalog exists ──────────────────────────────────
+catalog_upstream_block = """    # ── GPCG Catalog Upstream ─────────────────────────────────────────────
+    upstream gpcg_catalog {
+        server gpcg-catalog:8788;
+        keepalive 16;
+    }
+"""
+if "upstream gpcg_catalog" not in content:
+    content = content.replace(
+        "    # ── GPCG Upstream",
+        catalog_upstream_block + "\n    # ── GPCG Upstream",
+        1,
+    )
+
 # ── Replace (or add) the /gpcg/ location block ───────────────────────────
 # Always rewrite the full block so config stays consistent across deploys.
 location_block = """    # ── GPCG (Gameplay Content Generator) ────────────────────────────────
@@ -296,6 +310,21 @@ location_block = """    # ── GPCG (Gameplay Content Generator) ────�
         proxy_read_timeout 1200s;
         proxy_send_timeout 1200s;
         client_max_body_size 1024m;
+    }
+    # Game Catalog Service — proxied to the catalog container (port 8788).
+    # More specific than /gpcg/ so nginx matches this first.
+    location /gpcg/api/catalog/ {
+        limit_req zone=api_limit burst=30 nodelay;
+        rewrite ^/gpcg/api/catalog/(.*)$ /api/$1 break;
+        proxy_pass         http://gpcg_catalog;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_buffering    on;
+        proxy_read_timeout 30s;
     }
 """
 
@@ -353,6 +382,14 @@ if [[ "$API_PUBLIC" != "FAIL" ]]; then
   API_OK=1
 else
   err "API pública não respondeu"
+fi
+
+log "  Verificando Catalog Service..."
+CATALOG_HEALTH=$(vps "docker inspect --format='{{.State.Health.Status}}' gpcg-catalog 2>/dev/null || echo 'starting'")
+if [[ "$CATALOG_HEALTH" == "healthy" || "$CATALOG_HEALTH" == "starting" ]]; then
+  ok "Catalog container: $CATALOG_HEALTH"
+else
+  err "Catalog container: $CATALOG_HEALTH"
 fi
 
 # ── Step 8: Versionamento + commit + tag + push ──────────────────────────────

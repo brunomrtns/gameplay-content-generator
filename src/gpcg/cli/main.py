@@ -10,6 +10,7 @@ Usage:
     gpcg db-init         # create tables
     gpcg generate --game <id>   # trigger a single generation job
     gpcg creative-test -t <topic> -f <fact>  # smoke-test the CreativeEngine
+    gpcg catalog         # run the Game Catalog Service (IGDB sync, port 8788)
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import typer
 
 from gpcg.cli.commands import (
     analyze_gameplay,
+    catalog,
     creative_test,
     db_init,
     dev,
@@ -38,6 +40,7 @@ app = typer.Typer(
 
 app.command()(db_init)
 app.command()(analyze_gameplay)
+app.command()(catalog)
 app.command()(creative_test)
 app.command()(dev)
 app.command()(generate)
