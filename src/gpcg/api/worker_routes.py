@@ -38,6 +38,8 @@ from sqlalchemy.orm import Session
 from gpcg.config import get_settings
 from gpcg.domain.models import (
     Document,
+    Game,
+    GameAlias,
     GameplayAsset,
     GameplayClipUsage,
     GameplayEvent,
@@ -623,6 +625,9 @@ def _serialize_gameplay_source_for_job(job: Job, db: Session) -> Optional[dict]:
         "game_id": source.game_id,
         "storage_key": source.storage_key,
         "upload_token": source.upload_token,
+        "capture_source": source.capture_source,
+        "resolution_method": source.resolution_method,
+        "resolution_confidence": source.resolution_confidence,
     }
 
 
@@ -979,6 +984,35 @@ def _maybe_auto_publish(job_id: int) -> None:
 # ── Gameplay download (streaming) ────────────────────────────────────────────
 
 
+@router.get("/games/registry")
+def worker_list_games(
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """List all games + aliases for the worker's game resolver.
+
+    The worker uses this to build a local candidate catalog for L1 (slug/alias
+    matching) and L3 (VLM candidate list).
+    """
+    games = db.query(Game).all()
+    aliases = db.query(GameAlias).all()
+    return {
+        "games": [
+            {
+                "id": g.id,
+                "canonical_name": g.canonical_name,
+                "slug": g.slug,
+                "camera_type": g.camera_type,
+            }
+            for g in games
+        ],
+        "aliases": [
+            {"game_id": a.game_id, "alias": a.alias}
+            for a in aliases
+        ],
+    }
+
+
 @router.get("/gameplays/{source_id}/download")
 def download_gameplay(
     source_id: int,
@@ -1239,6 +1273,67 @@ def submit_mapping_result(
         f"(version={req.analysis_version})"
     )
     return {"ok": True, "events_persisted": len(req.events)}
+
+
+# ── Game resolution (worker → VPS) ───────────────────────────────────────────
+
+
+class GameResolutionRequest(BaseModel):
+    """Worker sends VLM-identified game info to update the source."""
+    game_name: str  # canonical name or candidate
+    method: str = "vlm"
+    confidence: float = 0.0
+    notes: str = ""
+    capture_source: Optional[str] = None
+
+
+@router.post("/gameplays/{source_id}/resolve-game")
+def submit_game_resolution(
+    source_id: int,
+    req: GameResolutionRequest,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Worker sends VLM-identified game for a source.
+
+    Called after the worker runs L3 (VLM) resolution locally. If the game
+    doesn't exist in the registry, it's created. The source is updated with
+    the resolved game_id, method, confidence, and notes.
+    """
+    from gpcg.domain.game_registry import get_or_create
+    from gpcg.domain.slug_utils import slugify
+
+    source = db.query(GameplaySource).filter(GameplaySource.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Gameplay source not found")
+
+    if not req.game_name or req.confidence < 0.5:
+        log.info(f"Worker sent low-confidence resolution for #{source_id}: {req.game_name} (conf={req.confidence})")
+        return {"ok": True, "updated": False, "reason": "low confidence"}
+
+    # Get or create game in registry
+    game = get_or_create(
+        db,
+        req.game_name,
+        capture_sources=[req.capture_source] if req.capture_source else None,
+    )
+    db.flush()
+
+    source.game_id = game.id
+    source.resolution_method = req.method
+    source.resolution_confidence = req.confidence
+    source.resolution_notes = req.notes
+    if req.capture_source:
+        source.capture_source = req.capture_source
+    if source.ingestion_status == "needs_review":
+        source.ingestion_status = "ready"
+
+    db.commit()
+    log.info(
+        f"Worker resolved game for #{source_id}: '{game.canonical_name}' "
+        f"(method={req.method}, conf={req.confidence:.2f})"
+    )
+    return {"ok": True, "updated": True, "game_id": game.id, "game_name": game.canonical_name}
 
 
 # ── Video upload (worker → VPS) ──────────────────────────────────────────────

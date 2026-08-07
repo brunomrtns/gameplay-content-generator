@@ -73,6 +73,8 @@ class WorkerConfig:
     worker_version: str = "0.1.0"
     git_commit: str = ""
     build_number: str = ""
+    # Ollama URL for local VLM (game resolution, gameplay analysis)
+    ollama_url: str = "http://localhost:11434"
 
     @classmethod
     def from_env(cls) -> "WorkerConfig":
@@ -85,6 +87,7 @@ class WorkerConfig:
             poll_interval=float(os.environ.get("GPCG_WORKER_POLL_INTERVAL", "5")),
             heartbeat_interval=float(os.environ.get("GPCG_WORKER_HEARTBEAT_INTERVAL", "10")),
             capabilities=os.environ.get("GPCG_WORKER_CAPABILITIES", "mapping,generation").split(","),
+            ollama_url=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
         )
 
     def validate(self) -> None:
@@ -565,6 +568,162 @@ class RemoteWorker:
         log.info(f"Download confirmed for #{source_id}: {data}")
         return True
 
+    # ── VLM game resolution ──────────────────────────────────────────────────
+
+    def _try_vlm_resolution(
+        self,
+        source_id: int,
+        local_path: Path,
+        source: dict,
+    ) -> Optional[int]:
+        """Run full game resolution (L1→L2→L3) locally and report to VPS.
+
+        The VPS does NOT attempt game resolution — it just stores the upload
+        and creates a mapping job. The worker (with GPU + Ollama + the video)
+        runs the full hierarchical resolver:
+          L1: deterministic (filename → slug/alias registry)
+          L2: prior (capture_source → historical game association)
+          L3: VLM (sampled frames → gemma3:12b identification)
+
+        Fetches the game registry from VPS, builds a temp SQLite DB, runs
+        resolve(), and reports the result back via
+        POST /gameplays/{source_id}/resolve-game.
+
+        Returns the resolved game_id if successful, None otherwise.
+        """
+        try:
+            from gpcg.domain.game_resolver import resolve
+            from gpcg.infrastructure.llm import LLMClient
+        except ImportError as e:
+            log.warning(f"Game resolver modules not available: {e}")
+            return None
+
+        # L1/L2 work without Ollama. L3 needs it.
+        llm = None
+        if self._ollama_available():
+            llm = LLMClient()
+        else:
+            log.info("Ollama not available — will try L1/L2 only (no VLM)")
+
+        self.send_status("busy", f"Identificando jogo — {source['filename']}")
+        log.info(f"Running game resolution (L1→L2→L3) for source #{source_id}")
+
+        try:
+            # Fetch game registry from VPS and build a temp DB
+            session = self._build_resolver_session()
+            if session is None:
+                log.warning("Could not build resolver session — skipping game resolution")
+                return None
+
+            try:
+                result = resolve(local_path, local_path.name, session, llm=llm)
+            finally:
+                session.close()
+
+            if not result or not result.game_name or result.confidence < 0.5:
+                log.info(
+                    f"Game resolution inconclusive for #{source_id}: "
+                    f"game={result.game_name if result else 'None'} "
+                    f"conf={result.confidence if result else 0} "
+                    f"method={result.method if result else 'none'}"
+                )
+                return None
+
+            log.info(
+                f"Resolved #{source_id} → '{result.game_name}' "
+                f"(method={result.method}, conf={result.confidence:.2f})"
+            )
+
+            # Report to VPS
+            resp = self.client.post(
+                f"/api/gameplays/{source_id}/resolve-game",
+                json={
+                    "game_name": result.game_name,
+                    "method": result.method,
+                    "confidence": result.confidence,
+                    "notes": result.notes,
+                    "capture_source": source.get("capture_source") or result.capture_source,
+                },
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("updated"):
+                    log.info(
+                        f"VPS updated source #{source_id} → game_id={data.get('game_id')} "
+                        f"({data.get('game_name')})"
+                    )
+                    return data.get("game_id")
+                else:
+                    log.info(f"VPS did not update source #{source_id}: {data.get('reason')}")
+            else:
+                log.warning(f"VPS rejected game resolution for #{source_id}: {resp.status_code}")
+
+        except Exception as e:
+            log.error(f"Game resolution failed for #{source_id}: {e}")
+
+        return None
+
+    def _build_resolver_session(self):
+        """Build a temp SQLite DB with games + aliases from VPS for the resolver.
+
+        Returns a SQLAlchemy session, or None on failure.
+        """
+        import tempfile
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        try:
+            resp = self.client.get("/api/games/registry")
+            if resp.status_code != 200:
+                log.warning(f"Failed to fetch game registry: {resp.status_code}")
+                return None
+            data = resp.json()
+        except Exception as e:
+            log.warning(f"Error fetching game registry: {e}")
+            return None
+
+        from gpcg.domain.models import Base, Game, GameAlias
+        import gpcg.domain.models  # noqa: side effect: register all tables
+
+        tmpdir = tempfile.mkdtemp(prefix="gpcg_resolver_")
+        db_path = Path(tmpdir) / "resolver.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        Base.metadata.create_all(bind=engine)
+        SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+        session = SessionLocal()
+
+        try:
+            for g in data.get("games", []):
+                session.add(Game(
+                    id=g["id"],
+                    canonical_name=g["canonical_name"],
+                    slug=g.get("slug", ""),
+                    camera_type=g.get("camera_type", "unknown"),
+                ))
+            for a in data.get("aliases", []):
+                session.add(GameAlias(
+                    game_id=a["game_id"],
+                    alias=a["alias"],
+                ))
+            session.commit()
+            log.info(
+                f"Resolver DB: {len(data.get('games', []))} games, "
+                f"{len(data.get('aliases', []))} aliases"
+            )
+            return session
+        except Exception:
+            session.close()
+            raise
+
+    def _ollama_available(self) -> bool:
+        """Check if Ollama is running locally."""
+        import requests
+        try:
+            r = requests.get(f"{self.config.ollama_url}/api/tags", timeout=3)
+            return r.status_code == 200
+        except Exception:
+            return False
+
     # ── Submit mapping result ────────────────────────────────────────────────
 
     def submit_mapping_result(
@@ -957,6 +1116,20 @@ class RemoteWorker:
                 self.submit_job_result(job_id, status="failed", error=f"Download confirm failed: {e}")
                 return
 
+        # Stage 2b: VLM game resolution (if not already resolved with high confidence)
+        game_id = source.get("game_id")
+        resolution_confidence = source.get("resolution_confidence", 0.0) or 0.0
+        resolution_method = source.get("resolution_method", "unknown") or "unknown"
+
+        if not game_id or resolution_confidence < 0.6:
+            log.info(
+                f"Source #{source_id} needs VLM game resolution "
+                f"(game_id={game_id}, method={resolution_method}, conf={resolution_confidence})"
+            )
+            game_id = self._try_vlm_resolution(source_id, local_path, source)
+        else:
+            log.debug(f"Source #{source_id} already resolved (game_id={game_id}, conf={resolution_confidence})")
+
         # Stage 3: Run GameplayAnalyzer locally
         self.update_job_status(job_id, status="running", stage="mapping", progress=0.15)
         self.send_status("busy", f"Mapeando {source['filename']}", job_id=job_id)
@@ -969,7 +1142,6 @@ class RemoteWorker:
 
         # Determine camera_type from the game (if linked)
         camera_type = "unknown"
-        game_id = source.get("game_id")
         if game_id:
             # Fetch game info from VPS to get camera_type
             try:
