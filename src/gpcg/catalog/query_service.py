@@ -137,7 +137,11 @@ class QueryService:
                     func.lower(CatalogGame.name).contains(q_lower),
                     CatalogGame.id.in_(
                         select(CatalogAlias.game_id).where(
-                            func.lower(CatalogAlias.alias) == q_lower
+                            or_(
+                                func.lower(CatalogAlias.alias) == q_lower,
+                                func.lower(CatalogAlias.alias).startswith(q_lower),
+                                func.lower(CatalogAlias.alias).contains(q_lower),
+                            )
                         )
                     ),
                 )
@@ -152,6 +156,8 @@ class QueryService:
                     tier = 0
                 elif name_lower.startswith(q_lower):
                     tier = 1
+                elif self._has_alias_prefix(session, game.id, q_lower):
+                    tier = 2
                 elif self._has_exact_alias(session, game.id, q_lower):
                     tier = 2
                 else:
@@ -171,6 +177,16 @@ class QueryService:
             select(CatalogAlias.id).where(
                 CatalogAlias.game_id == game_id,
                 func.lower(CatalogAlias.alias) == alias_lower,
+            )
+        ).first()
+        return result is not None
+
+    def _has_alias_prefix(self, session, game_id: int, prefix_lower: str) -> bool:
+        """Check if a game has an alias that starts with the query (case-insensitive)."""
+        result = session.execute(
+            select(CatalogAlias.id).where(
+                CatalogAlias.game_id == game_id,
+                func.lower(CatalogAlias.alias).startswith(prefix_lower),
             )
         ).first()
         return result is not None
@@ -218,7 +234,7 @@ class QueryService:
     def autocomplete(self, partial: str, limit: int = 10) -> list[GameSummary]:
         """Fast autocomplete for UI search boxes.
 
-        Uses a simple prefix match on the game name (case-insensitive).
+        Matches on game name prefix AND alias prefix (case-insensitive).
         Sorted by total_rating_count desc so popular games appear first.
         """
         partial = partial.strip()
@@ -227,9 +243,21 @@ class QueryService:
 
         q_lower = partial.lower()
         with session_scope() as session:
+            # Games whose name starts with the query, OR that have an alias
+            # that starts with the query (e.g. "gta" → "Grand Theft Auto V"
+            # via the alias "GTA")
             games = session.execute(
                 select(CatalogGame)
-                .where(func.lower(CatalogGame.name).startswith(q_lower))
+                .where(
+                    or_(
+                        func.lower(CatalogGame.name).startswith(q_lower),
+                        CatalogGame.id.in_(
+                            select(CatalogAlias.game_id).where(
+                                func.lower(CatalogAlias.alias).startswith(q_lower)
+                            )
+                        ),
+                    )
+                )
                 .order_by(
                     func.coalesce(CatalogGame.total_rating_count, 0).desc(),
                     CatalogGame.name,
