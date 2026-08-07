@@ -229,6 +229,7 @@ class SyncService:
                 except Exception as e:
                     log.error("Failed to upsert IGDB game %d (%s): %s", igdb_game.id, igdb_game.name, e)
                     stats["errors"] += 1
+                    session.rollback()
 
         return stats
 
@@ -281,11 +282,16 @@ class SyncService:
         sync and are still valid alternative names.
         """
         added = 0
+        seen = set()  # Deduplicate within this batch (IGDB can return dupes)
         for alias in aliases:
             alias = alias.strip()
             if not alias:
                 continue
-            # Check if this alias already exists for this game
+            key = alias.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            # Check if this alias already exists for this game (case-insensitive)
             exists = session.execute(
                 select(CatalogAlias.id).where(
                     CatalogAlias.game_id == game_id,
