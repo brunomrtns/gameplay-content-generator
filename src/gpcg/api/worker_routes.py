@@ -695,9 +695,14 @@ def update_job_status(
         if queued_ki_id:
             try:
                 from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
+                from gpcg.application.knowledge_item_service import release_usage
                 from sqlalchemy.orm.attributes import flag_modified
                 ki = db.get(KnowledgeItem, queued_ki_id)
                 if ki and ki.status == KnowledgeItemStatus.fresh.value:
+                    # Release per-consumer usage record so is_used_by_consumer
+                    # returns False — otherwise the re-queued KI would be
+                    # silently skipped on the next poll cycle.
+                    released = release_usage(db, queued_ki_id, job.user_id)
                     auto = db.query(Automation).filter(
                         Automation.user_id == job.user_id
                     ).first()
@@ -709,7 +714,7 @@ def update_job_status(
                             cfg["idea_queue"] = q
                             auto.config = cfg
                             flag_modified(auto, "config")
-                            log.info(f"job #{job_id} failed: re-queued KI #{queued_ki_id} at top of idea queue")
+                            log.info(f"job #{job_id} failed: re-queued KI #{queued_ki_id} at top of idea queue (usage released: {released})")
             except Exception as e:
                 log.warning(f"job #{job_id} failed: could not re-queue KI #{queued_ki_id}: {e}")
 
@@ -840,8 +845,10 @@ def submit_job_result(
             try:
                 from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
                 from sqlalchemy.orm.attributes import flag_modified
+                from gpcg.application.knowledge_item_service import release_usage
                 ki = db.get(KnowledgeItem, queued_ki_id)
                 if ki and ki.status == KnowledgeItemStatus.fresh.value:
+                    released = release_usage(db, queued_ki_id, job.user_id)
                     auto = db.query(Automation).filter(
                         Automation.user_id == job.user_id
                     ).first()
@@ -853,7 +860,7 @@ def submit_job_result(
                             cfg["idea_queue"] = q
                             auto.config = cfg
                             flag_modified(auto, "config")
-                            log.info(f"job #{job_id} failed: re-queued KI #{queued_ki_id} at top of idea queue")
+                            log.info(f"job #{job_id} failed: re-queued KI #{queued_ki_id} at top of idea queue (usage released: {released})")
             except Exception as e:
                 log.warning(f"job #{job_id} failed: could not re-queue KI #{queued_ki_id}: {e}")
 
