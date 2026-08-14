@@ -1,0 +1,81 @@
+# systemd service file for the GPCG remote worker on Flávio's VM.
+#
+# This runs on the VM (CPU-only, no GPU). It connects to the VPS API
+# via WireGuard tunnel and processes jobs using remote LLM/VLM/ASR.
+#
+# INSTALL:
+#   1. Copy to: ~/.config/systemd/user/gpcg-worker-vm.service
+#   2. Edit paths/credentials below to match the VM setup
+#   3. Reload systemd:  systemctl --user daemon-reload
+#   4. Enable + start:  systemctl --user enable --now gpcg-worker-vm
+#   5. Check logs:      journalctl --user -u gpcg-worker-vm -f
+#
+# The VM worker needs:
+#   - GPCG venv with CPU-only dependencies (no torch, no GPU packages)
+#   - WireGuard tunnel to VPS (10.10.0.1)
+#   - video-generate project with requirements-cpu.txt installed
+#   - Kokoro TTS model files (kokoro-v1.0.onnx, voices-v1.0.bin)
+#   - FFmpeg installed (apt install ffmpeg)
+#   - LiteLLM proxy running (for remote LLM/VLM/ASR)
+
+[Unit]
+Description=GPCG Remote Worker — VM (CPU-only, Flávio)
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/gpcg-worker
+
+# Use the VM venv (CPU-only, no GPU deps)
+ExecStart=/opt/gpcg-worker/.venv/bin/gpcg remote-worker
+
+# Environment — configure these!
+Environment=GPCG_VPS_URL=http://10.10.0.1:8787/gpcg
+Environment=GPCG_WORKER_ID=flavio-vm
+Environment=GPCG_WORKER_API_KEY=CHANGE_ME
+Environment=GPCG_WORKER_STORAGE=/opt/gpcg-worker/data
+Environment=GPCG_WORKER_CAPABILITIES=mapping,generation
+
+# ── Remote AI providers (LiteLLM) ───────────────────────────────────────
+# LLM/VLM via LiteLLM proxy (OpenAI-compatible)
+Environment=GPCG_LLM_PROVIDER=litellm
+Environment=GPCG_LITELLM_BASE_URL=http://10.10.0.1:4000/v1
+Environment=GPCG_LITELLM_API_KEY=CHANGE_ME_LITELLM
+Environment=GPCG_LLM_MODEL_LITELLM=ollama/llama3.1:8b
+Environment=GPCG_VLM_MODEL_LITELLM=ollama/gemma3:12b
+
+# ASR via LiteLLM (remote, no faster-whisper needed)
+Environment=GPCG_ASR_PROVIDER=litellm
+Environment=GPCG_ASR_MODEL_LITELLM=whisper
+
+# YOLO on CPU (no GPU on VM)
+Environment=GPCG_YOLO_DEVICE=cpu
+
+# ── video-generate integration ──────────────────────────────────────────
+Environment=VIDEO_GENERATE_DIR=/opt/video-generate
+Environment=AI_MEDIA_CORE_DIR=/opt/ai-media-core/src
+Environment=VIDEO_GENERATE_PYTHON=/opt/video-generate/.venv/bin/python
+
+# ── Kokoro TTS (CPU-only) ───────────────────────────────────────────────
+Environment=TTS_ENGINE=kokoro
+Environment=KOKORO_MODEL_PATH=/opt/video-generate/models/kokoro-v1.0.onnx
+Environment=KOKORO_VOICES_PATH=/opt/video-generate/models/voices-v1.0.bin
+Environment=KOKORO_DEFAULT_VOICE=pm_alex
+
+# ── Gameplay search dirs (VM-specific) ──────────────────────────────────
+Environment=GPCG_GAMEPLAY_SEARCH_DIRS=/opt/gpcg-worker/data/gameplays
+
+# Restart on failure (network issues, VPS restarts, etc.)
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gpcg-worker-vm
+
+[Install]
+WantedBy=default.target

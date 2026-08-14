@@ -35,10 +35,15 @@ Environment=GPCG_WORKER_API_KEY=CHANGE_ME
 Environment=GPCG_WORKER_STORAGE=/media/bruno/ToshibaHD/gpcg
 Environment=GPCG_WORKER_CAPABILITIES=mapping,generation
 
-# Local AI services
+# ── Local AI providers (Ollama, default) ────────────────────────────────
+Environment=GPCG_LLM_PROVIDER=ollama
 Environment=OLLAMA_HOST=http://localhost:11434
 Environment=GPCG_GAMEPLAY_VISION_MODEL=gemma3:12b
 Environment=GPCG_GAMEPLAY_ASR_DEVICE=cuda
+Environment=GPCG_YOLO_DEVICE=cuda
+
+# ── TTS (XTTS with voice cloning, GPU) ──────────────────────────────────
+Environment=TTS_ENGINE=xtts
 
 # video-generate integration
 Environment=VIDEO_GENERATE_DIR=/home/bruno/Desenvolvimento/brunointegrations/video-generate
