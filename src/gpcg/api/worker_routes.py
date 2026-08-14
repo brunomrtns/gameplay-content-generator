@@ -42,6 +42,7 @@ from gpcg.domain.models import (
     GameAlias,
     GameplayAsset,
     GameplayClipUsage,
+    GameplayDownload,
     GameplayEvent,
     GameplayProcessingStatus,
     GameplaySource,
@@ -1232,18 +1233,63 @@ def confirm_download(
     # Mark as downloaded
     source.processing_status = GameplayProcessingStatus.downloaded.value
     source.downloaded_at = _utcnow()
-    source.downloaded_by_worker = req.worker_id
+    # Keep downloaded_by_worker for backward compat (first downloader)
+    if not source.downloaded_by_worker:
+        source.downloaded_by_worker = req.worker_id
     source.upload_token = None  # invalidate token
 
-    # Delete temp file from VPS
+    # Track per-worker download (multi-worker)
+    existing_dl = db.query(GameplayDownload).filter(
+        GameplayDownload.source_id == source_id,
+        GameplayDownload.worker_id == req.worker_id,
+    ).first()
+    if not existing_dl:
+        dl = GameplayDownload(
+            source_id=source_id,
+            worker_id=req.worker_id,
+            downloaded_at=_utcnow(),
+            checksum_verified=True,
+            file_size=source.file_size,
+        )
+        db.add(dl)
+        db.flush()  # ensure the new record is visible in the query below
+
+    # Delete temp file from VPS only if ALL active workers have confirmed
+    # (or if there's only one worker — backward compat single-worker mode)
     if source.storage_key:
-        file_path = _resolve_storage_path(source.storage_key)
-        if file_path.exists():
-            try:
-                file_path.unlink()
-                log.info(f"Deleted temp file {source.storage_key} from VPS (download confirmed)")
-            except OSError as e:
-                log.warning(f"Failed to delete temp file {file_path}: {e}")
+        # Find all active workers with mapping or generation capability.
+        # Filter in Python because SQLite JSON .contains() is unreliable.
+        active_workers = (
+            db.query(Worker)
+            .filter(Worker.status.in_([
+                WorkerStatus.online.value, WorkerStatus.busy.value
+            ]))
+            .all()
+        )
+        all_active = set(
+            w.worker_id for w in active_workers
+            if "mapping" in (w.capabilities or []) or "generation" in (w.capabilities or [])
+        )
+        confirmed = set(
+            dl.worker_id for dl in
+            db.query(GameplayDownload).filter(
+                GameplayDownload.source_id == source_id
+            ).all()
+        )
+
+        if all_active.issubset(confirmed) or len(all_active) <= 0:
+            file_path = _resolve_storage_path(source.storage_key)
+            if file_path.exists():
+                try:
+                    file_path.unlink()
+                    log.info(f"Deleted temp file {source.storage_key} from VPS (all workers confirmed)")
+                except OSError as e:
+                    log.warning(f"Failed to delete temp file {file_path}: {e}")
+        else:
+            log.info(
+                f"Keeping temp file {source.storage_key} on VPS "
+                f"({len(confirmed)}/{len(all_active)} workers confirmed)"
+            )
 
     db.commit()
     log.info(f"Gameplay #{source_id} download confirmed by '{req.worker_id}'")
@@ -1511,6 +1557,57 @@ async def upload_video(
 
     db.commit()
     return {"ok": True, "storage_key": storage_key, "file_size": file_size}
+
+
+# ── Gameplay sync (multi-worker: list gameplays a worker needs to download) ──
+
+
+@router.get("/gameplays/list-for-sync")
+def list_gameplays_for_sync(
+    worker_id: str,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """List gameplays that a worker should download on startup.
+
+    Returns gameplays that:
+    - Have a storage_key (file exists on VPS temp)
+    - Are in 'downloaded', 'mapped', or 'ready' processing_status
+    - Have NOT been confirmed by this worker yet (no GameplayDownload record)
+
+    The worker downloads these via SCP/HTTP and calls confirm-download for each.
+    This ensures a worker can generate jobs even if another worker did the mapping.
+    """
+    # Find gameplays with temp files still on VPS
+    sources_with_temp = (
+        db.query(GameplaySource)
+        .filter(GameplaySource.storage_key.isnot(None))
+        .filter(GameplaySource.processing_status.in_([
+            GameplayProcessingStatus.downloaded.value,
+            GameplayProcessingStatus.mapped.value,
+            GameplayProcessingStatus.ready.value,
+        ]))
+        .all()
+    )
+
+    # Filter out ones this worker already confirmed
+    result = []
+    for source in sources_with_temp:
+        already = db.query(GameplayDownload).filter(
+            GameplayDownload.source_id == source.id,
+            GameplayDownload.worker_id == worker_id,
+        ).first()
+        if not already:
+            result.append({
+                "id": source.id,
+                "filename": source.filename,
+                "file_hash": source.file_hash,
+                "file_size": source.file_size,
+                "storage_key": source.storage_key,
+                "processing_status": source.processing_status,
+            })
+
+    return {"gameplays": result, "count": len(result)}
 
 
 # ── Create mapping job (called by frontend when user uploads gameplay) ───────

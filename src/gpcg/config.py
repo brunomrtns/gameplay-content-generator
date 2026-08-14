@@ -296,6 +296,13 @@ class Settings(BaseSettings):
     # Stale jobs are requeued to `queued` (or `failed` if attempts >= max_attempts).
     # Must be longer than gpcg_worker_heartbeat_timeout to avoid false positives.
     gpcg_job_lease_timeout: int = 300
+    # Colon-separated list of extra dirs to search for gameplay files locally.
+    # Used by local_db_sync.py when resolving gameplay paths for generation jobs.
+    # Example: "/data/gpcg/gameplays:/media/bruno/ToshibaHD/Captures"
+    gpcg_gameplay_search_dirs: str = ""
+    # Directory where the remote worker stores downloaded gameplays.
+    # Defaults to {storage_dir}/gameplays. Used by _sync_gameplays_on_startup.
+    gpcg_gameplay_download_dir: str = ""
 
     # ── V2: Game Enrichment ──────────────────────────────────────────────────
     # Master switch for automatic game enrichment on creation.

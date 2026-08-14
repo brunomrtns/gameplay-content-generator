@@ -794,12 +794,70 @@ class RemoteWorker:
 
     # ── Main loop ────────────────────────────────────────────────────────────
 
+    def _sync_gameplays_on_startup(self) -> None:
+        """Download gameplays from VPS that this worker doesn't have yet.
+
+        Called on startup so a worker can generate jobs even if another
+        worker did the mapping. Fetches the list of gameplays to sync from
+        the VPS and downloads each one that isn't already local with a
+        matching checksum.
+        """
+        try:
+            resp = self.client.get(
+                "/api/gameplays/list-for-sync",
+                params={"worker_id": self.config.worker_id},
+            )
+            if resp.status_code != 200:
+                log.warning(f"Gameplay sync: VPS returned {resp.status_code}")
+                return
+
+            data = resp.json()
+            gameplays = data.get("gameplays", [])
+            if not gameplays:
+                log.info("Gameplay sync: no gameplays to download")
+                return
+
+            log.info(f"Gameplay sync: {len(gameplays)} gameplay(s) to download")
+            for gp in gameplays:
+                source_id = gp["id"]
+                filename = gp["filename"]
+                expected_hash = gp["file_hash"]
+
+                # Check if already exists locally with matching checksum
+                local_path = self.storage_root / "gameplays" / f"{source_id}_{filename}"
+                if local_path.exists() and local_path.stat().st_size > 0:
+                    if self._verify_local_file(local_path, expected_hash):
+                        log.info(f"Gameplay sync: {filename} already local (checksum OK)")
+                        # Confirm with VPS so it knows we have it
+                        self.confirm_download(gp, local_path)
+                        continue
+                    else:
+                        log.warning(f"Gameplay sync: {filename} checksum mismatch, re-downloading")
+                        local_path.unlink()
+
+                # Download
+                try:
+                    self.send_status("busy", f"Sincronizando {filename}")
+                    downloaded = self.download_gameplay(gp)
+                    self.confirm_download(gp, downloaded)
+                    log.info(f"Gameplay sync: downloaded {filename} ({gp.get('file_size', 0)} bytes)")
+                except Exception as e:
+                    log.error(f"Gameplay sync: failed to download {filename}: {e}")
+
+            self.send_status("online", "Idle")
+        except Exception as e:
+            log.warning(f"Gameplay sync on startup failed: {e}")
+
     def run(self) -> None:
         """Main worker loop: poll for jobs and process them."""
         self._running = True
         self.register()
         self.start_heartbeat()
         self.send_status("online", "Idle")
+
+        # Multi-worker: sync gameplays on startup so this worker can
+        # generate jobs even if another worker did the mapping.
+        self._sync_gameplays_on_startup()
 
         # Auto content collection scheduler
         self._last_collection_time = 0.0

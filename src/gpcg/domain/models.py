@@ -548,6 +548,37 @@ class GameplaySource(Base):
         return self.analysis_status == AnalysisStatus.ready.value
 
 
+class GameplayDownload(Base):
+    """Tracks which workers have downloaded a gameplay file.
+
+    In multi-worker mode, the VPS keeps the temp file until ALL registered
+    workers with 'mapping' or 'generation' capability have confirmed download
+    (or until retention expiry). This table tracks per-worker download state.
+
+    Backward compat: GameplaySource.downloaded_by_worker (string) is still
+    set to the FIRST worker that confirms, but this table is the source of
+    truth for multi-worker tracking.
+    """
+    __tablename__ = "gameplay_downloads"
+    __table_args__ = (
+        UniqueConstraint("source_id", "worker_id", name="uq_download_worker"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_id: Mapped[int] = mapped_column(
+        ForeignKey("gameplay_sources.id"), nullable=False, index=True
+    )
+    worker_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    downloaded_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    checksum_verified: Mapped[bool] = mapped_column(Boolean, default=True)
+    file_size: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    def __repr__(self) -> str:
+        return f"<GameplayDownload source={self.source_id} worker={self.worker_id}>"
+
+
 class GameplayAsset(Base):
     """A reusable clip (start→end) of a gameplay source. MVP: manually defined."""
     __tablename__ = "gameplay_assets"

@@ -19,6 +19,7 @@ the VPS via POST /api/jobs/{id}/sync.
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -52,8 +53,9 @@ def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Pat
     Locally, gameplay files may be in:
     - {storage_root}/data/gameplays/{filename}
     - {storage_root}/data/inbox/{filename}
-    - /media/bruno/ToshibaHD/Captures/{filename}
-    - Any subdirectory under /media/bruno/ToshibaHD
+    - {storage_root}/gameplays/{source_id}_{filename}  (downloaded by remote worker)
+    - Any dir listed in GPCG_GAMEPLAY_SEARCH_DIRS (colon-separated)
+    - /media/bruno/ToshibaHD/Captures/{filename} (legacy Bruno PC)
 
     Returns the first matching path, or None if not found.
     """
@@ -72,15 +74,31 @@ def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Pat
     if stripped != filename:
         candidates.append(stripped)
 
-    # Search common locations
+    # Search common locations (storage_root-relative)
     search_dirs = [
         storage_root / "data" / "gameplays",
         storage_root / "data" / "inbox",
+        storage_root / "gameplays",  # downloaded by remote worker
+    ]
+
+    # Extra search dirs from env var (colon-separated, like PATH)
+    extra = os.environ.get("GPCG_GAMEPLAY_SEARCH_DIRS", "")
+    if extra:
+        for d in extra.split(":"):
+            d = d.strip()
+            if d:
+                search_dirs.append(Path(d))
+
+    # Legacy Bruno PC paths (only if they exist on this machine)
+    legacy_dirs = [
         Path("/media/bruno/ToshibaHD/Captures"),
         Path("/media/bruno/ToshibaHD/gpcg/data/gameplays"),
         Path("/media/bruno/ToshibaHD/gpcg/data/inbox"),
-        Path("/media/bruno/ToshibaHD"),  # root of external drive
+        Path("/media/bruno/ToshibaHD"),
     ]
+    for d in legacy_dirs:
+        if d.exists():
+            search_dirs.append(d)
 
     for d in search_dirs:
         for name in candidates:
@@ -88,19 +106,27 @@ def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Pat
             if candidate.exists():
                 return str(candidate)
 
-    # Last resort: find by filename under /media/bruno/ToshibaHD
-    # Try both original and stripped filename
+    # Last resort: find by filename under the first existing legacy dir
+    # or storage_root (only if it's a real directory tree)
     import subprocess
+    find_roots = []
+    for d in legacy_dirs:
+        if d.exists():
+            find_roots.append(str(d))
+            break
+    if not find_roots:
+        find_roots.append(str(storage_root))
     for name in candidates:
-        try:
-            result = subprocess.run(
-                ["find", "/media/bruno/ToshibaHD", "-name", name, "-type", "f"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip().split("\n")[0]
-        except Exception:
-            pass
+        for root in find_roots:
+            try:
+                result = subprocess.run(
+                    ["find", root, "-name", name, "-type", "f"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip().split("\n")[0]
+            except Exception:
+                pass
 
     return None
 
