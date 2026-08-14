@@ -52,6 +52,20 @@ class Settings(BaseSettings):
     gpcg_vlm_model: str = "gemma3:12b"
     gpcg_llm_timeout: int = 180
 
+    # ── LLM Provider (multi-worker: Ollama local vs LiteLLM remote) ──────────
+    # Provider selection: "ollama" (local, default) or "litellm" (remote).
+    # When litellm, all LLM/VLM calls go through the OpenAI-compatible API
+    # at gpcg_litellm_base_url. Ollama-specific features (unload_model, /api/ps)
+    # become no-ops in litellm mode.
+    gpcg_llm_provider: str = "ollama"  # ollama | litellm
+    gpcg_litellm_base_url: str = ""    # e.g. http://10.0.0.5:4000/v1
+    gpcg_litellm_api_key: str = ""     # API key for LiteLLM proxy
+    # Model names for LiteLLM (may include provider prefix like "ollama/llama3.1:8b")
+    gpcg_llm_model_litellm: str = "ollama/llama3.1:8b"
+    gpcg_vlm_model_litellm: str = "ollama/gemma3:12b"
+    # Max retries on HTTP 429 (rate limit) before giving up
+    gpcg_llm_max_retries: int = 5
+
     # ── video-generate integration ───────────────────────────────────────────
     video_generate_dir: str = Field(
         default="/home/bruno/Desenvolvimento/brunointegrations/video-generate"
