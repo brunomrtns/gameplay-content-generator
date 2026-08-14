@@ -315,6 +315,10 @@ class Settings(BaseSettings):
     # Shared secret for worker API authentication. Workers send this as
     # X-Worker-Key header. If empty, worker endpoints are disabled.
     gpcg_worker_api_key: str = ""
+    # Disable SSL certificate verification when connecting to the VPS.
+    # Useful when the VPS is reached via a WireGuard IP (10.0.0.1) and the
+    # TLS certificate is for a public domain (brunointegrations.com).
+    gpcg_verify_ssl: bool = True
     # Seconds without heartbeat before a worker is considered offline.
     gpcg_worker_heartbeat_timeout: int = 30
     # Seconds before a running job is considered stale (worker died or vanished).

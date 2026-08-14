@@ -168,10 +168,16 @@ class RemoteWorker:
         config.validate()
 
         # HTTP client (persistent connection)
+        # SSL verification can be disabled via GPCG_VERIFY_SSL=false when
+        # the VPS is reached via a WireGuard IP and the TLS cert is for a
+        # public domain.
+        from gpcg.config import get_settings
+        verify_ssl = get_settings().gpcg_verify_ssl
         self.client = httpx.Client(
             base_url=config.vps_url.rstrip("/"),
             headers={"X-Worker-Key": config.api_key},
             timeout=300.0,  # long timeout for file downloads
+            verify=verify_ssl,
         )
 
         # State

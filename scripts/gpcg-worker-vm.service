@@ -4,15 +4,15 @@
 # via WireGuard tunnel and processes jobs using remote LLM/VLM/ASR.
 #
 # INSTALL:
-#   1. Copy to: ~/.config/systemd/user/gpcg-worker-vm.service
+#   1. Copy to: /etc/systemd/system/gpcg-worker-vm.service
 #   2. Edit paths/credentials below to match the VM setup
-#   3. Reload systemd:  systemctl --user daemon-reload
-#   4. Enable + start:  systemctl --user enable --now gpcg-worker-vm
-#   5. Check logs:      journalctl --user -u gpcg-worker-vm -f
+#   3. Reload systemd:  systemctl daemon-reload
+#   4. Enable + start:  systemctl enable --now gpcg-worker-vm
+#   5. Check logs:      journalctl -u gpcg-worker-vm -f
 #
 # The VM worker needs:
 #   - GPCG venv with CPU-only dependencies (no torch, no GPU packages)
-#   - WireGuard tunnel to VPS (10.10.0.1)
+#   - WireGuard tunnel to VPS (10.0.0.1)
 #   - video-generate project with requirements-cpu.txt installed
 #   - Kokoro TTS model files (kokoro-v1.0.onnx, voices-v1.0.bin)
 #   - FFmpeg installed (apt install ffmpeg)
@@ -31,7 +31,10 @@ WorkingDirectory=/opt/gpcg-worker
 ExecStart=/opt/gpcg-worker/.venv/bin/gpcg remote-worker
 
 # Environment — configure these!
-Environment=GPCG_VPS_URL=http://10.10.0.1:8787/gpcg
+# VPS via WireGuard tunnel (10.0.0.1). HTTPS with cert verification disabled
+# because the VPS cert is for brunointegrations.com, not for the IP.
+Environment=GPCG_VPS_URL=https://10.0.0.1/gpcg
+Environment=GPCG_VERIFY_SSL=false
 Environment=GPCG_WORKER_ID=flavio-vm
 Environment=GPCG_WORKER_API_KEY=CHANGE_ME
 Environment=GPCG_WORKER_STORAGE=/opt/gpcg-worker/data
@@ -40,7 +43,7 @@ Environment=GPCG_WORKER_CAPABILITIES=mapping,generation
 # ── Remote AI providers (LiteLLM) ───────────────────────────────────────
 # LLM/VLM via LiteLLM proxy (OpenAI-compatible)
 Environment=GPCG_LLM_PROVIDER=litellm
-Environment=GPCG_LITELLM_BASE_URL=http://10.10.0.1:4000/v1
+Environment=GPCG_LITELLM_BASE_URL=http://10.0.0.1:4000/v1
 Environment=GPCG_LITELLM_API_KEY=CHANGE_ME_LITELLM
 Environment=GPCG_LLM_MODEL_LITELLM=ollama/llama3.1:8b
 Environment=GPCG_VLM_MODEL_LITELLM=ollama/gemma3:12b
@@ -78,4 +81,4 @@ StandardError=journal
 SyslogIdentifier=gpcg-worker-vm
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
