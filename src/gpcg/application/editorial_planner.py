@@ -207,7 +207,10 @@ class EditorialPlanner:
             data = self.llm.chat_json(
                 system=PLANNER_SYSTEM,
                 prompt=user_prompt,
-                model=s.gpcg_llm_model,  # use default text model for planning
+                # Don't pass model explicitly — let LLMClient use its default
+                # (which is gpcg_llm_model_litellm in litellm mode, gpcg_llm_model
+                # in ollama mode). Passing s.gpcg_llm_model would override the
+                # litellm model with the ollama-only tag, causing 403.
                 temperature=s.gpcg_editorial_temperature,
                 max_tokens=s.gpcg_editorial_max_tokens,
             )
