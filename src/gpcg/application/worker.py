@@ -125,11 +125,15 @@ def _requeue_stale_jobs() -> None:
                 f"Re-queuing stale job #{job.id} (type={job.type}, "
                 f"worker_id={job.worker_id}, updated_at={job.updated_at})"
             )
-            job.status = JobStatus.queued.value
-            job.worker_id = None
-            job.started_at = None
-            if job.attempts < job.max_attempts:
-                job.attempts += 1
+            if job.attempts >= job.max_attempts:
+                job.status = JobStatus.failed.value
+                job.error = f"Max attempts ({job.max_attempts}) reached after stale timeout"
+            else:
+                job.status = JobStatus.queued.value
+                job.worker_id = None
+                job.started_at = None
+                # NOTE: Do NOT increment attempts here — /jobs/claim does that.
+                # Double-incrementing would exhaust max_attempts too fast.
             session.flush()
 
 

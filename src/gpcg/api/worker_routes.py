@@ -238,6 +238,78 @@ def _check_worker_offline(worker: Worker) -> bool:
     return elapsed > timeout
 
 
+def _requeue_stale_jobs_in_claim(db: Session) -> int:
+    """Re-queue jobs stuck in 'running' whose worker is offline or vanished.
+
+    Called at the start of /jobs/claim so any worker triggering a claim
+    also recovers stale jobs from dead workers.
+
+    A job is stale if:
+    - status='running' AND worker_id is set but worker heartbeat is older
+      than gpcg_job_lease_timeout
+    - status='running' AND worker_id IS NULL AND updated_at older than
+      gpcg_job_lease_timeout (VPS worker jobs)
+
+    If attempts >= max_attempts, mark as 'failed' instead of requeuing.
+    Does NOT increment attempts — the subsequent /jobs/claim does that.
+
+    Returns the number of jobs requeued.
+    """
+    from datetime import timedelta
+
+    settings = get_settings()
+    lease_timeout = timedelta(seconds=settings.gpcg_job_lease_timeout)
+    now = _utcnow().replace(tzinfo=None)
+    cutoff = now - lease_timeout
+
+    # Find running jobs with offline workers
+    stale_jobs = (
+        db.query(Job)
+        .outerjoin(Worker, Job.worker_id == Worker.id)
+        .filter(Job.status == JobStatus.running.value)
+        .filter(
+            (
+                # worker_id is NULL (VPS worker) and updated_at is old
+                (Job.worker_id.is_(None))
+                & (Job.updated_at < cutoff)
+            )
+            |
+            (
+                # worker heartbeat is old or NULL
+                (Job.worker_id.isnot(None))
+                & (
+                    (Worker.last_heartbeat.is_(None))
+                    | (Worker.last_heartbeat < cutoff)
+                )
+            )
+        )
+        .all()
+    )
+
+    requeued = 0
+    for job in stale_jobs:
+        if job.attempts >= job.max_attempts:
+            job.status = JobStatus.failed.value
+            job.error = f"Max attempts ({job.max_attempts}) reached after stale worker recovery"
+            log.warning(
+                f"Job #{job.id} marked as failed (attempts={job.attempts} "
+                f">= max_attempts={job.max_attempts})"
+            )
+        else:
+            job.status = JobStatus.queued.value
+            job.worker_id = None
+            job.started_at = None
+            requeued += 1
+            log.info(
+                f"Job #{job.id} requeued (stale worker, attempts={job.attempts}/"
+                f"{job.max_attempts})"
+            )
+
+    if stale_jobs:
+        db.flush()
+    return requeued
+
+
 def _cleanup_orphan_gameplays(db: Session) -> int:
     """Delete gameplay files from VPS temp_uploads that were never downloaded.
 
@@ -489,6 +561,11 @@ def claim_job(
     worker = db.query(Worker).filter(Worker.worker_id == req.worker_id).first()
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not registered")
+
+    # Recover stale jobs before claiming new ones
+    requeued_count = _requeue_stale_jobs_in_claim(db)
+    if requeued_count > 0:
+        log.info(f"Recovered {requeued_count} stale job(s) before claim")
 
     worker_caps = set(req.capabilities or worker.capabilities)
 

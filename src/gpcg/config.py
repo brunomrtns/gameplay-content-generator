@@ -292,6 +292,10 @@ class Settings(BaseSettings):
     gpcg_worker_api_key: str = ""
     # Seconds without heartbeat before a worker is considered offline.
     gpcg_worker_heartbeat_timeout: int = 30
+    # Seconds before a running job is considered stale (worker died or vanished).
+    # Stale jobs are requeued to `queued` (or `failed` if attempts >= max_attempts).
+    # Must be longer than gpcg_worker_heartbeat_timeout to avoid false positives.
+    gpcg_job_lease_timeout: int = 300
 
     # ── V2: Game Enrichment ──────────────────────────────────────────────────
     # Master switch for automatic game enrichment on creation.
