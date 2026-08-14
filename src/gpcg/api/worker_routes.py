@@ -1818,14 +1818,12 @@ def get_job_data(
         log.warning(f"Failed to sync knowledge items: {e}")
         data["knowledge_items"] = []
 
-    # Gameplay sources + events for the game (and general-topic sources)
+    # Gameplay sources + events — send ALL user's ready sources so the worker
+    # can do cross-game fallback when the primary game's clips are exhausted.
     sources_query = db.query(GameplaySource).filter(
-        GameplaySource.user_id == job.user_id
+        GameplaySource.user_id == job.user_id,
+        GameplaySource.processing_status == "ready",
     )
-    if job.game_id:
-        sources_query = sources_query.filter(
-            (GameplaySource.game_id == job.game_id) | (GameplaySource.game_id.is_(None))
-        )
     sources = sources_query.all()
     data["gameplay_sources"] = []
     for src in sources:

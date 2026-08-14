@@ -233,14 +233,15 @@ def find_available_segment(
         if (ge - gs) >= max(needed_duration, min_segment)
     ]
 
-    if not suitable and max_uses <= 1:
+    if not suitable and max_uses <= 1 and max_uses != 0:
         # Strict mode with no gaps — nothing available
+        # (max_uses=0 means unlimited, so we fall through to reuse)
         # (For max_uses > 1, we'll try event-based selection below)
         if not event_boundaries:
             return None
         # Try event boundaries even in used regions if max_uses > 1
         # (handled below)
-        if max_uses <= 1:
+        if max_uses <= 1 and max_uses != 0:
             return None
 
     # If event boundaries are provided, try to find an event-aligned segment
@@ -282,6 +283,10 @@ def find_available_segment(
                 return (s, e)
 
     if not suitable:
+        # Last resort: if unlimited reuse (max_uses=0), pick any random segment
+        if max_uses == 0:
+            start = rng.uniform(0, max(0, source_duration - needed_duration))
+            return (start, start + needed_duration)
         return None
 
     # Pick a random suitable gap
