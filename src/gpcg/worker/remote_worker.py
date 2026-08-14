@@ -59,8 +59,9 @@ class WorkerConfig:
     vps_url: str = ""  # e.g., "https://brunointegrations.com/gpcg"
     worker_id: str = ""  # e.g., "home-pc"
     api_key: str = ""  # shared secret for API auth
-    # Local storage for gameplay files (HD Toshiba)
-    local_storage_dir: str = "/media/bruno/ToshibaHD/gpcg"
+    # Local storage for gameplay/renders/outputs. Override via GPCG_WORKER_STORAGE.
+    # Default is a generic path that works on any machine (not Bruno-specific).
+    local_storage_dir: str = "./data/gpcg-worker"
     # Polling interval (seconds) for job claiming
     poll_interval: float = 5.0
     # Heartbeat interval (seconds)
@@ -83,7 +84,7 @@ class WorkerConfig:
             vps_url=os.environ.get("GPCG_VPS_URL", ""),
             worker_id=os.environ.get("GPCG_WORKER_ID", ""),
             api_key=os.environ.get("GPCG_WORKER_API_KEY", ""),
-            local_storage_dir=os.environ.get("GPCG_WORKER_STORAGE", "/media/bruno/ToshibaHD/gpcg"),
+            local_storage_dir=os.environ.get("GPCG_WORKER_STORAGE", "./data/gpcg-worker"),
             poll_interval=float(os.environ.get("GPCG_WORKER_POLL_INTERVAL", "5")),
             heartbeat_interval=float(os.environ.get("GPCG_WORKER_HEARTBEAT_INTERVAL", "10")),
             capabilities=os.environ.get("GPCG_WORKER_CAPABILITIES", "mapping,generation").split(","),
@@ -1927,7 +1928,7 @@ def run_remote_worker(
         vps_url=vps_url or os.environ.get("GPCG_VPS_URL", ""),
         worker_id=worker_id or os.environ.get("GPCG_WORKER_ID", ""),
         api_key=api_key or os.environ.get("GPCG_WORKER_API_KEY", ""),
-        local_storage_dir=storage_dir or os.environ.get("GPCG_WORKER_STORAGE", "/media/bruno/ToshibaHD/gpcg"),
+        local_storage_dir=storage_dir or os.environ.get("GPCG_WORKER_STORAGE", "./data/gpcg-worker"),
         capabilities=(capabilities or os.environ.get("GPCG_WORKER_CAPABILITIES", "mapping,generation")).split(","),
     )
     worker = RemoteWorker(config)

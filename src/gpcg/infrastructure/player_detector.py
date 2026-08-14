@@ -184,7 +184,10 @@ class PlayerDetector:
     """
 
     def __init__(self, config: DetectorConfig | None = None) -> None:
-        self.config = config or DetectorConfig()
+        if config is None:
+            from gpcg.config import get_settings
+            config = DetectorConfig(device=get_settings().gpcg_yolo_device)
+        self.config = config
         self._model = None  # lazy load
 
     @property

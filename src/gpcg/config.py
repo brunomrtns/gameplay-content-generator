@@ -172,6 +172,8 @@ class Settings(BaseSettings):
     gpcg_gameplay_asr_device: str = "cuda"
     # Compute type for ASR: float16 (GPU), int8 (CPU), float32 (compat).
     gpcg_gameplay_asr_compute_type: str = "float16"
+    # YOLO device: "cuda" (GPU, default) or "cpu" (VM worker without GPU).
+    gpcg_yolo_device: str = "cuda"
     # ASR provider: "local" (faster-whisper) or "litellm" (remote, OpenAI-compatible).
     # When litellm, transcription goes through gpcg_litellm_base_url/audio/transcriptions.
     # Uses the same base_url and api_key as the LLM provider.
