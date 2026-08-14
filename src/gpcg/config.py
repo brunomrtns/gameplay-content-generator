@@ -172,6 +172,15 @@ class Settings(BaseSettings):
     gpcg_gameplay_asr_device: str = "cuda"
     # Compute type for ASR: float16 (GPU), int8 (CPU), float32 (compat).
     gpcg_gameplay_asr_compute_type: str = "float16"
+    # ASR provider: "local" (faster-whisper) or "litellm" (remote, OpenAI-compatible).
+    # When litellm, transcription goes through gpcg_litellm_base_url/audio/transcriptions.
+    # Uses the same base_url and api_key as the LLM provider.
+    gpcg_asr_provider: str = "local"  # local | litellm
+    # Model name for remote ASR (LiteLLM). Default: "whisper" (LiteLLM proxy model).
+    gpcg_asr_model_litellm: str = "whisper"
+    # Chunk length in minutes for long audio files when using remote ASR.
+    # Remote ASR APIs may have file size limits; chunking avoids them.
+    gpcg_asr_chunk_minutes: int = 5
     # Coarse analysis: segment duration in seconds for the first pass.
     gpcg_gameplay_coarse_segment_sec: float = 30.0
     # Adaptive refinement: frame interval in seconds within high-activity zones.

@@ -34,7 +34,7 @@ from gpcg.domain.gameplay_events import (
     RawFrameObservation,
     RefinedEvent,
 )
-from gpcg.infrastructure.asr_transcriber import ASRTranscriber
+from gpcg.infrastructure.asr_transcriber import ASRTranscriber, get_asr_transcriber
 from gpcg.infrastructure.frame_sampler import FrameSampler, SampledFrame
 from gpcg.infrastructure.image_enhancer import EnhancementConfig, enhance_crop, save_image
 from gpcg.infrastructure.llm import LLMError
@@ -70,7 +70,7 @@ class GameplayAnalyzer:
     ) -> None:
         s = get_settings()
         self.vision = vision or VisionAnalyzer()
-        self.asr = asr or ASRTranscriber()
+        self.asr = asr or get_asr_transcriber()
         self.sampler = sampler or FrameSampler()
         self.player_detector = player_detector  # lazy-init when needed
         self.camera_type = camera_type
