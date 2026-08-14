@@ -95,6 +95,17 @@ class LLMClient:
     def _is_litellm(self) -> bool:
         return self.provider == "litellm"
 
+    def _litellm_model(self, model: str) -> str:
+        """Ensure model has a provider prefix for LiteLLM.
+
+        LiteLLM routes by prefix (ollama/, openai/, anthropic/, etc.).
+        GPCG configs use bare Ollama tags like 'qwen3:14b' or 'gemma3:12b'.
+        When in litellm mode, auto-prefix with 'ollama/' if no '/' present.
+        """
+        if "/" in model:
+            return model
+        return f"ollama/{model}"
+
     def _headers(self) -> dict:
         if self._is_litellm and self.api_key:
             return {"Authorization": f"Bearer {self.api_key}"}
@@ -218,7 +229,7 @@ class LLMClient:
     ) -> str:
         url = f"{self.host}/chat/completions"
         payload = {
-            "model": model,
+            "model": self._litellm_model(model),
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
@@ -328,7 +339,7 @@ class LLMClient:
                 "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
             })
         payload = {
-            "model": model,
+            "model": self._litellm_model(model),
             "messages": [
                 {"role": "user", "content": content},
             ],
@@ -453,7 +464,7 @@ class LLMClient:
 
     def _embed_litellm(self, text: str, model: str) -> list[float]:
         url = f"{self.host}/embeddings"
-        payload = {"model": model, "input": text}
+        payload = {"model": self._litellm_model(model), "input": text}
         data = self._post_with_retry(url, payload)
         embedding = data.get("data", [{}])[0].get("embedding", [])
         if not embedding:
