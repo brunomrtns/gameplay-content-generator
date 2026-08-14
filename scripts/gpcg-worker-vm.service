@@ -27,6 +27,9 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/gpcg-worker
 
+# Load secrets (API keys) from .env — not committed to git
+EnvironmentFile=/opt/gpcg-worker/.env
+
 # Use the VM venv (CPU-only, no GPU deps)
 ExecStart=/opt/gpcg-worker/.venv/bin/gpcg remote-worker
 
@@ -40,12 +43,14 @@ Environment=GPCG_WORKER_API_KEY=CHANGE_ME
 Environment=GPCG_WORKER_STORAGE=/opt/gpcg-worker/data
 Environment=GPCG_WORKER_CAPABILITIES=mapping,generation
 
-# ── Remote AI providers (LiteLLM) ───────────────────────────────────────
-# LLM/VLM via LiteLLM proxy (OpenAI-compatible)
+# ── Remote AI providers (LiteLLM do Flávio) ────────────────────────────
+# LLM/VLM via LiteLLM proxy (OpenAI-compatible, servidores da casa)
+# Modelos: ollama/hermes3:latest (texto), ollama/gemma3:12b (VLM)
+# ASR: whisper, TTS: kokoro (mas TTS é local na VM com kokoro-onnx)
+# API key NÃO vai aqui — vem do EnvironmentFile=/opt/gpcg-worker/.env
 Environment=GPCG_LLM_PROVIDER=litellm
-Environment=GPCG_LITELLM_BASE_URL=http://10.0.0.1:4000/v1
-Environment=GPCG_LITELLM_API_KEY=CHANGE_ME_LITELLM
-Environment=GPCG_LLM_MODEL_LITELLM=ollama/llama3.1:8b
+Environment=GPCG_LITELLM_BASE_URL=http://litellm.ganja.sv.house.dev.br:4000/v1
+Environment=GPCG_LLM_MODEL_LITELLM=ollama/hermes3:latest
 Environment=GPCG_VLM_MODEL_LITELLM=ollama/gemma3:12b
 
 # ASR via LiteLLM (remote, no faster-whisper needed)
