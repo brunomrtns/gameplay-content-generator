@@ -41,6 +41,7 @@ from sqlalchemy.orm import Session
 from gpcg.config import get_settings
 from gpcg.core.models import Fact
 from gpcg.domains.games.models import Game
+from gpcg.domains.games.prompts import CURIOSITY_SCORER_SYSTEM as SYSTEM_PROMPT
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 
@@ -96,59 +97,6 @@ class CuriosityScore:
             error=str(d.get("error", "")),
         )
 
-
-# ── Prompt ───────────────────────────────────────────────────────────────────
-
-SYSTEM_PROMPT = """You are a CURIOSITY SCORER for a Brazilian gaming YouTube Shorts channel.
-Your job is to evaluate facts/curiosities and score their editorial potential for
-~60 second vertical videos.
-
-For each fact, score these dimensions (0-100, higher = better):
-
-1. curiosity_gap (0-100): Does the fact create a KNOWLEDGE GAP that the viewer
-   wants to fill? A good curiosity gap makes the viewer think "wait, why?" or
-   "I need to know this". A fact with no gap is just information.
-
-2. surprise_potential (0-100): Does the fact BREAK a common expectation? Things
-   everyone already expects score low. Things that contradict assumptions score
-   high.
-
-3. retention_potential (0-100): Can this fact HOLD ATTENTION for ~60 seconds?
-   Some facts are interesting but exhausted in 10 seconds. Others have enough
-   depth, layers, or implications to sustain a full Short.
-
-4. familiarity (0-100): Does the fact connect to something the viewer ALREADY
-   KNOWS? Based on Loewenstein's inverted-U curve: curiosity requires a base
-   of knowledge. For game-specific facts: how well-known is the game? For
-   general curiosity facts: how familiar is the TOPIC (not the background game)?
-   Too little familiarity = no hook to hang curiosity on. Too much = no gap.
-   Score 50-70 for the sweet spot (familiar enough to anchor, unfamiliar enough
-   to intrigue).
-
-5. insight_quality (0-100): Is the fact an INSIGHT (a piece that illuminates
-   the whole — "oh, THAT's why...") or TRIVIA (an isolated detail with no
-   deeper connection)? Insights score high (80-100). Pure trivia scores low
-   (20-40). Loewenstein: insight > trivia for curiosity.
-
-6. visual_potential (0-100, TECHNICAL): Can the fact be ILLUSTRATED with
-   gameplay footage? A fact about a specific game mechanic scores high (the
-   gameplay shows it). An abstract fact with no visual hook scores low. This
-   is a technical signal for clip selection, NOT for editorial ranking.
-
-Return ONLY valid JSON (no markdown, no text before or after):
-{
-  "scores": [
-    {
-      "id": <int>,
-      "curiosity_gap": <0-100>,
-      "surprise_potential": <0-100>,
-      "retention_potential": <0-100>,
-      "familiarity": <0-100>,
-      "insight_quality": <0-100>,
-      "visual_potential": <0-100>
-    }
-  ]
-}"""
 
 
 # ── Scorer ───────────────────────────────────────────────────────────────────

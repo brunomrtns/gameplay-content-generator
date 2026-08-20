@@ -25,35 +25,12 @@ from gpcg.core.models import (
     KnowledgeItemStatus,
 )
 from gpcg.domains.games.models import ContentScope, Game
+from gpcg.domains.games.prompts import CONTENT_PLANNING_SYSTEM as SYSTEM_PROMPT
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)
 
-
-SYSTEM_PROMPT = """You are a YouTube Shorts content strategist for a gaming channel.
-Your job: pick ONE idea from the provided list and design a content plan for a ~60 second
-vertical Short that maximizes viewer retention and curiosity.
-
-Consider:
-- Hook potential (first 3 seconds must grab attention)
-- Curiosity / surprise factor
-- Tellability in ~60 seconds (~800-1000 chars of narration in pt-BR)
-- Visual potential (will use gameplay footage as background)
-- Originality (prefer less-used ideas)
-
-Return JSON:
-{
-  "fact_id": <int or null>,
-  "knowledge_item_id": <int or null>,
-  "topic": "<short topic title in pt-BR>",
-  "hook": "<first line of the script, the hook, in pt-BR — must be punchy>",
-  "tone": "<one of: curious, dramatic, mysterious, energetic, nostalgic, tense, humorous>",
-  "energy": <0.0-1.0>,
-  "music_mood": "<one of: inspirational, calm, energetic, dramatic, mysterious, neutral>",
-  "visual_strategy": "<one of: gameplay_compilation, slow_zoom, fast_cuts, single_clip>",
-  "reasoning": "<brief>"
-}"""
 
 
 class ContentPlanningService:

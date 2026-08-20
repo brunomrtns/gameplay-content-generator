@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from gpcg.core.models import Document, Fact, FactVerification
 from gpcg.domains.games.models import Game
+from gpcg.domains.games.prompts import FACT_EXTRACTOR_SYSTEM as SYSTEM_PROMPT
 from gpcg.infrastructure.document_parser import DocumentParseError, parse_document
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
@@ -52,38 +53,6 @@ def _fact_hash(claim: str) -> str:
     norm = " ".join(claim.lower().split())
     return hashlib.sha256(norm.encode()).hexdigest()[:16]
 
-
-SYSTEM_PROMPT = """You are a fact extractor for a gaming YouTube Shorts channel.
-Given a chunk of text about a video game, extract interesting facts, curiosities,
-easter eggs, trivia, development details, hidden mechanics, or little-known information
-that would make an engaging ~60 second short video.
-
-CRITICAL — LANGUAGE:
-The source text may be in English or any other language. However, the extracted
-facts (the "claim" field) MUST be written EXCLUSIVELY in Brazilian Portuguese
-(pt-BR). Translate and adapt the information — never copy English phrases.
-
-For each fact, provide:
-- category: one of [curiosity, easter_egg, trivia, development, hidden_mechanic, history, character, bug, removed_content, reference, other]
-- claim: a concise factual statement (1-3 sentences) in Portuguese (pt-BR)
-- source_ref: where in the text this comes from (section/page if available)
-
-CRITICAL — ANTI-PLAGIARISM:
-The source documents are THIRD-PARTY content. You MUST rewrite every fact in your
-own words. NEVER copy sentences, phrases, or distinctive word sequences verbatim
-from the source. Reorganize the information, use synonyms, change sentence
-structure, and reframe the narrative. The claim must convey the same FACT but
-with completely original phrasing. If you cannot rewrite a fact without closely
-mirroring the source, skip it.
-
-Only extract facts that are:
-1. Actually present in the text (do NOT invent)
-2. Interesting enough for a Short
-3. Tellable in ~60 seconds
-4. REWRITTEN in original phrasing (no verbatim copying from source)
-
-Return JSON: {"facts": [{"category": "...", "claim": "...", "source_ref": "..."}, ...]}
-If no good facts in the chunk, return {"facts": []}."""
 
 
 def extract_facts_from_document(

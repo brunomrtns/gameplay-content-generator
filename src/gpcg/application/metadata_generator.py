@@ -14,6 +14,7 @@ from typing import Optional
 
 from gpcg.core.models import ContentPlan, Script
 from gpcg.domains.games.models import Game
+from gpcg.domains.games.prompts import METADATA_SYSTEM
 from gpcg.infrastructure.llm import LLMClient, LLMError
 
 log = logging.getLogger(__name__)
@@ -57,13 +58,7 @@ class MetadataGenerator:
         game_name = game.canonical_name if game else ""
         script_text = (script.final or "")[:2000]  # Truncate for prompt size
 
-        system = (
-            "You are a YouTube SEO specialist for gaming content. "
-            "Generate catchy, click-worthy metadata optimized for YouTube Shorts. "
-            "IMPORTANT: Generate the title and description in Brazilian Portuguese (pt-BR), "
-            "matching the language of the script. Tags can be in English (common YouTube search terms). "
-            "Respond ONLY in JSON format."
-        )
+        system = METADATA_SYSTEM
 
         prompt = f"""Generate YouTube metadata for this video.
 
