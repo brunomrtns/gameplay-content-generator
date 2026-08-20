@@ -471,3 +471,121 @@ def test_mark_as_used_sets_global_status(db_session, two_users):
     refreshed = db_session.get(KnowledgeItem, ki.id)
     assert refreshed.status == KnowledgeItemStatus.used.value
     # This is the BUG for public KIs — record_usage should be used instead
+
+
+# ── Regression: stale get_settings() cache after GPCG_DATA_DIR change ──────
+
+
+def test_local_db_sync_clears_settings_cache_for_data_dir(tmp_path, monkeypatch):
+    """Regression: run_generation_locally must clear get_settings() cache after
+    setting GPCG_DATA_DIR so GenerationService observes the worker's storage
+    directory, not a stale cached value from RemoteWorker startup.
+
+    Bug scenario:
+        1. RemoteWorker.__init__() calls get_settings() → cache populated with
+           default gpcg_data_dir="./data"
+        2. run_generation_locally() sets os.environ["GPCG_DATA_DIR"] to the
+           worker's HD path
+        3. GenerationService.__init__() calls get_settings() → without
+           cache_clear(), returns the STALE cached Settings with "./data"
+        4. Rendered videos written to ./data instead of the worker's HD
+
+    This test exercises the actual run_generation_locally code path by
+    patching GenerationService to capture the Settings it receives, rather
+    than running the full pipeline. If the cache_clear() call is removed
+    from local_db_sync.py, the captured Settings will have the stale
+    data_dir and the test will fail.
+    """
+    import os
+    import unittest.mock as mock
+
+    from gpcg.config import get_settings
+
+    # ── Step 1: Simulate RemoteWorker.__init__() calling get_settings() at
+    # startup, populating the lru_cache with the default gpcg_data_dir.
+    get_settings.cache_clear()
+    monkeypatch.delenv("GPCG_DATA_DIR", raising=False)
+    stale_settings = get_settings()
+    stale_data_dir = str(stale_settings.data_dir)
+
+    # ── Step 2: Build a minimal job_data that populate_local_db can handle.
+    job_data = {
+        "job": {
+            "id": 777,
+            "job_uuid": "regression-test-uuid",
+            "user_id": None,
+            "type": "generate_short",
+            "status": "queued",
+            "stage": "ingest",
+            "progress": 0.0,
+            "priority": "normal",
+            "game_id": None,
+            "content_plan_id": None,
+            "gameplay_source_id": None,
+            "artifacts": {},
+            "attempts": 0,
+            "max_attempts": 3,
+        },
+        "gameplay_sources": [],
+        "channel_profile": None,
+    }
+
+    storage_root = tmp_path / "worker_storage"
+    storage_root.mkdir(parents=True)
+
+    # ── Step 3: Patch GenerationService so it captures the Settings it
+    # observes at __init__ time, without running the pipeline.
+    captured_settings_data_dir = []
+
+    class _CapturingGenerationService:
+        """Stand-in for GenerationService that captures get_settings() result."""
+        def __init__(self, *args, **kwargs):
+            s = get_settings()
+            captured_settings_data_dir.append(str(s.data_dir))
+            # Provide the attributes run_generation_locally might access
+            # before calling run_job (which will fail — we don't care).
+            self._session_scope = kwargs.get("session_scope")
+
+        def run_job(self, job_id):
+            # Don't run the pipeline — we only care about settings capture.
+            return True
+
+    with mock.patch(
+        "gpcg.application.generation_service.GenerationService",
+        _CapturingGenerationService,
+    ):
+        from gpcg.worker.local_db_sync import run_generation_locally
+
+        # ── Step 4: Call run_generation_locally. This will:
+        #   a. populate_local_db (creates temp SQLite DB)
+        #   b. set os.environ["GPCG_DATA_DIR"] = storage_root / "data"
+        #   c. get_settings.cache_clear()  ← THE FIX
+        #   d. create GenerationService (patched — captures settings)
+        #   e. call gen.run_job() (no-op in the patched class)
+        result = run_generation_locally(job_data, storage_root)
+
+    # ── Step 5: Cleanup env + cache for other tests.
+    os.environ.pop("GPCG_DATA_DIR", None)
+    get_settings.cache_clear()
+
+    # ── Step 6: Assert the observable behavior.
+    # The GenerationService must have observed the worker's data dir,
+    # NOT the stale cached default. If cache_clear() is removed from
+    # local_db_sync.py, captured_settings_data_dir[0] will equal
+    # stale_data_dir and this assertion will fail.
+    assert len(captured_settings_data_dir) == 1, (
+        f"Expected GenerationService to be instantiated once, "
+        f"got {len(captured_settings_data_dir)} times"
+    )
+    observed = captured_settings_data_dir[0]
+    expected = str(storage_root / "data")
+    assert observed == expected, (
+        f"GenerationService observed data_dir={observed!r} but expected "
+        f"{expected!r}. The get_settings() cache was not cleared after "
+        f"setting GPCG_DATA_DIR — rendered videos would be written to "
+        f"the wrong directory."
+    )
+    assert observed != stale_data_dir, (
+        f"GenerationService observed stale data_dir {observed!r} "
+        f"(matches pre-cache-clear value {stale_data_dir!r})"
+    )
