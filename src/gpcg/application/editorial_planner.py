@@ -40,7 +40,8 @@ from gpcg.domain.creative_plan import (
     ToneWeights,
     VideoCreativePlan,
 )
-from gpcg.domain.models import ContentPlan, Fact, Game, GameplayEvent, GameplaySource
+from gpcg.core.models import ContentPlan, Fact
+from gpcg.domains.games.models import Game, GameplayEvent, GameplaySource
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 from sqlalchemy.orm import Session
@@ -373,7 +374,7 @@ class EditorialPlanner:
         # Add fact claim if available (CRITICAL for gameplay_query generation)
         if plan.fact_id:
             from sqlalchemy import select
-            from gpcg.domain.models import Fact
+            from gpcg.core.models import Fact
             # The fact claim is the single source of truth for what the video
             # is about. Without it, the planner can't generate a meaningful
             # gameplay_query for semantic clip retrieval.
@@ -420,7 +421,7 @@ class EditorialPlanner:
         if content_plan is None or not content_plan.fact_id:
             return ""
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import Fact
+        from gpcg.core.models import Fact
         text = ""
         with session_scope() as sess:
             fact = sess.get(Fact, content_plan.fact_id)

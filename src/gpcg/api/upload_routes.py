@@ -39,10 +39,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
-from gpcg.domain.models import (
-    GameplayProcessingStatus,
-    GameplaySource,
-    IngestionStatus,
+from gpcg.core.models import (
     Job,
     JobPriority,
     JobStage,
@@ -51,6 +48,7 @@ from gpcg.domain.models import (
     User,
     WorkerCapability,
 )
+from gpcg.domains.games.models import GameplayProcessingStatus, GameplaySource, IngestionStatus
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db, session_scope
 

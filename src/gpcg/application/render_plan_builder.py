@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from gpcg.application.gameplay_selector import SelectedClip
 from gpcg.config import get_settings
-from gpcg.domain.models import ContentPlan, Script
+from gpcg.core.models import ContentPlan, Script
 from gpcg.domain.video_profiles import (
     SubtitleConfig,
     get_profile_dict,

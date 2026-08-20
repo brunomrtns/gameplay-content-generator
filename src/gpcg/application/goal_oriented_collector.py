@@ -34,12 +34,8 @@ from gpcg.domain.editorial_types import (
     FeedSpec,
     SearchQuery,
 )
-from gpcg.domain.models import (
-    Game,
-    KnowledgeItem,
-    KnowledgeItemSource,
-    KnowledgeItemStatus,
-)
+from gpcg.core.models import KnowledgeItem, KnowledgeItemSource, KnowledgeItemStatus
+from gpcg.domains.games.models import Game
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)

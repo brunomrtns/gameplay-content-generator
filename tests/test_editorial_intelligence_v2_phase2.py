@@ -39,7 +39,7 @@ def fresh_db(tmp_path, monkeypatch):
 
 def _make_ki(**kwargs):
     """Create a KnowledgeItem with sensible defaults."""
-    from gpcg.domain.models import KnowledgeItem, KnowledgeItemSource, KnowledgeItemStatus
+    from gpcg.core.models import KnowledgeItem, KnowledgeItemSource, KnowledgeItemStatus
     defaults = dict(
         title="Test KI",
         content="Test content",
@@ -142,7 +142,7 @@ class TestLifecycleManager:
     def test_update_all_fresh_updates_scores(self, fresh_db):
         from gpcg.application.lifecycle_manager import LifecycleManager
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -169,7 +169,7 @@ class TestLifecycleManager:
     def test_update_all_fresh_skips_used_items(self, fresh_db):
         from gpcg.application.lifecycle_manager import LifecycleManager
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
+        from gpcg.core.models import KnowledgeItem, KnowledgeItemStatus
 
         with session_scope() as session:
             ki = _make_ki(
@@ -192,9 +192,8 @@ class TestCompositeScorer:
     def test_score_with_gameplay_available(self, fresh_db):
         from gpcg.application.composite_scorer import CompositeScorer
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import (
-            User, Game, GameplaySource, GameplayAsset, KnowledgeItem,
-        )
+        from gpcg.core.models import User, KnowledgeItem
+        from gpcg.domains.games.models import Game, GameplaySource, GameplayAsset
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -239,7 +238,8 @@ class TestCompositeScorer:
     def test_score_without_gameplay(self, fresh_db):
         from gpcg.application.composite_scorer import CompositeScorer
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Game, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
+        from gpcg.domains.games.models import Game
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -276,7 +276,8 @@ class TestCompositeScorer:
     def test_score_with_cooldown_penalty(self, fresh_db):
         from gpcg.application.composite_scorer import CompositeScorer
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Game, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
+        from gpcg.domains.games.models import Game
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -312,7 +313,8 @@ class TestCompositeScorer:
     def test_score_without_cooldown(self, fresh_db):
         from gpcg.application.composite_scorer import CompositeScorer
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Game, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
+        from gpcg.domains.games.models import Game
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -346,7 +348,8 @@ class TestCompositeScorer:
         """A KI with zero gameplay should have near-zero final score."""
         from gpcg.application.composite_scorer import CompositeScorer
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Game, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
+        from gpcg.domains.games.models import Game
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -384,7 +387,7 @@ class TestCompositeScorer:
     def test_source_authority_tiers(self, fresh_db):
         from gpcg.application.composite_scorer import CompositeScorer
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -426,7 +429,7 @@ class TestReconcilerV2:
         """When composite scoring is off, reconciler uses editorial_score."""
         from gpcg.api.automation_routes import _reconcile_idea_queue
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -459,9 +462,8 @@ class TestReconcilerV2:
         """When composite scoring is on, KIs with gameplay rank higher."""
         from gpcg.api.automation_routes import _reconcile_idea_queue
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import (
-            User, Game, GameplaySource, GameplayAsset, KnowledgeItem,
-        )
+        from gpcg.core.models import User, KnowledgeItem
+        from gpcg.domains.games.models import Game, GameplaySource, GameplayAsset
 
         # Enable composite scoring
         monkeypatch.setenv("GPCG_COMPOSITE_SCORING_ENABLED", "true")
@@ -525,7 +527,7 @@ class TestReconcilerV2:
         """Archived KIs should not appear in the queue."""
         from gpcg.api.automation_routes import _reconcile_idea_queue
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")

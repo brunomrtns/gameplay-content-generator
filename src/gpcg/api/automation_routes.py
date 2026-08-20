@@ -21,12 +21,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import (
+from gpcg.core.models import (
     Automation,
     ContentPlan,
-    Game,
-    GameplaySource,
-    IngestionStatus,
     Job,
     JobPriority,
     JobStatus,
@@ -37,6 +34,7 @@ from gpcg.domain.models import (
     Video,
     VideoStatus,
 )
+from gpcg.domains.games.models import Game, GameplaySource, IngestionStatus
 from gpcg.config import get_settings
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db, session_scope
@@ -136,7 +134,8 @@ def get_current_job(
     Returns null if no job is running. Used by the ideas page to show
     "currently processing" above the queue.
     """
-    from gpcg.domain.models import Job, JobStatus, KnowledgeItem, Game
+    from gpcg.core.models import Job, JobStatus, KnowledgeItem
+    from gpcg.domains.games.models import Game
     from sqlalchemy import select
 
     job = db.execute(
@@ -403,7 +402,12 @@ def _reconcile_idea_queue(
     Returns the new queue entries (list[dict] with ki_id, gameplay_preference,
     reuse_override). Returns empty list if no fresh KIs are available.
     """
-    from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus, Job, JobStatus
+    from gpcg.core.models import (
+    KnowledgeItem,
+    KnowledgeItemStatus,
+    Job,
+    JobStatus,
+)
     from gpcg.domain.visibility import visible_to_user
 
     max_size = limit if limit is not None else (config.get("max_queue_size") or 10)
@@ -471,7 +475,7 @@ def _reconcile_with_composite_score(
     from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
     from gpcg.application.editorial_brief_builder import EditorialBriefBuilder
     from gpcg.application.embedding_service import get_knowledge_item_embedding
-    from gpcg.domain.models import ChannelProfile, KnowledgeItemEmbedding
+    from gpcg.core.models import ChannelProfile, KnowledgeItemEmbedding
 
     # Fetch a larger pool to score (we need more than max_size to rank properly)
     pool_size = max(max_size * 3, 20)
@@ -497,7 +501,7 @@ def _reconcile_with_composite_score(
     # Get channel embedding (if available)
     channel_embedding = None
     try:
-        from gpcg.domain.models import ChannelProfileEmbedding
+        from gpcg.core.models import ChannelProfileEmbedding
         emb_row = db.query(ChannelProfileEmbedding).filter_by(user_id=user_id).first()
         if emb_row:
             from gpcg.application.embedding_service import deserialize_embedding
@@ -565,7 +569,7 @@ def reconcile_user_queue(db: Session, user_id: int) -> int:
 
     Returns the number of new entries added (0 if nothing changed).
     """
-    from gpcg.domain.models import Automation
+    from gpcg.core.models import Automation
     from sqlalchemy.orm.attributes import flag_modified
 
     auto = db.query(Automation).filter(Automation.user_id == user_id).first()
@@ -608,7 +612,7 @@ def reconcile_all_users(db: Session) -> int:
     Called after content collection syncs new KIs to the VPS.
     Returns the total number of entries added across all users.
     """
-    from gpcg.domain.models import Automation
+    from gpcg.core.models import Automation
     autos = db.query(Automation).all()
     total = 0
     for auto in autos:
@@ -701,7 +705,7 @@ def enqueue_ideas_worker(
     Only enqueues KIs that are fresh and visible to the user.
     """
     from sqlalchemy.orm.attributes import flag_modified
-    from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
+    from gpcg.core.models import Automation, KnowledgeItem, KnowledgeItemStatus
     auto = db.query(Automation).filter(Automation.user_id == req.user_id).first()
     if not auto:
         raise HTTPException(404, "Automation not found")
@@ -733,7 +737,14 @@ def get_editorial_data(
     EditorialStrategyService locally (with LLM) and then creates the job
     via POST /api/automation/create-job.
     """
-    from gpcg.domain.models import Fact, KnowledgeChunk, KnowledgeItem, KnowledgeItemStatus, ChannelProfile, GameplayAsset
+    from gpcg.core.models import (
+    Fact,
+    KnowledgeChunk,
+    KnowledgeItem,
+    KnowledgeItemStatus,
+    ChannelProfile,
+)
+    from gpcg.domains.games.models import GameplayAsset
     from sqlalchemy import select, func, desc
     from datetime import datetime, timezone, timedelta
 
@@ -972,7 +983,7 @@ def get_editorial_brief(
     """
     from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
     from gpcg.application.editorial_brief_builder import EditorialBriefBuilder
-    from gpcg.domain.models import ChannelProfile
+    from gpcg.core.models import ChannelProfile
 
     try:
         profile = db.query(ChannelProfile).filter(
@@ -1202,7 +1213,7 @@ def create_job_from_automation(user_id: int) -> int | None:
         gameplay_preference = queue_entry.get("gameplay_preference") if isinstance(queue_entry, dict) else None
         reuse_override = queue_entry.get("reuse_override") if isinstance(queue_entry, dict) else None
         from gpcg.application.generation_service import GenerationService
-        from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
+        from gpcg.core.models import KnowledgeItem, KnowledgeItemStatus
         from gpcg.infrastructure.llm import get_llm
 
         with session_scope() as session:
@@ -1255,7 +1266,7 @@ def create_job_from_automation(user_id: int) -> int | None:
             # not just sources with status=ready. A source with 0 clips will
             # cause the render pipeline to fail with "no gameplay assets available".
             if not bg_game:
-                from gpcg.domain.models import GameplayAsset
+                from gpcg.domains.games.models import GameplayAsset
                 bg_game = session.query(Game).join(
                     GameplaySource, GameplaySource.game_id == Game.id
                 ).join(
@@ -1326,7 +1337,7 @@ def create_job_from_automation(user_id: int) -> int | None:
                     # BEFORE creating the job. Without this check, the system would
                     # spend GPU time on script/TTS only to fail at render with
                     # "no gameplay assets available".
-                    from gpcg.domain.models import GameplayAsset
+                    from gpcg.domains.games.models import GameplayAsset
                     user_clips = session.query(GameplayAsset).join(
                         GameplaySource, GameplayAsset.source_id == GameplaySource.id
                     ).filter(
@@ -1738,7 +1749,7 @@ def cleanup_idea_queue(
     - KIs with status=rejected
     - KIs with game_id where user has no clips (would fail at render)
     """
-    from gpcg.domain.models import GameplayAsset
+    from gpcg.domains.games.models import GameplayAsset
     from sqlalchemy.orm.attributes import flag_modified
 
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()

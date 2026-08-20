@@ -15,7 +15,7 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import Game, GameAlias
+from gpcg.domains.games.models import Game, GameAlias
 from gpcg.domain.slug_utils import normalize_name, slugify
 from gpcg.logging import get_logger
 
@@ -221,7 +221,12 @@ def _maybe_trigger_enrichment(session: Session, game: Game) -> None:
 
         import uuid
         from sqlalchemy import select as sa_select
-        from gpcg.domain.models import Job, JobType, JobStatus, JobPriority
+        from gpcg.core.models import (
+    Job,
+    JobType,
+    JobStatus,
+    JobPriority,
+)
 
         # Dedup: check for existing queued/running enrichment job
         existing = session.execute(

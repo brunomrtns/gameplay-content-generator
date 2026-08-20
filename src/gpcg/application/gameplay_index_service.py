@@ -24,7 +24,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from gpcg.config import get_settings
 from gpcg.domain.gameplay_events import EventTimeline, GameplayEventRecord
-from gpcg.domain.models import AnalysisStatus, GameplayEvent, GameplaySource
+from gpcg.domains.games.models import AnalysisStatus, GameplayEvent, GameplaySource
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)

@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import ChannelProfile
+from gpcg.core.models import ChannelProfile
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)

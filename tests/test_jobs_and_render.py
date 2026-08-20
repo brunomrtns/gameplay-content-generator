@@ -6,15 +6,15 @@ import pytest
 
 from gpcg.application.render_plan_builder import RenderPlanBuilder
 from gpcg.domain.game_repository import get_or_create
-from gpcg.domain.models import (
+from gpcg.core.models import (
     ContentPlan,
-    GameplaySource,
     Job,
     JobStage,
     JobStatus,
     Script,
     ScriptStatus,
 )
+from gpcg.domains.games.models import GameplaySource
 from gpcg.infrastructure.database import init_db, session_scope
 
 

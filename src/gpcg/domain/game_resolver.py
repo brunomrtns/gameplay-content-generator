@@ -21,7 +21,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from gpcg.domain.filename_parser import ParsedFilename, parse_filename
-from gpcg.domain.models import Game, GameAlias, GameplaySource, GameResolutionMethod
+from gpcg.domains.games.models import (
+    Game,
+    GameAlias,
+    GameplaySource,
+    GameResolutionMethod,
+)
 from gpcg.domain.slug_utils import normalize_name, slugify
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.infrastructure.media import extract_frames

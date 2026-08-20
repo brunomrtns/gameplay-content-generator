@@ -22,7 +22,7 @@ from gpcg.domain.game_registry import (
 )
 from gpcg.domain.game_resolver import resolve_l1
 from gpcg.domain.filename_parser import parse_filename
-from gpcg.domain.models import Game, GameAlias, GameResolutionMethod
+from gpcg.domains.games.models import Game, GameAlias, GameResolutionMethod
 from gpcg.domain.slug_utils import normalize_name, slugify
 from gpcg.infrastructure.database import init_db, session_scope
 
@@ -235,7 +235,7 @@ class TestGameRegistry:
         with session_scope() as s:
             # This would be a different game (e.g., Doom 2016 vs Doom 1993)
             # Since get_or_create reuses by name, we need to create directly
-            from gpcg.domain.models import Game as GameModel
+            from gpcg.domains.games.models import Game as GameModel
             g2 = GameModel(canonical_name="Doom", slug=None)
             s.add(g2)
             s.flush()
@@ -341,7 +341,7 @@ class TestDataMigration:
         # The fresh_db fixture already runs init_db on an empty DB.
         # Create a game without slug directly, then re-run init_db.
         with session_scope() as s:
-            from gpcg.domain.models import Game as GameModel
+            from gpcg.domains.games.models import Game as GameModel
             game = GameModel(canonical_name="Migration Test Game", slug=None)
             s.add(game)
             s.flush()
@@ -361,7 +361,7 @@ class TestDataMigration:
     def test_json_aliases_migrated_to_table(self):
         """JSON aliases column should be migrated to game_aliases table on init."""
         with session_scope() as s:
-            from gpcg.domain.models import Game as GameModel
+            from gpcg.domains.games.models import Game as GameModel
             game = GameModel(
                 canonical_name="Migration Alias Test",
                 slug=None,

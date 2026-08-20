@@ -154,7 +154,7 @@ class TestEditorialProfileService:
     def test_get_or_create_creates_profile(self, fresh_db):
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -169,7 +169,7 @@ class TestEditorialProfileService:
     def test_apply_preset_curiosidades(self, fresh_db):
         from gpcg.application.editorial_profile_service import apply_preset, serialize_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -186,7 +186,7 @@ class TestEditorialProfileService:
     def test_apply_preset_lore(self, fresh_db):
         from gpcg.application.editorial_profile_service import apply_preset
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -201,7 +201,7 @@ class TestEditorialProfileService:
     def test_apply_preset_unknown_raises(self, fresh_db):
         from gpcg.application.editorial_profile_service import apply_preset
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -216,7 +216,7 @@ class TestEditorialProfileService:
             update_structured_fields,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -240,7 +240,7 @@ class TestEditorialProfileService:
             update_structured_fields,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -258,7 +258,7 @@ class TestEditorialProfileService:
             update_learned_preferences,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -277,7 +277,7 @@ class TestEditorialProfileService:
             serialize_profile,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -287,7 +287,7 @@ class TestEditorialProfileService:
 
             apply_preset(session, uid, "curiosidades")
             profile = session.query(
-                __import__("gpcg.domain.models", fromlist=["ChannelProfile"]).ChannelProfile
+                __import__("gpcg.core.models", fromlist=["ChannelProfile"]).ChannelProfile
             ).filter_by(user_id=uid).first()
             data = serialize_profile(profile)
             assert "content_type_affinity" in data
@@ -305,7 +305,7 @@ class TestEditorialIntentBuilder:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -324,9 +324,13 @@ class TestEditorialIntentBuilder:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import (
-            User, Game, GameplaySource, GameplayAsset, AnalysisStatus,
-        )
+        from gpcg.core.models import User
+        from gpcg.domains.games.models import (
+    Game,
+    GameplaySource,
+    GameplayAsset,
+    AnalysisStatus,
+)
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -365,7 +369,7 @@ class TestEditorialIntentBuilder:
             update_structured_fields,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Video
+        from gpcg.core.models import User, Video
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -394,7 +398,7 @@ class TestEditorialIntentBuilder:
             update_structured_fields,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Video
+        from gpcg.core.models import User, Video
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -421,7 +425,7 @@ class TestEditorialIntentBuilder:
             get_or_create_profile,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -448,7 +452,7 @@ class TestEditorialBriefBuilder:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import apply_preset
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -457,7 +461,7 @@ class TestEditorialBriefBuilder:
             uid = user.id
 
             apply_preset(session, uid, "curiosidades")
-            from gpcg.domain.models import ChannelProfile
+            from gpcg.core.models import ChannelProfile
             profile = session.query(ChannelProfile).filter_by(user_id=uid).first()
 
             intent_builder = EditorialIntentBuilder()
@@ -477,9 +481,8 @@ class TestEditorialBriefBuilder:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import apply_preset
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import (
-            User, Game, GameplaySource, GameplayAsset,
-        )
+        from gpcg.core.models import User
+        from gpcg.domains.games.models import Game, GameplaySource, GameplayAsset
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -502,7 +505,7 @@ class TestEditorialBriefBuilder:
             session.add(asset)
 
             apply_preset(session, uid, "curiosidades")
-            from gpcg.domain.models import ChannelProfile
+            from gpcg.core.models import ChannelProfile
             profile = session.query(ChannelProfile).filter_by(user_id=uid).first()
 
             intent = EditorialIntentBuilder().build(session, uid, profile)
@@ -518,9 +521,8 @@ class TestEditorialBriefBuilder:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import apply_preset
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import (
-            User, Game, GameplaySource, GameplayAsset,
-        )
+        from gpcg.core.models import User
+        from gpcg.domains.games.models import Game, GameplaySource, GameplayAsset
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -543,7 +545,7 @@ class TestEditorialBriefBuilder:
                 session.add(a)
 
             apply_preset(session, uid, "curiosidades")
-            from gpcg.domain.models import ChannelProfile
+            from gpcg.core.models import ChannelProfile
             profile = session.query(ChannelProfile).filter_by(user_id=uid).first()
 
             intent = EditorialIntentBuilder().build(session, uid, profile)
@@ -556,7 +558,7 @@ class TestEditorialBriefBuilder:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import apply_preset
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -565,7 +567,7 @@ class TestEditorialBriefBuilder:
             uid = user.id
 
             apply_preset(session, uid, "lore")
-            from gpcg.domain.models import ChannelProfile
+            from gpcg.core.models import ChannelProfile
             profile = session.query(ChannelProfile).filter_by(user_id=uid).first()
 
             intent = EditorialIntentBuilder().build(session, uid, profile)
@@ -586,7 +588,7 @@ class TestGoalOrientedCollector:
         """Collector should stop early when all targets are met."""
         from gpcg.application.goal_oriented_collector import GoalOrientedCollector
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -623,7 +625,7 @@ class TestGoalOrientedCollector:
     def test_collect_creates_kis_with_correct_item_type(self, fresh_db):
         from gpcg.application.goal_oriented_collector import GoalOrientedCollector
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -660,7 +662,7 @@ class TestGoalOrientedCollector:
     def test_collect_deduplicates_by_content_hash(self, fresh_db):
         from gpcg.application.goal_oriented_collector import GoalOrientedCollector
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -695,7 +697,7 @@ class TestGoalOrientedCollector:
     def test_collect_from_global_feed_creates_shared_ki(self, fresh_db):
         from gpcg.application.goal_oriented_collector import GoalOrientedCollector
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")

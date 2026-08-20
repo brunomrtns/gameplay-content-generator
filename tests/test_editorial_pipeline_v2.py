@@ -13,15 +13,14 @@ import pytest
 from gpcg.application.content_collectors import _compute_hash
 from gpcg.application.content_planning_service import ContentPlanningService
 from gpcg.domain.game_registry import get_or_create
-from gpcg.domain.models import (
-    ContentScope,
+from gpcg.core.models import (
     Fact,
-    Game,
     KnowledgeItem,
     KnowledgeItemSource,
     KnowledgeItemStatus,
     KnowledgeItemType,
 )
+from gpcg.domains.games.models import ContentScope, Game
 from gpcg.infrastructure.database import init_db, session_scope
 
 
@@ -269,7 +268,7 @@ class TestEditorialPlannerEnrichedContext:
             s.flush()
 
             from gpcg.application.editorial_planner import EditorialPlanner
-            from gpcg.domain.models import ContentPlan
+            from gpcg.core.models import ContentPlan
             plan = ContentPlan(
                 game_id=game.id,
                 format="9:16",
@@ -301,7 +300,7 @@ class TestEditorialPlannerEnrichedContext:
             s.flush()
 
             from gpcg.application.editorial_planner import EditorialPlanner
-            from gpcg.domain.models import ContentPlan
+            from gpcg.core.models import ContentPlan
             plan = ContentPlan(
                 game_id=game.id,
                 format="9:16",

@@ -521,7 +521,7 @@ class TestGameplayIndexService:
     @pytest.fixture
     def source_id(self, fresh_db):
         """Create a test GameplaySource."""
-        from gpcg.domain.models import GameplaySource, Game
+        from gpcg.domains.games.models import GameplaySource, Game
         from gpcg.infrastructure.database import session_scope
         with session_scope() as session:
             game = Game(canonical_name="TestGame")
@@ -544,7 +544,7 @@ class TestGameplayIndexService:
 
     def test_set_and_get_analysis_status(self, fresh_db, source_id):
         from gpcg.application.gameplay_index_service import GameplayIndexService
-        from gpcg.domain.models import AnalysisStatus
+        from gpcg.domains.games.models import AnalysisStatus
         from gpcg.infrastructure.database import session_scope
 
         svc = GameplayIndexService()
@@ -655,7 +655,7 @@ class TestGameplayIndexService:
 
     def test_get_compatible_sources(self, fresh_db, source_id):
         from gpcg.application.gameplay_index_service import GameplayIndexService
-        from gpcg.domain.models import GameplaySource
+        from gpcg.domains.games.models import GameplaySource
         from gpcg.infrastructure.database import session_scope
 
         svc = GameplayIndexService()

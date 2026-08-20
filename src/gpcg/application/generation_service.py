@@ -50,11 +50,10 @@ from gpcg.application.story_finder import StoryFinder
 from gpcg.config import get_settings
 from gpcg.domain.creative_plan import StoryConcept, VideoCreativePlan
 from gpcg.domain.game_repository import find_by_name
-from gpcg.domain.models import (
+from gpcg.core.models import (
     Automation,
     ContentPlan,
     Fact,
-    Game,
     Job,
     JobStage,
     JobStatus,
@@ -63,6 +62,7 @@ from gpcg.domain.models import (
     Video,
     VideoStatus,
 )
+from gpcg.domains.games.models import Game
 from gpcg.infrastructure.database import session_scope
 from gpcg.infrastructure.google_integration_adapter import (
     GoogleIntegrationAdapter,
@@ -373,7 +373,7 @@ class GenerationService:
             cp_user_id = job.artifacts.get("user_id") or job.user_id
             if cp_user_id:
                 try:
-                    from gpcg.domain.models import ChannelProfile
+                    from gpcg.core.models import ChannelProfile
                     channel_profile = session.query(ChannelProfile).filter(
                         ChannelProfile.user_id == cp_user_id
                     ).first()
@@ -508,7 +508,7 @@ class GenerationService:
             user_id = job.artifacts.get("user_id") or job.user_id
             if not channel_context and user_id:
                 try:
-                    from gpcg.domain.models import ChannelProfile
+                    from gpcg.core.models import ChannelProfile
                     profile = session.query(ChannelProfile).filter(
                         ChannelProfile.user_id == user_id
                     ).first()
@@ -770,7 +770,7 @@ class GenerationService:
             plan = session.get(ContentPlan, job.content_plan_id)
             # Reconstruct SelectedClip-like objects (with scene_index)
             from gpcg.application.gameplay_selector import SelectedClip
-            from gpcg.domain.models import GameplayAsset
+            from gpcg.domains.games.models import GameplayAsset
             from gpcg.domain.video_profiles import SubtitleConfig
 
             clips = []
@@ -1237,7 +1237,7 @@ class GenerationService:
             # Get the content plan and fact for factual accuracy checking
             plan = session.get(ContentPlan, job.content_plan_id)
             if plan and plan.fact_id:
-                from gpcg.domain.models import Fact
+                from gpcg.core.models import Fact
                 fact = session.get(Fact, plan.fact_id)
                 if fact:
                     source_fact = fact.claim
@@ -1246,7 +1246,7 @@ class GenerationService:
                 plan_meta = plan.metadata_json or {}
                 ki_id = plan_meta.get("knowledge_item_id")
                 if ki_id:
-                    from gpcg.domain.models import KnowledgeItem
+                    from gpcg.core.models import KnowledgeItem
                     ki = session.get(KnowledgeItem, ki_id)
                     if ki:
                         source_fact = ki.content[:500]  # truncate for prompt
@@ -1346,7 +1346,7 @@ class GenerationService:
         Returns None if the engine is disabled.
         """
         from gpcg.application.creative_engine import get_style
-        from gpcg.domain.models import Fact
+        from gpcg.core.models import Fact
 
         with session_scope() as session:
             job = session.get(Job, job_id)
@@ -1478,7 +1478,7 @@ class GenerationService:
             queued_ki_id = (job.artifacts or {}).get("queued_knowledge_item_id")
             if queued_ki_id:
                 try:
-                    from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
+                    from gpcg.core.models import Automation, KnowledgeItem, KnowledgeItemStatus
                     from sqlalchemy.orm.attributes import flag_modified
                     ki = session.get(KnowledgeItem, queued_ki_id)
                     if ki and ki.status == KnowledgeItemStatus.fresh.value:

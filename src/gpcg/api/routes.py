@@ -35,16 +35,10 @@ from gpcg.application.generation_service import GenerationService
 from gpcg.application.ingestion_service import IngestionService
 from gpcg.config import get_settings
 from gpcg.domain.game_repository import get_or_create, list_all
-from gpcg.domain.models import (
+from gpcg.core.models import (
     ContentPlan,
     Document,
     Fact,
-    Game,
-    GameplayAsset,
-    GameplayClipUsage,
-    GameplayEvent,
-    GameplaySource,
-    IngestionStatus,
     Job,
     JobStatus,
     JobType,
@@ -54,6 +48,14 @@ from gpcg.domain.models import (
     User,
     Video,
     VideoStatus,
+)
+from gpcg.domains.games.models import (
+    Game,
+    GameplayAsset,
+    GameplayClipUsage,
+    GameplayEvent,
+    GameplaySource,
+    IngestionStatus,
 )
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db, session_scope
@@ -356,7 +358,7 @@ def upload_gameplay(
     """
     import hashlib
     from gpcg.config import get_settings
-    from gpcg.domain.models import GameplayProcessingStatus
+    from gpcg.domains.games.models import GameplayProcessingStatus
 
     settings = get_settings()
     # Use temp_uploads_dir — files here are deleted after worker confirms download
@@ -485,13 +487,8 @@ def delete_gameplay_source(
     - Verifies ownership (user_id == requester)
     - Refuses if there's an active job (queued/running) using this source
     """
-    from gpcg.domain.models import (
-        GameplayClipUsage,
-        GameplayEvent,
-        GameplayEventEmbedding,
-        JobPriority,
-        WorkerCapability,
-    )
+    from gpcg.core.models import JobPriority, WorkerCapability
+    from gpcg.domains.games.models import GameplayClipUsage, GameplayEvent, GameplayEventEmbedding
     from gpcg.api.worker_routes import _generate_upload_token
 
     source = db.get(GameplaySource, source_id)
@@ -902,7 +899,7 @@ def create_generation_job(
     settings = get_settings()
 
     # Load automation config as defaults (subtitle/transition/voice)
-    from gpcg.domain.models import Automation
+    from gpcg.core.models import Automation
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     auto_cfg = auto.config or {} if auto else {}
 
@@ -1015,7 +1012,7 @@ def create_curiosity_job(
     settings = get_settings()
 
     # Load automation config as defaults
-    from gpcg.domain.models import Automation
+    from gpcg.core.models import Automation
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     auto_cfg = auto.config or {} if auto else {}
 
@@ -1430,7 +1427,7 @@ def publish_video(
     must have a connected YouTube channel. On success, updates the Video
     with the YouTube URL and video ID.
     """
-    from gpcg.domain.models import VideoStatus, Automation, Job
+    from gpcg.core.models import VideoStatus, Automation, Job
     from gpcg.infrastructure.google_integration_adapter import GoogleIntegrationAdapter
     from gpcg.config import get_settings
 
@@ -1603,7 +1600,12 @@ def delete_video(
     # so the idea can be reused in a future video.
     ki_released = False
     if should_release and v.job_id:
-        from gpcg.domain.models import Job, ContentPlan, KnowledgeItem, KnowledgeItemStatus
+        from gpcg.core.models import (
+    Job,
+    ContentPlan,
+    KnowledgeItem,
+    KnowledgeItemStatus,
+)
         job = db.get(Job, v.job_id)
         if job and job.content_plan_id:
             plan = db.get(ContentPlan, job.content_plan_id)
@@ -1650,7 +1652,7 @@ def regenerate_video(
     """
     from gpcg.application.clip_usage_service import release_clip_usage
     from gpcg.api.knowledge_item_routes import _normalize_idea_queue, _queue_ki_ids
-    from gpcg.domain.models import Automation
+    from gpcg.core.models import Automation
     from sqlalchemy.orm.attributes import flag_modified
 
     v = db.get(Video, video_id)

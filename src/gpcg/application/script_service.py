@@ -26,7 +26,12 @@ from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
 from gpcg.domain.creative_plan import StoryConcept, VideoCreativePlan
-from gpcg.domain.models import ContentPlan, Fact, Script, ScriptStatus
+from gpcg.core.models import (
+    ContentPlan,
+    Fact,
+    Script,
+    ScriptStatus,
+)
 from gpcg.domain.originality import check_originality
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
@@ -300,7 +305,7 @@ class ScriptService:
         if not fact_text and plan.metadata_json:
             ki_id = plan.metadata_json.get("knowledge_item_id")
             if ki_id:
-                from gpcg.domain.models import KnowledgeItem
+                from gpcg.core.models import KnowledgeItem
                 ki = session.get(KnowledgeItem, ki_id)
                 if ki:
                     # Use summary if available, else title, else content
@@ -794,7 +799,7 @@ class ScriptService:
 
         REFACTORY_V2: applies visibility filter (own + shared pool + public).
         """
-        from gpcg.domain.models import Document, Fact
+        from gpcg.core.models import Document, Fact
         from gpcg.domain.visibility import visible_to_user
         from sqlalchemy import select
 

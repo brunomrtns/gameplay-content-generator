@@ -15,15 +15,17 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import (
-    GameplayAsset,
-    GameplayEvent,
-    GameplaySource,
-    IngestionStatus,
+from gpcg.core.models import (
     Job,
     JobStatus,
     KnowledgeItem,
     KnowledgeItemStatus,
+)
+from gpcg.domains.games.models import (
+    GameplayAsset,
+    GameplayEvent,
+    GameplaySource,
+    IngestionStatus,
 )
 
 
@@ -110,7 +112,7 @@ def detect_problems(db: Session, user_id: int) -> dict[str, Any]:
         })
 
     # 4. Rejected KIs still in the idea queue
-    from gpcg.domain.models import Automation
+    from gpcg.core.models import Automation
     auto = db.query(Automation).filter(Automation.user_id == user_id).first()
     if auto and auto.config:
         config = auto.config if isinstance(auto.config, dict) else {}

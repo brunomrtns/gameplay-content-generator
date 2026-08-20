@@ -21,7 +21,14 @@ from gpcg.application.knowledge_item_service import (
     list_items,
     reject_item,
 )
-from gpcg.domain.models import Game, Job, JobPriority, JobStatus, JobType, User
+from gpcg.core.models import (
+    Job,
+    JobPriority,
+    JobStatus,
+    JobType,
+    User,
+)
+from gpcg.domains.games.models import Game
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db
 
@@ -232,11 +239,7 @@ def create_manual_knowledge_item(
     The item is private to the owner (is_public=False), sourced as "manual",
     and classified as a "curiosity" with a neutral editorial score (50.0).
     """
-    from gpcg.domain.models import (
-        KnowledgeItem,
-        KnowledgeItemSource,
-        KnowledgeItemStatus,
-    )
+    from gpcg.core.models import KnowledgeItem, KnowledgeItemSource, KnowledgeItemStatus
 
     # Validate required fields
     if not req.title or not req.title.strip():
@@ -346,7 +349,7 @@ def get_idea_queue(
     This runs on the VPS when the user opens the ideas page, so the queue
     is filled immediately without waiting for the worker to poll.
     """
-    from gpcg.domain.models import Automation, KnowledgeItem
+    from gpcg.core.models import Automation, KnowledgeItem
     # V3: Reconcile before returning — fill queue if auto_fill_queue is on
     try:
         from gpcg.api.automation_routes import reconcile_user_queue
@@ -395,7 +398,7 @@ def add_to_idea_queue(
     "skip"=don't generate without material).
     """
     from sqlalchemy.orm.attributes import flag_modified
-    from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
+    from gpcg.core.models import Automation, KnowledgeItem, KnowledgeItemStatus
     ki = db.get(KnowledgeItem, req.knowledge_item_id)
     if not ki:
         raise HTTPException(404, "KnowledgeItem not found")
@@ -428,7 +431,7 @@ def remove_from_idea_queue(
 ):
     """Remove a KnowledgeItem from the user's idea queue."""
     from sqlalchemy.orm.attributes import flag_modified
-    from gpcg.domain.models import Automation
+    from gpcg.core.models import Automation
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     if not auto:
         raise HTTPException(404, "Automation not found")
@@ -455,7 +458,7 @@ def reorder_idea_queue(
     for items that already have it. New items get defaults.
     """
     from sqlalchemy.orm.attributes import flag_modified
-    from gpcg.domain.models import Automation
+    from gpcg.core.models import Automation
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     if not auto:
         raise HTTPException(404, "Automation not found")
@@ -490,7 +493,7 @@ def update_idea_queue_item(
 ):
     """Update gameplay_preference and/or reuse_override for an existing queue item."""
     from sqlalchemy.orm.attributes import flag_modified
-    from gpcg.domain.models import Automation
+    from gpcg.core.models import Automation
 
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     if not auto:

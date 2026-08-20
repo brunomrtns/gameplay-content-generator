@@ -18,7 +18,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
-from gpcg.domain.models import ContentPlan, ContentScope, Fact, Game, KnowledgeItem, KnowledgeItemStatus
+from gpcg.core.models import (
+    ContentPlan,
+    Fact,
+    KnowledgeItem,
+    KnowledgeItemStatus,
+)
+from gpcg.domains.games.models import ContentScope, Game
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 

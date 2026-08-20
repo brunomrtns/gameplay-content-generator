@@ -22,16 +22,14 @@ from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
 from gpcg.domain.editorial_types import EditorialIntent, GameTarget
-from gpcg.domain.models import (
+from gpcg.core.models import (
     Automation,
     ChannelProfile,
-    Game,
-    GameplayAsset,
-    GameplaySource,
     KnowledgeItem,
     KnowledgeItemStatus,
     Video,
 )
+from gpcg.domains.games.models import Game, GameplayAsset, GameplaySource
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)

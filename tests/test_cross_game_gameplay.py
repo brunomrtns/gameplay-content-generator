@@ -17,7 +17,7 @@ import pytest
 from gpcg.application.gameplay_retriever import GameplayRetriever, _expand_game_ids
 from gpcg.application.gameplay_selector import SelectedClip
 from gpcg.domain.game_registry import get_or_create
-from gpcg.domain.models import ContentScope, Game, GameplaySource
+from gpcg.domains.games.models import ContentScope, Game, GameplaySource
 from gpcg.infrastructure.database import init_db, session_scope
 
 

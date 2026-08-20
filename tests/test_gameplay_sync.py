@@ -14,16 +14,14 @@ from pathlib import Path
 
 import pytest
 
-from gpcg.domain.models import (
-    GameplayDownload,
-    GameplayProcessingStatus,
-    GameplaySource,
+from gpcg.core.models import (
     Job,
     JobStage,
     JobStatus,
     Worker,
     WorkerStatus,
 )
+from gpcg.domains.games.models import GameplayDownload, GameplayProcessingStatus, GameplaySource
 from gpcg.infrastructure.database import init_db, session_scope
 
 

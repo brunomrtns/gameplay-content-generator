@@ -13,7 +13,7 @@ import uuid
 
 import pytest
 
-from gpcg.domain.models import (
+from gpcg.core.models import (
     Job,
     JobStage,
     JobStatus,

@@ -28,7 +28,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
-from gpcg.domain.models import Game, KnowledgeItem, KnowledgeItemSource, KnowledgeItemStatus, KnowledgeItemType
+from gpcg.core.models import (
+    KnowledgeItem,
+    KnowledgeItemSource,
+    KnowledgeItemStatus,
+    KnowledgeItemType,
+)
+from gpcg.domains.games.models import Game
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)

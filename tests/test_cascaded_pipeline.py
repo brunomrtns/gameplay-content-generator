@@ -353,7 +353,7 @@ class TestGameplayAnalyzerCascade:
 
 class TestCameraType:
     def test_camera_type_values(self):
-        from gpcg.domain.models import CameraType
+        from gpcg.domains.games.models import CameraType
         assert CameraType.third_person.value == "third_person"
         assert CameraType.first_person.value == "first_person"
         assert CameraType.top_down.value == "top_down"
@@ -362,6 +362,6 @@ class TestCameraType:
         assert CameraType.unknown.value == "unknown"
 
     def test_camera_type_is_string_enum(self):
-        from gpcg.domain.models import CameraType
+        from gpcg.domains.games.models import CameraType
         assert CameraType("third_person") == CameraType.third_person
         assert isinstance(CameraType.third_person.value, str)

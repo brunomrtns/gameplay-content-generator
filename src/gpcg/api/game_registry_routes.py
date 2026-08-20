@@ -22,7 +22,14 @@ from gpcg.domain.game_registry import (
     remove_alias,
     search,
 )
-from gpcg.domain.models import Game, GameAlias, Job, JobType, JobStatus, JobPriority, User
+from gpcg.core.models import (
+    Job,
+    JobType,
+    JobStatus,
+    JobPriority,
+    User,
+)
+from gpcg.domains.games.models import Game, GameAlias
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db
 
@@ -280,10 +287,13 @@ def get_gameplay_availability(
     usage history), not globally.
     """
     from sqlalchemy import select, func as sql_func
-    from gpcg.domain.models import (
-        GameplaySource, GameplayAsset, GameplayEvent, Automation,
-        IngestionStatus,
-    )
+    from gpcg.core.models import Automation
+    from gpcg.domains.games.models import (
+    GameplaySource,
+    GameplayAsset,
+    GameplayEvent,
+    IngestionStatus,
+)
     from gpcg.application.clip_usage_service import (
         get_used_ranges, estimate_availability,
     )

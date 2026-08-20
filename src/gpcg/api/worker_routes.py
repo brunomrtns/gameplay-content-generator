@@ -36,17 +36,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
-from gpcg.domain.models import (
+from gpcg.core.models import (
     Document,
-    Game,
-    GameAlias,
-    GameplayAsset,
-    GameplayClipUsage,
-    GameplayDownload,
-    GameplayEvent,
-    GameplayProcessingStatus,
-    GameplaySource,
-    IngestionStatus,
     Job,
     JobPriority,
     JobStage,
@@ -57,6 +48,17 @@ from gpcg.domain.models import (
     Worker,
     WorkerCapability,
     WorkerStatus,
+)
+from gpcg.domains.games.models import (
+    Game,
+    GameAlias,
+    GameplayAsset,
+    GameplayClipUsage,
+    GameplayDownload,
+    GameplayEvent,
+    GameplayProcessingStatus,
+    GameplaySource,
+    IngestionStatus,
 )
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db, session_scope
@@ -669,7 +671,7 @@ def _serialize_game_for_job(job: Job, db: Session) -> Optional[dict]:
     """Serialize game info if the job has a game_id (enrichment, generation jobs)."""
     if not job.game_id:
         return None
-    from gpcg.domain.models import Game
+    from gpcg.domains.games.models import Game
     game = db.get(Game, job.game_id)
     if not game:
         return None
@@ -772,7 +774,7 @@ def update_job_status(
         queued_ki_id = (_ensure_dict(job.artifacts) or {}).get("queued_knowledge_item_id")
         if queued_ki_id:
             try:
-                from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
+                from gpcg.core.models import Automation, KnowledgeItem, KnowledgeItemStatus
                 from gpcg.application.knowledge_item_service import release_usage
                 from sqlalchemy.orm.attributes import flag_modified
                 ki = db.get(KnowledgeItem, queued_ki_id)
@@ -851,7 +853,7 @@ def submit_job_result(
 
     # Create/update Video record if video metadata provided
     if req.status == JobStatus.completed.value and req.video:
-        from gpcg.domain.models import Video, VideoStatus
+        from gpcg.core.models import Video, VideoStatus
 
         video = db.query(Video).filter(Video.job_id == job.id).first()
         vdata = req.video
@@ -921,7 +923,7 @@ def submit_job_result(
         queued_ki_id = (_ensure_dict(job.artifacts) or {}).get("queued_knowledge_item_id")
         if queued_ki_id:
             try:
-                from gpcg.domain.models import Automation, KnowledgeItem, KnowledgeItemStatus
+                from gpcg.core.models import Automation, KnowledgeItem, KnowledgeItemStatus
                 from sqlalchemy.orm.attributes import flag_modified
                 from gpcg.application.knowledge_item_service import release_usage
                 ki = db.get(KnowledgeItem, queued_ki_id)
@@ -966,7 +968,8 @@ def _maybe_auto_publish(job_id: int) -> None:
     On failure, sets status=publish_failed and logs the error (non-fatal).
     If auto_publish=false, sets status=pending_approval for manual review.
     """
-    from gpcg.domain.models import Automation, Video as VideoModel, VideoStatus, ContentPlan
+    from gpcg.core.models import Automation, VideoStatus, ContentPlan
+    from gpcg.core.models import Video as VideoModel
     from gpcg.infrastructure.google_integration_adapter import GoogleIntegrationAdapter
 
     settings = get_settings()
@@ -1533,7 +1536,7 @@ async def upload_video(
         thumb_path = None
 
     # Update or create Video record
-    from gpcg.domain.models import Video, VideoStatus
+    from gpcg.core.models import Video, VideoStatus
 
     video = db.query(Video).filter(Video.job_id == job.id).first()
     if video:
@@ -1690,9 +1693,13 @@ def get_job_data(
     payload. The worker uses this to populate a local temp DB and run
     GenerationService locally.
     """
-    from gpcg.domain.models import (
-        Game, Fact, ContentPlan, Script, GameplayAsset, Automation,
-    )
+    from gpcg.core.models import (
+    Fact,
+    ContentPlan,
+    Script,
+    Automation,
+)
+    from gpcg.domains.games.models import Game, GameplayAsset
 
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
@@ -1766,7 +1773,7 @@ def get_job_data(
     # REFACTORY_V2: filter by visibility (own + shared + public)
     # V2: Sync game-specific KIs first, then general KIs for curiosity_short
     try:
-        from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
+        from gpcg.core.models import KnowledgeItem, KnowledgeItemStatus
         from gpcg.domain.visibility import visible_to_user as _ki_vis
         ki_vis = _ki_vis(KnowledgeItem.user_id, KnowledgeItem.is_public, job.user_id)
 
@@ -1884,7 +1891,7 @@ def get_job_data(
     # context in content_planning, story_finding, editorial_planning, script.
     # Without this, GenerationService._run_pipeline loads ChannelProfile from
     # the local DB and always gets None (G1 gap).
-    from gpcg.domain.models import ChannelProfile as _ChannelProfile
+    from gpcg.core.models import ChannelProfile as _ChannelProfile
     profile = db.query(_ChannelProfile).filter(
         _ChannelProfile.user_id == job.user_id
     ).first()
@@ -1929,7 +1936,8 @@ def sync_job_result(
     sends back the records it created/updated: ContentPlan, Script, Video,
     and updated Job artifacts.
     """
-    from gpcg.domain.models import ContentPlan, Script, Video as VideoModel, VideoStatus
+    from gpcg.core.models import ContentPlan, Script, VideoStatus
+    from gpcg.core.models import Video as VideoModel
 
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
@@ -2294,7 +2302,7 @@ def sync_enrichment_result(
     with the local LLM. Now it sends the structured fields to VPS for
     storage in the games table.
     """
-    from gpcg.domain.models import Game
+    from gpcg.domains.games.models import Game
     from gpcg.domain.game_registry import add_alias
 
     job = db.query(Job).filter(Job.id == job_id).first()
@@ -2388,7 +2396,7 @@ def sync_knowledge_items(
     The worker has collected RSS feeds, scored items with the local LLM,
     and now sends the structured items to VPS for storage.
     """
-    from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
+    from gpcg.core.models import KnowledgeItem, KnowledgeItemStatus
     from sqlalchemy import select
     import hashlib as _hashlib
 
@@ -2498,7 +2506,7 @@ def panel_list_videos(
     db: Session = Depends(get_db),
 ):
     """List recent videos for the worker panel (worker-auth, not user-auth)."""
-    from gpcg.domain.models import Video as VideoModel
+    from gpcg.core.models import Video as VideoModel
     videos = db.query(VideoModel).order_by(VideoModel.id.desc()).limit(limit).all()
     result = []
     for v in videos:
@@ -2521,7 +2529,7 @@ def panel_list_ideas(
     db: Session = Depends(get_db),
 ):
     """List knowledge items for the worker panel (worker-auth, not user-auth)."""
-    from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
+    from gpcg.core.models import KnowledgeItem, KnowledgeItemStatus
     q = db.query(KnowledgeItem)
     if status:
         q = q.filter(KnowledgeItem.status == status)
@@ -2545,7 +2553,7 @@ def panel_get_automation(
     db: Session = Depends(get_db),
 ):
     """Get automation status for the worker panel (worker-auth, not user-auth)."""
-    from gpcg.domain.models import Automation
+    from gpcg.core.models import Automation
     auto = db.query(Automation).first()
     if not auto:
         return {"status": "none", "user_id": None}
@@ -2562,7 +2570,7 @@ def panel_pause_automation(
     db: Session = Depends(get_db),
 ):
     """Pause automation for the worker panel (worker-auth, not user-auth)."""
-    from gpcg.domain.models import Automation
+    from gpcg.core.models import Automation
     auto = db.query(Automation).first()
     if not auto:
         return {"error": "no automation found"}
@@ -2578,7 +2586,7 @@ def panel_resume_automation(
     db: Session = Depends(get_db),
 ):
     """Resume automation for the worker panel (worker-auth, not user-auth)."""
-    from gpcg.domain.models import Automation
+    from gpcg.core.models import Automation
     auto = db.query(Automation).first()
     if not auto:
         return {"error": "no automation found"}
@@ -2594,7 +2602,7 @@ def panel_collect_ideas(
     db: Session = Depends(get_db),
 ):
     """Trigger content collection for the worker panel (worker-auth, not user-auth)."""
-    from gpcg.domain.models import Automation
+    from gpcg.core.models import Automation
     auto = db.query(Automation).first()
     if not auto:
         return {"error": "no automation found"}

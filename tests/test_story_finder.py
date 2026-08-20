@@ -26,7 +26,8 @@ from gpcg.application.script_service import ScriptService
 from gpcg.application.story_finder import StoryFinder
 from gpcg.config import get_settings
 from gpcg.domain.creative_plan import StoryConcept, VideoCreativePlan
-from gpcg.domain.models import ContentPlan, Fact, Game
+from gpcg.core.models import ContentPlan, Fact
+from gpcg.domains.games.models import Game
 from gpcg.infrastructure.database import session_scope
 from gpcg.infrastructure.llm import LLMError
 

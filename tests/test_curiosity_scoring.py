@@ -26,7 +26,8 @@ from gpcg.application.curiosity_scorer import (
     compute_curiosity_score,
 )
 from gpcg.config import get_settings
-from gpcg.domain.models import Fact, Game
+from gpcg.core.models import Fact
+from gpcg.domains.games.models import Game
 from gpcg.infrastructure.database import session_scope
 from gpcg.infrastructure.llm import LLMError
 

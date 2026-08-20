@@ -16,11 +16,7 @@ from gpcg.config import get_settings
 from gpcg.domain.filename_parser import parse_filename
 from gpcg.domain.game_repository import get_or_create
 from gpcg.domain.game_resolver import ResolutionResult, resolve
-from gpcg.domain.models import (
-    GameResolutionMethod,
-    GameplaySource,
-    IngestionStatus,
-)
+from gpcg.domains.games.models import GameResolutionMethod, GameplaySource, IngestionStatus
 from gpcg.infrastructure.database import session_scope
 from gpcg.infrastructure.llm import LLMClient, get_llm
 from gpcg.infrastructure.media import (

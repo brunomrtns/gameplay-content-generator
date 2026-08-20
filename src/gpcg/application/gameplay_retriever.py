@@ -42,7 +42,12 @@ from gpcg.application.gameplay_index_service import GameplayIndexService
 from gpcg.application.gameplay_selector import GameplaySelector, SelectedClip
 from gpcg.config import get_settings
 from gpcg.domain.creative_plan import VideoCreativePlan
-from gpcg.domain.models import ContentScope, Game, GameplayEvent, GameplaySource
+from gpcg.domains.games.models import (
+    ContentScope,
+    Game,
+    GameplayEvent,
+    GameplaySource,
+)
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)
@@ -613,7 +618,7 @@ class GameplayRetriever:
         total = 0.0
         scene_idx = 0
         scene_accum = 0.0  # accumulated duration within current scene
-        from gpcg.domain.models import GameplayAsset
+        from gpcg.domains.games.models import GameplayAsset
 
         # Cache assets per source to avoid repeated queries
         asset_cache: dict[int, GameplayAsset] = {}

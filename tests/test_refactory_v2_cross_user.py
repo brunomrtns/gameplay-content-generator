@@ -21,18 +21,18 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import (
+from gpcg.core.models import (
     Base,
     ContentPlan,
     Document,
     Fact,
-    Game,
     KnowledgeItem,
     KnowledgeItemStatus,
     KnowledgeItemType,
     KnowledgeItemSource,
     User,
 )
+from gpcg.domains.games.models import Game
 from gpcg.domain.visibility import visible_to_user
 
 

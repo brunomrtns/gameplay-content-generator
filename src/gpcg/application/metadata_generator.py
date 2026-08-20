@@ -12,7 +12,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from gpcg.domain.models import ContentPlan, Game, Script
+from gpcg.core.models import ContentPlan, Script
+from gpcg.domains.games.models import Game
 from gpcg.infrastructure.llm import LLMClient, LLMError
 
 log = logging.getLogger(__name__)

@@ -18,7 +18,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import User, Automation
+from gpcg.core.models import User, Automation
 from gpcg.infrastructure.auth import (
     get_admin_user,
     get_current_user,

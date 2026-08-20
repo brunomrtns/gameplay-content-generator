@@ -34,7 +34,7 @@ from gpcg.application.editorial_profile_service import (
     update_production_history,
 )
 from gpcg.config import get_settings
-from gpcg.domain.models import (
+from gpcg.core.models import (
     EditorialSignal,
     KnowledgeItem,
     KnowledgeItemStatus,

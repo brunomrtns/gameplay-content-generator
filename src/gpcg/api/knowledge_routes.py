@@ -24,7 +24,7 @@ from gpcg.application.editorial_profile_service import (
     serialize_profile,
     update_structured_fields,
 )
-from gpcg.domain.models import ChannelProfile, User
+from gpcg.core.models import ChannelProfile, User
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db, session_scope
 from gpcg.logging import get_logger

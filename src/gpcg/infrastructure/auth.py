@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
 from gpcg.infrastructure.database import get_db
-from gpcg.domain.models import User
+from gpcg.core.models import User
 
 log = logging.getLogger(__name__)
 

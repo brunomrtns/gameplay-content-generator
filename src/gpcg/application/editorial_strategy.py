@@ -30,19 +30,21 @@ from typing import Optional
 from sqlalchemy import select, func, desc
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import (
+from gpcg.core.models import (
     ContentPlan,
     Fact,
-    Game,
-    GameplayAsset,
-    GameplaySource,
-    IngestionStatus,
     Job,
     JobStatus,
     KnowledgeChunk,
     KnowledgeItem,
     KnowledgeItemStatus,
     Video,
+)
+from gpcg.domains.games.models import (
+    Game,
+    GameplayAsset,
+    GameplaySource,
+    IngestionStatus,
 )
 from gpcg.logging import get_logger
 
@@ -362,7 +364,7 @@ class EditorialStrategyService:
         # Load channel profile for context
         channel_context = ""
         try:
-            from gpcg.domain.models import ChannelProfile
+            from gpcg.core.models import ChannelProfile
 
             profile = session.query(ChannelProfile).filter(
                 ChannelProfile.user_id == user_id

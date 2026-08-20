@@ -11,13 +11,11 @@ from gpcg.application.clip_usage_service import (
     is_range_available,
 )
 from gpcg.application.gameplay_selector import GameplaySelector
-from gpcg.domain.models import (
+from gpcg.core.models import User, Video, VideoStatus
+from gpcg.domains.games.models import (
     GameplayAsset,
     GameplayClipUsage,
     GameplaySource,
-    User,
-    Video,
-    VideoStatus,
     Game,
 )
 from gpcg.infrastructure.database import session_scope, init_db

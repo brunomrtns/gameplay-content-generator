@@ -46,7 +46,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
-from gpcg.domain.models import Document, KnowledgeChunk
+from gpcg.core.models import Document, KnowledgeChunk
 from gpcg.infrastructure.database import session_scope
 from gpcg.infrastructure.document_parser import DocumentParseError, parse_document
 from gpcg.infrastructure.llm import LLMError

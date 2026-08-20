@@ -16,15 +16,14 @@ from sqlalchemy import exists, func, not_, select
 from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
-from gpcg.domain.models import (
-    ContentScope,
-    Game,
+from gpcg.core.models import (
     KnowledgeItem,
     KnowledgeItemSource,
     KnowledgeItemStatus,
     KnowledgeItemType,
     KnowledgeItemUsage,
 )
+from gpcg.domains.games.models import ContentScope, Game
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 

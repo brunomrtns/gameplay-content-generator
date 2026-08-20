@@ -29,7 +29,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import KnowledgeItem, KnowledgeItemStatus
+from gpcg.core.models import KnowledgeItem, KnowledgeItemStatus
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)

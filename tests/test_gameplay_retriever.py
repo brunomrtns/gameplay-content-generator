@@ -23,7 +23,7 @@ from gpcg.domain.creative_plan import (
     HumorPlan,
     VideoCreativePlan,
 )
-from gpcg.domain.models import (
+from gpcg.domains.games.models import (
     AnalysisStatus,
     Game,
     GameplayAsset,

@@ -239,7 +239,7 @@ def analyze_gameplay(
     try:
         sid = int(source)
         with session_scope() as session:
-            from gpcg.domain.models import GameplaySource, Game
+            from gpcg.domains.games.models import GameplaySource, Game
             src = session.get(GameplaySource, sid)
             if src is None:
                 console.print(f"[red]✗ GameplaySource #{sid} not found[/red]")
@@ -351,7 +351,7 @@ def set_camera_type(
         gpcg set-camera-type -g Bully -c third_person
         gpcg set-camera-type -g 1 -c first_person
     """
-    from gpcg.domain.models import CameraType
+    from gpcg.domains.games.models import CameraType
     from gpcg.infrastructure.database import session_scope
     from sqlalchemy import select
 
@@ -365,7 +365,7 @@ def set_camera_type(
         return
 
     with session_scope() as session:
-        from gpcg.domain.models import Game
+        from gpcg.domains.games.models import Game
         # Resolve game: integer = ID, else = name
         try:
             gid = int(game)

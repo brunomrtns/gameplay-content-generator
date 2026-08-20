@@ -17,11 +17,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
-from gpcg.domain.models import (
-    GameplayEventEmbedding,
-    KnowledgeItem,
-    KnowledgeItemEmbedding,
-)
+from gpcg.core.models import KnowledgeItem, KnowledgeItemEmbedding
+from gpcg.domains.games.models import GameplayEventEmbedding
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 

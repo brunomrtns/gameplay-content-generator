@@ -17,7 +17,12 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
-from gpcg.domain.models import ContentPlan, Script, Video, VideoStatus
+from gpcg.core.models import (
+    ContentPlan,
+    Script,
+    Video,
+    VideoStatus,
+)
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.infrastructure.media import MediaError, generate_thumbnail, probe
 from gpcg.logging import get_logger

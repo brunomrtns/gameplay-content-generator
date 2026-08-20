@@ -23,7 +23,7 @@ from gpcg.domain.game_registry import (
     remove_alias,
     search,
 )
-from gpcg.domain.models import Game
+from gpcg.domains.games.models import Game
 
 
 def find_by_name(session: Session, name: str) -> Optional[Game]:

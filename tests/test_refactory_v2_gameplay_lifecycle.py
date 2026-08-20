@@ -13,15 +13,17 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import (
+from gpcg.core.models import (
     Base,
+    User,
+    Video,
+    VideoStatus,
+)
+from gpcg.domains.games.models import (
     Game,
     GameplayAsset,
     GameplayClipUsage,
     GameplaySource,
-    User,
-    Video,
-    VideoStatus,
 )
 from gpcg.application.clip_usage_service import (
     get_used_ranges,

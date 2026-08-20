@@ -58,10 +58,13 @@ class TestEndToEndV2Pipeline:
         from gpcg.application.lifecycle_manager import LifecycleManager
         from gpcg.api.automation_routes import _reconcile_idea_queue
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import (
-            User, Game, GameplaySource, GameplayAsset,
-            KnowledgeItem, KnowledgeItemStatus, Automation,
-        )
+        from gpcg.core.models import (
+    User,
+    KnowledgeItem,
+    KnowledgeItemStatus,
+    Automation,
+)
+        from gpcg.domains.games.models import Game, GameplaySource, GameplayAsset
         from gpcg.domain.editorial_types import SearchQuery, FeedSpec
 
         with session_scope() as session:
@@ -147,7 +150,7 @@ class TestEndToEndV2Pipeline:
 
             # ── Step 4b: Add some Minecraft KIs manually (to test ranking) ──
             # Minecraft has no gameplay → its KIs should rank lower than Bully's
-            from gpcg.domain.models import KnowledgeItemSource
+            from gpcg.core.models import KnowledgeItemSource
             for i in range(3):
                 session.add(KnowledgeItem(
                     user_id=uid, is_public=False,
@@ -214,11 +217,14 @@ class TestEndToEndV2Pipeline:
         from gpcg.application.feedback_propagator import FeedbackPropagator
         from gpcg.api.automation_routes import _reconcile_idea_queue
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import (
-            User, Game, GameplaySource, GameplayAsset,
-            KnowledgeItem, KnowledgeItemStatus, Automation,
-        )
-        from gpcg.domain.models import KnowledgeItemSource
+        from gpcg.core.models import (
+    User,
+    KnowledgeItem,
+    KnowledgeItemStatus,
+    Automation,
+)
+        from gpcg.domains.games.models import Game, GameplaySource, GameplayAsset
+        from gpcg.core.models import KnowledgeItemSource
 
         with session_scope() as session:
             user = User(email="test2@example.com", name="test2")
@@ -306,10 +312,13 @@ class TestEndToEndV2Pipeline:
         try:
             from gpcg.api.automation_routes import _reconcile_idea_queue
             from gpcg.infrastructure.database import session_scope
-            from gpcg.domain.models import (
-                User, KnowledgeItem, KnowledgeItemStatus, Automation,
-            )
-            from gpcg.domain.models import KnowledgeItemSource
+            from gpcg.core.models import (
+    User,
+    KnowledgeItem,
+    KnowledgeItemStatus,
+    Automation,
+)
+            from gpcg.core.models import KnowledgeItemSource
 
             with session_scope() as session:
                 user = User(email="legacy@example.com", name="legacy")

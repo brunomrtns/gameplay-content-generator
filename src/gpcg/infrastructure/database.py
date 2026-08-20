@@ -94,7 +94,8 @@ def init_db() -> None:
     """Create all tables. Idempotent. Also applies lightweight column additions
     for schema evolutions that don't warrant a full migration tool.
     """
-    from gpcg.domain.models import Base  # noqa: F401 — registers all models
+    from gpcg.core.models import Base  # noqa: F401 — registers core models
+    import gpcg.domains.games.models  # noqa: F401 — registers games models
 
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
@@ -196,7 +197,7 @@ def _seed_admin_user() -> None:
     but actual admin authorization is determined by BI Identity roles.
     """
     import logging
-    from gpcg.domain.models import User
+    from gpcg.core.models import User
     from gpcg.config import get_settings
 
     log = logging.getLogger(__name__)
@@ -237,7 +238,7 @@ def _migrate_v2_game_registry(engine) -> None:
     """
     import logging
     from sqlalchemy import text, inspect
-    from gpcg.domain.models import Game, GameAlias
+    from gpcg.domains.games.models import Game, GameAlias
     from gpcg.domain.slug_utils import slugify
 
     log = logging.getLogger(__name__)

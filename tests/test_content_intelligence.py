@@ -33,14 +33,13 @@ from gpcg.application.knowledge_item_service import (
     score_all_fresh,
 )
 from gpcg.domain.game_registry import get_or_create
-from gpcg.domain.models import (
-    ContentScope,
-    Game,
+from gpcg.core.models import (
     KnowledgeItem,
     KnowledgeItemSource,
     KnowledgeItemStatus,
     KnowledgeItemType,
 )
+from gpcg.domains.games.models import ContentScope, Game
 from gpcg.infrastructure.database import init_db, session_scope
 
 

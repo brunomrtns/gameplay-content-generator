@@ -46,7 +46,7 @@ class TestCooldownByGame:
             update_structured_fields,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Video
+        from gpcg.core.models import User, Video
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -74,7 +74,7 @@ class TestCooldownByGame:
             update_structured_fields,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Video
+        from gpcg.core.models import User, Video
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -99,7 +99,7 @@ class TestCooldownByGame:
             update_structured_fields,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Video
+        from gpcg.core.models import User, Video
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -125,7 +125,7 @@ class TestCooldownByGame:
             update_structured_fields,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Video
+        from gpcg.core.models import User, Video
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -154,7 +154,7 @@ class TestFormatRotation:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -171,7 +171,7 @@ class TestFormatRotation:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Video
+        from gpcg.core.models import User, Video
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -194,7 +194,7 @@ class TestFormatRotation:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Video
+        from gpcg.core.models import User, Video
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -222,9 +222,8 @@ class TestGameplayDriver:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import (
-            User, Game, GameplaySource, GameplayAsset,
-        )
+        from gpcg.core.models import User
+        from gpcg.domains.games.models import Game, GameplaySource, GameplayAsset
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -270,9 +269,8 @@ class TestGameplayDriver:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import (
-            User, Game, GameplaySource, GameplayAsset, Video,
-        )
+        from gpcg.core.models import User, Video
+        from gpcg.domains.games.models import Game, GameplaySource, GameplayAsset
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -313,9 +311,8 @@ class TestGameplayDriver:
             update_structured_fields,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import (
-            User, Game, GameplaySource, GameplayAsset,
-        )
+        from gpcg.core.models import User
+        from gpcg.domains.games.models import Game, GameplaySource, GameplayAsset
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -355,9 +352,8 @@ class TestExplorationFactor:
         """With exploration factor > 0, some queue slots are random."""
         from gpcg.api.automation_routes import _reconcile_idea_queue
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import (
-            User, Game, GameplaySource, GameplayAsset, KnowledgeItem,
-        )
+        from gpcg.core.models import User, KnowledgeItem
+        from gpcg.domains.games.models import Game, GameplaySource, GameplayAsset
 
         # Enable composite scoring + exploration
         monkeypatch.setenv("GPCG_COMPOSITE_SCORING_ENABLED", "true")
@@ -419,9 +415,8 @@ class TestExplorationFactor:
         """With exploration factor = 0, all slots are top-scored."""
         from gpcg.api.automation_routes import _reconcile_idea_queue
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import (
-            User, Game, GameplaySource, GameplayAsset, KnowledgeItem,
-        )
+        from gpcg.core.models import User, KnowledgeItem
+        from gpcg.domains.games.models import Game, GameplaySource, GameplayAsset
 
         monkeypatch.setenv("GPCG_COMPOSITE_SCORING_ENABLED", "true")
         monkeypatch.setenv("GPCG_EDITORIAL_EXPLORATION_FACTOR", "0.0")

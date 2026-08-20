@@ -39,7 +39,8 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
-from gpcg.domain.models import Fact, Game
+from gpcg.core.models import Fact
+from gpcg.domains.games.models import Game
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 

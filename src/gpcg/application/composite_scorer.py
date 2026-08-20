@@ -37,13 +37,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from gpcg.domain.editorial_types import CompositeScore, EditorialBrief
-from gpcg.domain.models import (
-    ChannelProfile,
-    GameplayAsset,
-    GameplaySource,
-    KnowledgeItem,
-    Video,
-)
+from gpcg.core.models import ChannelProfile, KnowledgeItem, Video
+from gpcg.domains.games.models import GameplayAsset, GameplaySource
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)

@@ -26,7 +26,8 @@ from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
 from gpcg.domain.creative_plan import StoryConcept
-from gpcg.domain.models import ContentPlan, Fact, Game
+from gpcg.core.models import ContentPlan, Fact
+from gpcg.domains.games.models import Game
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 

@@ -19,7 +19,12 @@ from gpcg.application.embedding_service import (
     serialize_embedding,
     store_knowledge_item_embedding,
 )
-from gpcg.domain.models import KnowledgeItem, KnowledgeItemSource, KnowledgeItemStatus, KnowledgeItemType
+from gpcg.core.models import (
+    KnowledgeItem,
+    KnowledgeItemSource,
+    KnowledgeItemStatus,
+    KnowledgeItemType,
+)
 from gpcg.infrastructure.database import init_db, session_scope
 
 

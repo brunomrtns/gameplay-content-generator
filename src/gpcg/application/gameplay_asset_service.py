@@ -12,7 +12,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import GameplayAsset, GameplaySource
+from gpcg.domains.games.models import GameplayAsset, GameplaySource
 from gpcg.infrastructure.media import MediaError, probe
 
 

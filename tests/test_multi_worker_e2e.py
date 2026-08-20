@@ -134,7 +134,7 @@ class TestJobClaimingMultiWorker:
 
         # Create two jobs directly in the DB
         from gpcg.infrastructure.database import get_sessionmaker
-        from gpcg.domain.models import Job, JobStatus, JobType
+        from gpcg.core.models import Job, JobStatus, JobType
         Session = get_sessionmaker()
         with Session() as session:
             for i in range(2):
@@ -172,7 +172,7 @@ class TestJobClaimingMultiWorker:
 
         # Verify worker assignment in DB
         from gpcg.infrastructure.database import get_sessionmaker
-        from gpcg.domain.models import Job as JobModel
+        from gpcg.core.models import Job as JobModel
         Session = get_sessionmaker()
         with Session() as session:
             j1 = session.query(JobModel).filter_by(id=job1["id"]).first()
@@ -259,7 +259,7 @@ class TestStaleJobRecoveryMultiWorker:
 
         # Create a job directly in the DB
         from gpcg.infrastructure.database import get_sessionmaker
-        from gpcg.domain.models import Job, JobStatus, JobType
+        from gpcg.core.models import Job, JobStatus, JobType
         Session = get_sessionmaker()
         with Session() as session:
             job = Job(
@@ -284,7 +284,7 @@ class TestStaleJobRecoveryMultiWorker:
         # Simulate by not sending heartbeats and setting stale timestamp
         from gpcg.infrastructure.database import get_sessionmaker
         from gpcg.infrastructure import database as db_mod
-        from gpcg.domain.models import Worker, Job, JobStatus
+        from gpcg.core.models import Worker, Job, JobStatus
         from datetime import datetime, timedelta, timezone
 
         Session = get_sessionmaker()
@@ -323,7 +323,7 @@ class TestGameplaySyncMultiWorker:
 
         # Create a gameplay source with a temp file
         from gpcg.infrastructure.database import get_sessionmaker
-        from gpcg.domain.models import GameplaySource, GameplayProcessingStatus
+        from gpcg.domains.games.models import GameplaySource, GameplayProcessingStatus
 
         # Create temp file
         temp_file = tmp_path / "gameplay.mp4"

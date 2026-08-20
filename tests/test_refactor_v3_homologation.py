@@ -19,13 +19,10 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import (
+from gpcg.core.models import (
     Automation,
     Base,
     ChannelProfile,
-    Game,
-    GameplaySource,
-    IngestionStatus,
     Job,
     JobStatus,
     JobType,
@@ -34,6 +31,7 @@ from gpcg.domain.models import (
     KnowledgeItemUsage,
     User,
 )
+from gpcg.domains.games.models import Game, GameplaySource, IngestionStatus
 from gpcg.application.knowledge_item_service import (
     is_used_by_consumer,
     record_usage,
@@ -440,7 +438,7 @@ def test_manual_mode_prevents_editorial_fallback(db_session, full_setup):
 
 def test_worker_stale_classification(db_session, full_setup):
     """Workers should be classified as active/offline/stale."""
-    from gpcg.domain.models import Worker, WorkerStatus
+    from gpcg.core.models import Worker, WorkerStatus
     from datetime import datetime, timedelta, timezone
 
     # Active worker (recent heartbeat)

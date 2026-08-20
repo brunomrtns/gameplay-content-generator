@@ -28,7 +28,7 @@ from typing import Optional
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from gpcg.domain.models import Base
+from gpcg.core.models import Base
 
 log = logging.getLogger(__name__)
 
@@ -134,7 +134,8 @@ def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Pat
 def _create_temp_db(db_path: Path) -> sessionmaker:
     """Create a temporary SQLite DB with all GPCG tables."""
     # Import ALL models so Base.metadata knows about every table
-    import gpcg.domain.models  # noqa: F401 — side effect: registers all tables
+    import gpcg.core.models  # noqa: F401 — side effect: registers core tables
+    import gpcg.domains.games.models  # noqa: F401 — side effect: registers games tables
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(
@@ -157,11 +158,23 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
     Returns:
         A sessionmaker bound to the populated temp DB.
     """
-    from gpcg.domain.models import (
-        User, Game, GameplaySource, GameplayEvent, GameplayAsset, Fact,
-        ContentPlan, Script, Job, Automation, KnowledgeItem,
-        GameplayClipUsage, ChannelProfile,
-    )
+    from gpcg.core.models import (
+    User,
+    Fact,
+    ContentPlan,
+    Script,
+    Job,
+    Automation,
+    KnowledgeItem,
+    ChannelProfile,
+)
+    from gpcg.domains.games.models import (
+    Game,
+    GameplaySource,
+    GameplayEvent,
+    GameplayAsset,
+    GameplayClipUsage,
+)
 
     SessionLocal = _create_temp_db(db_path)
     session = SessionLocal()
@@ -336,7 +349,7 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
 
         # Record the initial clip usage count so we can identify NEW records
         # created during this job (for sync back to VPS without duplicates)
-        from gpcg.domain.models import GameplayClipUsage as _ClipUsage
+        from gpcg.domains.games.models import GameplayClipUsage as _ClipUsage
         initial_clip_usage_count = session.query(_ClipUsage).count()
         job_data["_initial_clip_usage_count"] = initial_clip_usage_count
 
@@ -557,7 +570,8 @@ def run_generation_locally(
         # may not see those commits (WAL snapshot isolation).
         from gpcg.infrastructure.database import session_scope as _session_scope
         with _session_scope() as session:
-            from gpcg.domain.models import Job as JobModel, ContentPlan, Script, Video
+            from gpcg.core.models import ContentPlan, Script, Video
+            from gpcg.core.models import Job as JobModel
 
             job_row = session.query(JobModel).filter(JobModel.id == job_id).first()
             if not job_row:
@@ -633,7 +647,7 @@ def run_generation_locally(
             # The local DB was populated from the VPS at the start, so we must
             # NOT re-sync pre-existing records (that would create duplicates).
             # We track the count at population time and only send the new ones.
-            from gpcg.domain.models import GameplayClipUsage as ClipUsage
+            from gpcg.domains.games.models import GameplayClipUsage as ClipUsage
             initial_clip_usage_count = job_data.get("_initial_clip_usage_count", 0)
             all_clip_usages = session.query(ClipUsage).order_by(ClipUsage.id).all()
             new_clip_usages = all_clip_usages[initial_clip_usage_count:]

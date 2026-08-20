@@ -20,7 +20,7 @@ from typing import Optional
 from sqlalchemy import select, delete
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import GameplayClipUsage, GameplaySource
+from gpcg.domains.games.models import GameplayClipUsage, GameplaySource
 
 log = logging.getLogger(__name__)
 

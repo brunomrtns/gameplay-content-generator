@@ -20,7 +20,7 @@ from gpcg.config import get_settings
 
 
 class CatalogBase(DeclarativeBase):
-    """Declarative base for catalog models. Separate from gpcg.domain.models.Base."""
+    """Declarative base for catalog models. Separate from gpcg.core.models.Base."""
     pass
 
 

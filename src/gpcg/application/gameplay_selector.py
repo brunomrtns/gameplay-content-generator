@@ -27,7 +27,7 @@ from typing import Optional
 from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import GameplayAsset, GameplaySource
+from gpcg.domains.games.models import GameplayAsset, GameplaySource
 from gpcg.application.clip_usage_service import (
     get_used_ranges,
     find_available_segment,
@@ -208,7 +208,7 @@ class GameplaySelector:
                     session, a.source_id, consumer_user_id=user_id,
                 )
                 # Load event boundaries for this source (for coherent cuts)
-                from gpcg.domain.models import GameplayEvent
+                from gpcg.domains.games.models import GameplayEvent
                 evs = session.execute(
                     select(GameplayEvent.start_time, GameplayEvent.end_time)
                     .where(GameplayEvent.source_id == a.source_id)

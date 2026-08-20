@@ -51,7 +51,7 @@ def fresh_db(tmp_path, monkeypatch):
 
 
 def _make_ki(**kwargs):
-    from gpcg.domain.models import KnowledgeItem, KnowledgeItemSource, KnowledgeItemStatus
+    from gpcg.core.models import KnowledgeItem, KnowledgeItemSource, KnowledgeItemStatus
     defaults = dict(
         title="Test KI",
         content="Test content",
@@ -67,7 +67,7 @@ def _make_ki(**kwargs):
 
 def _make_game_with_clips(session, user_id, name, n_clips):
     """Helper: create a game with gameplay source + clips."""
-    from gpcg.domain.models import Game, GameplaySource, GameplayAsset
+    from gpcg.domains.games.models import Game, GameplaySource, GameplayAsset
     game = Game(canonical_name=name, slug=name.lower())
     session.add(game)
     session.flush()
@@ -93,7 +93,7 @@ class TestBrandNewChannel:
         """A brand new channel should have an empty profile with safe defaults."""
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="new@example.com", name="new")
@@ -114,7 +114,7 @@ class TestBrandNewChannel:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="new@example.com", name="new")
@@ -135,7 +135,7 @@ class TestBrandNewChannel:
         ordering is preserved)."""
         from gpcg.api.automation_routes import _reconcile_idea_queue
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem, Automation
+        from gpcg.core.models import User, KnowledgeItem, Automation
 
         with session_scope() as session:
             user = User(email="new@example.com", name="new")
@@ -171,7 +171,7 @@ class TestBrandNewChannel:
         """Feedback loop on a new channel (no embeddings) should not crash."""
         from gpcg.application.feedback_propagator import FeedbackPropagator
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="new@example.com", name="new")
@@ -200,7 +200,7 @@ class TestAbandonedChannel:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Video
+        from gpcg.core.models import User, Video
 
         with session_scope() as session:
             user = User(email="abandoned@example.com", name="abandoned")
@@ -225,7 +225,7 @@ class TestAbandonedChannel:
         """KIs collected before the gap should be archived by lifecycle."""
         from gpcg.application.lifecycle_manager import LifecycleManager
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="abandoned@example.com", name="abandoned")
@@ -261,7 +261,7 @@ class TestNicheChange:
             get_or_create_profile,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="change@example.com", name="change")
@@ -291,7 +291,7 @@ class TestNicheChange:
             get_or_create_profile,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="change@example.com", name="change")
@@ -322,7 +322,7 @@ class TestNicheChange:
             get_or_create_profile,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="change@example.com", name="change")
@@ -356,7 +356,8 @@ class TestGameplayRemoved:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, GameplayAsset, GameplaySource
+        from gpcg.core.models import User
+        from gpcg.domains.games.models import GameplayAsset, GameplaySource
 
         with session_scope() as session:
             user = User(email="rm@example.com", name="rm")
@@ -389,7 +390,8 @@ class TestGameplayRemoved:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, GameplayAsset, GameplaySource, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
+        from gpcg.domains.games.models import GameplayAsset, GameplaySource
         from gpcg.domain.editorial_types import EditorialBrief
 
         with session_scope() as session:
@@ -439,7 +441,7 @@ class TestGameplayAdded:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="add@example.com", name="add")
@@ -461,7 +463,8 @@ class TestGameplayAdded:
         """KIs about a newly-added game should score higher after gameplay is added."""
         from gpcg.application.composite_scorer import CompositeScorer
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Game, KnowledgeItem, GameplaySource, GameplayAsset
+        from gpcg.core.models import User, KnowledgeItem
+        from gpcg.domains.games.models import Game, GameplaySource, GameplayAsset
         from gpcg.domain.editorial_types import EditorialBrief
 
         with session_scope() as session:
@@ -514,7 +517,7 @@ class TestConflictingFeedback:
         from gpcg.application.feedback_propagator import FeedbackPropagator
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem, Video
+        from gpcg.core.models import User, KnowledgeItem, Video
 
         with session_scope() as session:
             user = User(email="conflict@example.com", name="conflict")
@@ -552,7 +555,7 @@ class TestConflictingFeedback:
             assert profile.production_history_summary.get("total_videos") == 1
 
             # The rejected KI should have a signal
-            from gpcg.domain.models import EditorialSignal
+            from gpcg.core.models import EditorialSignal
             signals = session.query(EditorialSignal).all()
             assert len(signals) == 2  # production + rejection
 
@@ -571,7 +574,7 @@ class TestDegradedSources:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="degraded@example.com", name="degraded")
@@ -603,7 +606,7 @@ class TestDegradedSources:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="degraded@example.com", name="degraded")
@@ -646,7 +649,7 @@ class TestQueueEdgeCases:
         """Empty queue should be filled up to max_queue_size."""
         from gpcg.api.automation_routes import _reconcile_idea_queue
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem, Automation
+        from gpcg.core.models import User, KnowledgeItem, Automation
 
         with session_scope() as session:
             user = User(email="q@example.com", name="q")
@@ -676,7 +679,7 @@ class TestQueueEdgeCases:
         """No KIs available → empty result (no crash)."""
         from gpcg.api.automation_routes import _reconcile_idea_queue
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Automation
+        from gpcg.core.models import User, Automation
 
         with session_scope() as session:
             user = User(email="empty@example.com", name="empty")
@@ -698,7 +701,7 @@ class TestQueueEdgeCases:
         """Fewer KIs than max_queue_size → return what's available."""
         from gpcg.api.automation_routes import _reconcile_idea_queue
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Automation
+        from gpcg.core.models import User, Automation
 
         with session_scope() as session:
             user = User(email="few@example.com", name="few")
@@ -734,7 +737,7 @@ class TestScale:
         """Reconciler should handle 1000+ KIs without performance issues."""
         from gpcg.api.automation_routes import _reconcile_idea_queue
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Automation
+        from gpcg.core.models import User, Automation
 
         with session_scope() as session:
             user = User(email="scale@example.com", name="scale")
@@ -766,7 +769,7 @@ class TestScale:
         """LifecycleManager should handle many KIs."""
         from gpcg.application.lifecycle_manager import LifecycleManager
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="scale@example.com", name="scale")
@@ -800,7 +803,7 @@ class TestConvergenceNoDeathSpirals:
             MAX_CUMULATIVE_ADJUSTMENT,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="spiral@example.com", name="spiral")
@@ -849,7 +852,7 @@ class TestConvergenceNoDeathSpirals:
             FEEDBACK_DECAY_FACTOR,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="decay@example.com", name="decay")
@@ -877,7 +880,7 @@ class TestConvergenceNoDeathSpirals:
         """Very small feedback adjustments should snap to zero."""
         from gpcg.application.feedback_propagator import FeedbackPropagator
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="snap@example.com", name="snap")
@@ -899,7 +902,7 @@ class TestConvergenceNoDeathSpirals:
         """User A's rejection should NOT affect User B's KI scores."""
         from gpcg.application.feedback_propagator import FeedbackPropagator
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user_a = User(email="a@example.com", name="a")
@@ -951,7 +954,7 @@ class TestLearnedPreferencesCaps:
             LEARNED_PREF_CAPS,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="cap@example.com", name="cap")
@@ -971,7 +974,7 @@ class TestLearnedPreferencesCaps:
             LEARNED_PREF_CAPS,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="cap@example.com", name="cap")
@@ -992,7 +995,7 @@ class TestLearnedPreferencesCaps:
             LEARNED_PREF_CAPS,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="fifo@example.com", name="fifo")
@@ -1020,7 +1023,7 @@ class TestSignalsCleanup:
         """Signals older than 90 days should be cleaned up."""
         from gpcg.application.feedback_propagator import FeedbackPropagator
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, EditorialSignal
+        from gpcg.core.models import User, EditorialSignal
 
         with session_scope() as session:
             user = User(email="cleanup@example.com", name="cleanup")
@@ -1066,7 +1069,7 @@ class TestPriorityFloor:
         from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User
+        from gpcg.core.models import User
 
         with session_scope() as session:
             user = User(email="floor@example.com", name="floor")

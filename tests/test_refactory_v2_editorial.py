@@ -50,7 +50,7 @@ class TestEditorialGate:
         """If the final verdict is REVISE after max_revisions, GenerationError is raised."""
         from gpcg.application.generation_service import GenerationError
         from gpcg.application.script_critic import CRITIC_VERDICT_REVISE
-        from gpcg.domain.models import JobStage
+        from gpcg.core.models import JobStage
 
         # Simulate the post-loop check
         max_revisions = 3

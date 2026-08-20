@@ -19,14 +19,12 @@ from gpcg.application.clip_usage_service import (
     estimate_availability,
 )
 from gpcg.application.gameplay_selector import GameplaySelector, SelectedClip
-from gpcg.domain.models import (
+from gpcg.core.models import User, Video, VideoStatus
+from gpcg.domains.games.models import (
     GameplayAsset,
     GameplayClipUsage,
     GameplayEvent,
     GameplaySource,
-    User,
-    Video,
-    VideoStatus,
 )
 from gpcg.infrastructure.database import session_scope, init_db
 from gpcg.domain.game_repository import get_or_create

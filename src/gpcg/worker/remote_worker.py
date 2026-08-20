@@ -689,8 +689,10 @@ class RemoteWorker:
             log.warning(f"Error fetching game registry: {e}")
             return None
 
-        from gpcg.domain.models import Base, Game, GameAlias
-        import gpcg.domain.models  # noqa: side effect: register all tables
+        from gpcg.core.models import Base
+        from gpcg.domains.games.models import Game, GameAlias
+        import gpcg.core.models  # noqa: side effect: register all tables
+        import gpcg.domains.games.models  # noqa: side effect: register games tables
 
         tmpdir = tempfile.mkdtemp(prefix="gpcg_resolver_")
         db_path = Path(tmpdir) / "resolver.db"

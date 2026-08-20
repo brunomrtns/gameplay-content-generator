@@ -14,7 +14,12 @@ from sqlalchemy import select
 from gpcg.application.generation_service import GenerationError, GenerationService
 from gpcg.application.ingestion_service import IngestionService
 from gpcg.config import get_settings
-from gpcg.domain.models import Job, JobStage, JobStatus, JobType
+from gpcg.core.models import (
+    Job,
+    JobStage,
+    JobStatus,
+    JobType,
+)
 from gpcg.infrastructure.database import session_scope
 from gpcg.infrastructure.llm import get_llm
 from gpcg.infrastructure.video_generate_adapter import VideoGenerateAdapter
@@ -219,7 +224,7 @@ def _process_job(gen: GenerationService, job_id: int) -> None:
         # If we have a video_id, load its qa_report
         vid_id = artifacts.get("video_id")
         if vid_id and not qa_report:
-            from gpcg.domain.models import Video
+            from gpcg.core.models import Video
 
             v = session.get(Video, vid_id)
             if v:
@@ -338,7 +343,7 @@ def _process_game_enrich_job(job_id: int) -> None:
             else:
                 job.status = JobStatus.failed.value
                 job.completed_at = _utcnow()
-                from gpcg.domain.models import Game
+                from gpcg.domains.games.models import Game
                 game = session.get(Game, game_id)
                 job.error = game.enrichment_error if game else "enrichment failed"
                 log.error(f"game_enrich job #{job_id} failed: {job.error}")
@@ -363,7 +368,8 @@ def _process_content_collect_job(job_id: int) -> None:
     from gpcg.application.content_collectors import collect_rss, cleanup_old_news
     from gpcg.application.knowledge_item_service import score_all_fresh
     from gpcg.infrastructure.llm import get_llm
-    from gpcg.domain.models import Game, GameplaySource, User
+    from gpcg.core.models import User
+    from gpcg.domains.games.models import Game, GameplaySource
     from sqlalchemy import distinct, select as sa_select
 
     log.info(f"processing content_collect job #{job_id}")
@@ -450,7 +456,7 @@ def _collect_with_editorial_brief(session, llm) -> int:
     from gpcg.application.editorial_intent_builder import EditorialIntentBuilder
     from gpcg.application.editorial_brief_builder import EditorialBriefBuilder
     from gpcg.application.goal_oriented_collector import GoalOrientedCollector
-    from gpcg.domain.models import GameplaySource
+    from gpcg.domains.games.models import GameplaySource
 
     # Find all users that have gameplay sources
     user_ids = session.execute(

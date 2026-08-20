@@ -23,7 +23,7 @@ from gpcg.domain.editorial_types import (
     FeedSpec,
     SearchQuery,
 )
-from gpcg.domain.models import ChannelProfile
+from gpcg.core.models import ChannelProfile
 from gpcg.domain.search_templates import (
     SEARCH_TEMPLATES,
     merge_keywords,

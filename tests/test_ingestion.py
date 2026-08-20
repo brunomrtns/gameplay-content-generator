@@ -6,7 +6,7 @@ import shutil
 import pytest
 
 from gpcg.application.ingestion_service import IngestionService
-from gpcg.domain.models import GameplaySource, IngestionStatus
+from gpcg.domains.games.models import GameplaySource, IngestionStatus
 from gpcg.infrastructure.database import init_db, session_scope
 from sqlalchemy import select
 

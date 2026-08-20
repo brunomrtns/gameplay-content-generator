@@ -18,7 +18,8 @@ import pytest
 
 from gpcg.application.game_enrichment import enrich_game
 from gpcg.domain.game_registry import get_or_create
-from gpcg.domain.models import Game, GameAlias, Job, JobType, JobStatus
+from gpcg.core.models import Job, JobType, JobStatus
+from gpcg.domains.games.models import Game, GameAlias
 from gpcg.infrastructure.database import init_db, session_scope
 from gpcg.infrastructure.wikidata_client import WikidataGameInfo
 from gpcg.infrastructure.wikipedia_client import WikipediaArticle

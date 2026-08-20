@@ -14,7 +14,8 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import Document, Fact, FactVerification, Game
+from gpcg.core.models import Document, Fact, FactVerification
+from gpcg.domains.games.models import Game
 from gpcg.infrastructure.document_parser import DocumentParseError, parse_document
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger

@@ -36,7 +36,7 @@ def fresh_db(tmp_path, monkeypatch):
 
 
 def _make_ki(**kwargs):
-    from gpcg.domain.models import KnowledgeItem, KnowledgeItemSource, KnowledgeItemStatus
+    from gpcg.core.models import KnowledgeItem, KnowledgeItemSource, KnowledgeItemStatus
     defaults = dict(
         title="Test KI",
         content="Test content",
@@ -61,7 +61,7 @@ class TestFeedbackPropagator:
             SIGNAL_REJECTION_PENALTY,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem, EditorialSignal
+        from gpcg.core.models import User, KnowledgeItem, EditorialSignal
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -91,7 +91,7 @@ class TestFeedbackPropagator:
             SIGNAL_MANUAL_ADD_BOOST,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem, EditorialSignal
+        from gpcg.core.models import User, KnowledgeItem, EditorialSignal
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -118,7 +118,7 @@ class TestFeedbackPropagator:
         from gpcg.application.feedback_propagator import FeedbackPropagator
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -143,7 +143,8 @@ class TestFeedbackPropagator:
         from gpcg.application.feedback_propagator import FeedbackPropagator
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Game, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
+        from gpcg.domains.games.models import Game
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -172,7 +173,8 @@ class TestFeedbackPropagator:
         from gpcg.application.feedback_propagator import FeedbackPropagator
         from gpcg.application.editorial_profile_service import get_or_create_profile
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Game, Video
+        from gpcg.core.models import User, Video
+        from gpcg.domains.games.models import Game
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -200,7 +202,7 @@ class TestFeedbackPropagator:
         """Rejection of a KI penalizes similar KIs via embeddings."""
         from gpcg.application.feedback_propagator import FeedbackPropagator
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -242,7 +244,7 @@ class TestFeedbackPropagator:
         """Rejection should NOT penalize dissimilar KIs."""
         from gpcg.application.feedback_propagator import FeedbackPropagator
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, KnowledgeItem
+        from gpcg.core.models import User, KnowledgeItem
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")
@@ -293,7 +295,7 @@ class TestFeedbackPropagator:
         try:
             from gpcg.application.feedback_propagator import FeedbackPropagator
             from gpcg.infrastructure.database import session_scope
-            from gpcg.domain.models import User, KnowledgeItem, EditorialSignal
+            from gpcg.core.models import User, KnowledgeItem, EditorialSignal
 
             with session_scope() as session:
                 user = User(email="test@example.com", name="test")
@@ -324,7 +326,7 @@ class TestFeedbackPropagator:
             SIGNAL_PRODUCTION_HISTORY,
         )
         from gpcg.infrastructure.database import session_scope
-        from gpcg.domain.models import User, Video, EditorialSignal
+        from gpcg.core.models import User, Video, EditorialSignal
 
         with session_scope() as session:
             user = User(email="test@example.com", name="test")

@@ -20,10 +20,9 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from gpcg.domain.models import (
+from gpcg.core.models import (
     Base,
     ChannelProfile,
-    Game,
     Job,
     JobStatus,
     JobType,
@@ -32,6 +31,7 @@ from gpcg.domain.models import (
     KnowledgeItemUsage,
     User,
 )
+from gpcg.domains.games.models import Game
 from gpcg.application.knowledge_item_service import (
     is_used_by_consumer,
     record_usage,
@@ -94,7 +94,7 @@ def test_channel_profile_serialized_in_job_data(db_session, two_users):
     db_session.commit()
 
     # Simulate the serialization logic from worker_routes.get_job_data
-    from gpcg.domain.models import ChannelProfile as CP
+    from gpcg.core.models import ChannelProfile as CP
     fetched = db_session.query(CP).filter(CP.user_id == job.user_id).first()
     assert fetched is not None
     assert fetched.channel_description == "Canal de análises de FPS"
@@ -119,7 +119,7 @@ def test_channel_profile_none_when_not_set(db_session, two_users):
     db_session.add(job)
     db_session.commit()
 
-    from gpcg.domain.models import ChannelProfile as CP
+    from gpcg.core.models import ChannelProfile as CP
     fetched = db_session.query(CP).filter(CP.user_id == job.user_id).first()
     assert fetched is None
 

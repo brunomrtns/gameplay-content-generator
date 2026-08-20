@@ -17,11 +17,7 @@ from gpcg.domain.video_profiles import (
 )
 from gpcg.infrastructure.database import session_scope
 from gpcg.domain.game_repository import get_or_create
-from gpcg.domain.models import (
-    GameplaySource,
-    GameplayAsset,
-    IngestionStatus,
-)
+from gpcg.domains.games.models import GameplaySource, GameplayAsset, IngestionStatus
 
 
 # ── Video profiles ──────────────────────────────────────────────────────────

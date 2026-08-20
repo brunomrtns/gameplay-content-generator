@@ -12,7 +12,12 @@ from gpcg.domain.game_resolver import (
     resolve_l2,
 )
 from gpcg.domain.filename_parser import parse_filename
-from gpcg.domain.models import Game, GameAlias, GameplaySource, GameResolutionMethod
+from gpcg.domains.games.models import (
+    Game,
+    GameAlias,
+    GameplaySource,
+    GameResolutionMethod,
+)
 from gpcg.infrastructure.database import init_db, session_scope
 
 

@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
 from gpcg.domain.game_registry import add_alias
-from gpcg.domain.models import Game
+from gpcg.domains.games.models import Game
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.infrastructure.wikidata_client import WikidataClient, WikidataGameInfo
 from gpcg.infrastructure.wikipedia_client import WikipediaClient, WikipediaArticle
