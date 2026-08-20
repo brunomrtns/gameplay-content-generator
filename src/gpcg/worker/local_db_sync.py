@@ -543,6 +543,13 @@ def run_generation_locally(
     # not the default ./data/. This is a file-storage path, not a DB path.
     os.environ["GPCG_DATA_DIR"] = str(storage_root / "data")
 
+    # get_settings() is @lru_cache(maxsize=1). RemoteWorker.__init__() calls
+    # it during startup, so the cache is already populated with the default
+    # gpcg_data_dir. We must clear the cache so GenerationService picks up
+    # the new GPCG_DATA_DIR we just set.
+    from gpcg.config import get_settings
+    get_settings.cache_clear()
+
     try:
         from gpcg.application.generation_service import GenerationService
 
@@ -663,6 +670,9 @@ def run_generation_locally(
         # Clean up file-storage env var (GPCG_DATA_DIR). The global DB engine
         # was never touched — no database._engine or GPCG_DB_PATH cleanup needed.
         os.environ.pop("GPCG_DATA_DIR", None)
+        # Clear settings cache so subsequent calls re-read env vars (which
+        # no longer have GPCG_DATA_DIR set, reverting to the default).
+        get_settings.cache_clear()
         # Clean up temp DB (always — it's a throwaway SQLite file)
         try:
             if db_path.exists():
