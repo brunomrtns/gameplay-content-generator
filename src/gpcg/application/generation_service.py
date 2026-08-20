@@ -63,7 +63,7 @@ from gpcg.core.models import (
     VideoStatus,
 )
 from gpcg.domains.games.models import Game
-from gpcg.infrastructure.database import session_scope
+from gpcg.infrastructure.database import session_scope as _global_session_scope
 from gpcg.infrastructure.google_integration_adapter import (
     GoogleIntegrationAdapter,
 )
@@ -97,10 +97,15 @@ class GenerationService:
         script_critic: Optional[ScriptCritic] = None,
         story_finder: Optional[StoryFinder] = None,
         humanizer: Optional[Humanizer] = None,
+        session_scope=None,
     ) -> None:
         self.llm = llm
         self.vg_adapter = vg_adapter
         self.settings = get_settings()
+        # Session scope: defaults to the global database.session_scope (VPS mode).
+        # When a session_scope is injected (worker local_db_sync), all DB access
+        # uses the temporary DB without mutating global database state.
+        self._session_scope = session_scope or _global_session_scope
         self.selector = GameplaySelector()
         self.plan_builder = RenderPlanBuilder()
         self.qa = QAService(llm=llm)
@@ -151,7 +156,7 @@ class GenerationService:
         `creative_style` overrides the CreativeEngine style preset for this job
         (one of CREATIVE_PRESETS). Only used when GPCG_CREATIVE_ENGINE_ENABLED=true.
         """
-        with session_scope() as session:
+        with self._session_scope() as session:
             if isinstance(game_name_or_id, int):
                 game = session.get(Game, game_name_or_id)
             else:
@@ -250,7 +255,7 @@ class GenerationService:
         Customization params override config defaults when non-empty/non-zero.
         `creative_style` overrides the CreativeEngine style preset for this job.
         """
-        with session_scope() as session:
+        with self._session_scope() as session:
             bg_game = session.get(Game, background_game_id)
             if bg_game is None:
                 raise ValueError(f"background game #{background_game_id} not found")
@@ -321,7 +326,7 @@ class GenerationService:
 
     def run_job(self, job_id: int) -> bool:
         """Run a job to completion. Returns True on success, False on failure."""
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             if job is None:
                 raise ValueError(f"job #{job_id} not found")
@@ -347,7 +352,7 @@ class GenerationService:
         vg = self.vg_adapter or VideoGenerateAdapter()
 
         # Determine job type to branch the pipeline
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             is_curiosity = job.type == JobType.curiosity_short.value
             bg_game_id = job.artifacts.get("background_game_id") if is_curiosity else None
@@ -388,7 +393,7 @@ class GenerationService:
 
         # ── Stage: content_planning ─────────────────────────────────────────
         self._set_stage(job_id, JobStage.content_planning)
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             planner = ContentPlanningService(llm=llm)
             if is_curiosity:
@@ -492,7 +497,7 @@ class GenerationService:
 
         # ── Stage: script ───────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.script)
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
 
             # ── Channel context (per-channel personalization) ──
@@ -566,7 +571,7 @@ class GenerationService:
             # Get user_id from job artifacts (fallback to job.user_id)
             _job_user_id = self._get_artifact(job_id, "user_id")
             if not _job_user_id:
-                with session_scope() as session:
+                with self._session_scope() as session:
                     _job_user_id = session.get(Job, job_id).user_id
             resolved = None
             if _job_user_id:
@@ -587,7 +592,7 @@ class GenerationService:
                     f"TTS will use video-generate default."
                 )
                 voice_path = ""  # let synthesize_tts use its own fallback
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             script = session.get(Script, script_id)
             plan = session.get(ContentPlan, script.content_plan_id)
@@ -640,7 +645,7 @@ class GenerationService:
         narration_dur = self._get_artifact(job_id, "narration_duration")
         # Read scene_duration from job artifacts (or config default)
         scene_duration = self._get_artifact(job_id, "scene_duration") or self.settings.gpcg_scene_duration
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             # For curiosity shorts: select from background_game_id; else: job.game_id
             select_game_id = bg_game_id if is_curiosity else job.game_id
@@ -745,7 +750,7 @@ class GenerationService:
 
         # ── Stage: music_selection ──────────────────────────────────────────
         self._set_stage(job_id, JobStage.music_selection)
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             plan = session.get(ContentPlan, job.content_plan_id)
             try:
@@ -764,7 +769,7 @@ class GenerationService:
         # Read video format + subtitle config from job artifacts (or config defaults)
         video_format = self._get_artifact(job_id, "video_format") or self.settings.gpcg_video_format
         sub_cfg_dict = self._get_artifact(job_id, "subtitle_config") or {}
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             script = session.get(Script, script_id)
             plan = session.get(ContentPlan, job.content_plan_id)
@@ -818,7 +823,7 @@ class GenerationService:
 
         # ── Stage: render ───────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.render)
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             plan = session.get(ContentPlan, job.content_plan_id)
             script = session.get(Script, script_id)
@@ -855,7 +860,7 @@ class GenerationService:
         # ── Stage: qa ───────────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.qa)
         video_path = Path(self._get_artifact(job_id, "video_path"))
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             plan = session.get(ContentPlan, job.content_plan_id)
             script = session.get(Script, script_id)
@@ -942,7 +947,7 @@ class GenerationService:
             log.warning(f"metadata_generation: missing script_id for job {job_id}")
             return
 
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             script = session.get(Script, script_id)
             plan = session.get(ContentPlan, job.content_plan_id)
@@ -990,7 +995,7 @@ class GenerationService:
             log.warning(f"youtube_upload: missing video_path or script_id for job {job_id}")
             return
 
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             script = session.get(Script, script_id)
             plan = session.get(ContentPlan, job.content_plan_id)
@@ -1076,7 +1081,7 @@ class GenerationService:
         the angle becomes the central idea and the frame informs the plan.
         Persists the plan into job.artifacts["creative_plan"].
         """
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             plan = session.get(ContentPlan, job.content_plan_id)
             if plan is None:
@@ -1124,7 +1129,7 @@ class GenerationService:
 
         Persists the concept into job.artifacts["story_concept"].
         """
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             plan = session.get(ContentPlan, job.content_plan_id)
             if plan is None:
@@ -1167,7 +1172,7 @@ class GenerationService:
 
         Non-fatal: if humanization fails, the original script is kept.
         """
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             script_id = job.artifacts.get("script_id")
             if not script_id:
@@ -1229,7 +1234,7 @@ class GenerationService:
 
         # Fetch the source fact for factual_accuracy checking
         source_fact = ""
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             current_script = session.get(Script, script_id)
             if current_script is None:
@@ -1281,7 +1286,7 @@ class GenerationService:
             # Revise the script
             revision_count += 1
             log.info(f"script_review job #{job_id}: revising (attempt {revision_count})")
-            with session_scope() as session:
+            with self._session_scope() as session:
                 svc = ScriptService(llm=llm)
                 revised = svc.generate_script(
                     session, current_script.content_plan_id,
@@ -1300,7 +1305,7 @@ class GenerationService:
                 session.flush()
 
         # Persist all reviews
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             job.artifacts = {
                 **job.artifacts,
@@ -1348,7 +1353,7 @@ class GenerationService:
         from gpcg.application.creative_engine import get_style
         from gpcg.core.models import Fact
 
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             plan = session.get(ContentPlan, job.content_plan_id)
             if plan is None:
@@ -1407,7 +1412,7 @@ class GenerationService:
             )
 
         # Persist into job artifacts
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             job.artifacts = {**job.artifacts, "creative_material": material.to_dict()}
             session.flush()
@@ -1416,7 +1421,7 @@ class GenerationService:
         return material
 
     def _set_stage(self, job_id: int, stage: JobStage) -> None:
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             job.stage = stage.value
             # Progress: rough mapping
@@ -1442,12 +1447,12 @@ class GenerationService:
         log.info(f"job #{job_id} → stage={stage.value}")
 
     def _get_artifact(self, job_id: int, key: str):
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             return job.artifacts.get(key)
 
     def _get_qa_score(self, job_id: int) -> float:
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             vid_id = job.artifacts.get("video_id")
             if vid_id:
@@ -1458,7 +1463,7 @@ class GenerationService:
     def _complete(self, job_id: int) -> None:
         from datetime import datetime, timezone
 
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             job.status = JobStatus.completed.value
             job.stage = JobStage.done.value
@@ -1468,7 +1473,7 @@ class GenerationService:
         log.info(f"job #{job_id} completed ✓")
 
     def _mark_failed(self, job_id: int, error: str, stage: str = "render") -> None:
-        with session_scope() as session:
+        with self._session_scope() as session:
             job = session.get(Job, job_id)
             job.status = JobStatus.failed.value
             job.stage = stage

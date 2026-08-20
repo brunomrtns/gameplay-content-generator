@@ -63,6 +63,34 @@ def session_scope() -> Iterator[Session]:
         session.close()
 
 
+def make_session_scope(session_factory: sessionmaker) -> "contextmanager[Iterator[Session]]":
+    """Create a session_scope context manager bound to a specific session factory.
+
+    This allows callers (e.g. local_db_sync.py on the worker) to run the
+    GenerationService against a temporary DB without mutating the global
+    engine state (no os.environ changes, no database._engine = None).
+
+    Usage:
+        SessionLocal = sessionmaker(bind=temp_engine, ...)
+        my_session_scope = make_session_scope(SessionLocal)
+        gen = GenerationService(session_scope=my_session_scope)
+        gen.run_job(job_id)
+    """
+    @contextmanager
+    def _scoped() -> Iterator[Session]:
+        session = session_factory()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    return _scoped
+
+
 def get_db() -> Iterator[Session]:
     """FastAPI dependency yielding a session (no commit — caller manages)."""
     _ensure_engine()

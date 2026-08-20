@@ -530,26 +530,23 @@ def run_generation_locally(
         log.error(f"Failed to populate local DB: {e}", exc_info=True)
         return {"status": "failed", "error": f"DB sync failed: {e}"}
 
-    # Override the DB path AND data dir in settings so GenerationService:
-    # 1. Uses our temp DB (not the VPS DB)
-    # 2. Saves rendered videos to the HD (not the SSD)
-    import os
-    os.environ["GPCG_DB_PATH"] = str(db_path)
+    # Create a session scope bound to the temp DB (no global DB state mutation).
+    # This replaces the old approach of mutating os.environ["GPCG_DB_PATH"] +
+    # database._engine = None. The session scope is passed explicitly to
+    # GenerationService, so the global engine is never touched.
+    from gpcg.infrastructure.database import make_session_scope
+
+    temp_session_scope = make_session_scope(SessionLocal)
+
+    # GPCG_DATA_DIR controls where rendered videos are saved (file storage,
+    # not database). Set it so GenerationService saves to the worker's HD,
+    # not the default ./data/. This is a file-storage path, not a DB path.
     os.environ["GPCG_DATA_DIR"] = str(storage_root / "data")
-
-    # Clear the settings cache so the new paths take effect
-    from gpcg.config import get_settings
-    get_settings.cache_clear()
-
-    # Also clear the DB engine cache
-    from gpcg.infrastructure import database
-    database._engine = None
-    database._SessionLocal = None
 
     try:
         from gpcg.application.generation_service import GenerationService
 
-        gen = GenerationService()
+        gen = GenerationService(session_scope=temp_session_scope)
 
         if progress_callback:
             # Hook into the pipeline progress
@@ -563,13 +560,10 @@ def run_generation_locally(
         log.info(f"Running GenerationService for job #{job_id} on local DB")
         gen.run_job(job_id)
 
-        # Extract results from the local DB.
-        # IMPORTANT: use session_scope() from database.py (engine B with WAL mode),
-        # NOT the SessionLocal from _create_temp_db (engine A without WAL).
-        # Engine B is the one GenerationService used to commit artifacts — engine A
-        # may not see those commits (WAL snapshot isolation).
-        from gpcg.infrastructure.database import session_scope as _session_scope
-        with _session_scope() as session:
+        # Extract results from the local DB using the same temp session scope.
+        # Since GenerationService used temp_session_scope (bound to SessionLocal),
+        # we use the same scope for extraction — same engine, no visibility issues.
+        with temp_session_scope() as session:
             from gpcg.core.models import ContentPlan, Script, Video
             from gpcg.core.models import Job as JobModel
 
@@ -666,13 +660,9 @@ def run_generation_locally(
         log.error(f"Generation failed for job #{job_id}: {e}", exc_info=True)
         return {"status": "failed", "error": str(e)}
     finally:
-        # Restore original env vars
-        for var in ("GPCG_DB_PATH", "GPCG_DATA_DIR", "GPCG_YOUTUBE_UPLOAD_ENABLED"):
-            if var in os.environ:
-                del os.environ[var]
-        get_settings.cache_clear()
-        database._engine = None
-        database._SessionLocal = None
+        # Clean up file-storage env var (GPCG_DATA_DIR). The global DB engine
+        # was never touched — no database._engine or GPCG_DB_PATH cleanup needed.
+        os.environ.pop("GPCG_DATA_DIR", None)
         # Clean up temp DB (always — it's a throwaway SQLite file)
         try:
             if db_path.exists():
