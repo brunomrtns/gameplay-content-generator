@@ -243,7 +243,8 @@ export function AutomationPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Left: settings */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Section 1: Conteúdo */}
+          {/* Section 1: Conteúdo (Games-only — gameplay source selection) */}
+          {dashData?.channel_domain !== "kids" && (
           <Card>
             <SectionTitle icon={Film} title="Conteúdo" desc="Qual gameplay usar como fonte" />
             <div className="space-y-4">
@@ -297,6 +298,7 @@ export function AutomationPage() {
               </div>
             </div>
           </Card>
+          )}
 
           {/* Section 2: Formato */}
           <Card>

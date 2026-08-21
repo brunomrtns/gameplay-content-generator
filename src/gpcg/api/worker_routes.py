@@ -1250,6 +1250,56 @@ def download_voice_worker(
     raise HTTPException(404, "voice not found")
 
 
+# ── Kids asset download (worker) ─────────────────────────────────────────────
+
+
+@router.get("/kids/assets/{asset_id}/download")
+def download_kids_asset(
+    asset_id: int,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Stream a Kids story asset (image) from VPS to the worker.
+
+    Used by the remote worker to download story assets (images) so the
+    Kids pipeline can use them locally for image-to-clip conversion.
+    """
+    from gpcg.domains.kids.models import StoryAsset
+    from gpcg.config import get_settings
+
+    asset = db.query(StoryAsset).filter(StoryAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Story asset not found")
+
+    if not asset.storage_key:
+        raise HTTPException(status_code=404, detail="No file available for download")
+
+    settings = get_settings()
+    assets_dir = settings.data_dir / "kids_assets"
+    file_path = assets_dir / asset.storage_key
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Asset file not found on VPS")
+
+    log.info(f"Worker downloading Kids asset #{asset_id} ({asset.filename})")
+
+    def _stream(path: Path, chunk_size: int = 1024 * 1024):
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+
+    return StreamingResponse(
+        _stream(file_path),
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f'attachment; filename="{asset.filename}"',
+            "Content-Length": str(file_path.stat().st_size),
+        },
+    )
+
+
 # ── Confirm download (checksum verification + cleanup) ───────────────────────
 
 
@@ -1900,13 +1950,17 @@ def get_job_data(
         log.warning(f"Failed to sync knowledge items: {e}")
         data["knowledge_items"] = []
 
-    # Gameplay sources + events — send ALL user's ready sources so the worker
-    # can do cross-game fallback when the primary game's clips are exhausted.
-    sources_query = db.query(GameplaySource).filter(
-        GameplaySource.user_id == job.user_id,
-        GameplaySource.processing_status == "ready",
-    )
-    sources = sources_query.all()
+    # Gameplay sources + events — only for Games jobs.
+    # Kids jobs don't use gameplay sources; sending them wastes bandwidth
+    # and could confuse the worker's local DB sync.
+    if job.domain != "kids":
+        sources_query = db.query(GameplaySource).filter(
+            GameplaySource.user_id == job.user_id,
+            GameplaySource.processing_status == "ready",
+        )
+        sources = sources_query.all()
+    else:
+        sources = []
     data["gameplay_sources"] = []
     for src in sources:
         src_data = {
@@ -2114,7 +2168,7 @@ def sync_job_result(
                 tone=req.content_plan.get("tone", "curious"),
                 energy=req.content_plan.get("energy", 0.7),
                 music_mood=req.content_plan.get("music_mood", "neutral"),
-                visual_strategy=req.content_plan.get("visual_strategy", "gameplay_compilation"),
+                visual_strategy=req.content_plan.get("visual_strategy", "auto"),
                 metadata_json=req.content_plan.get("metadata_json", {}),
             )
             db.add(plan)

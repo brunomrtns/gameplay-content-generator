@@ -575,6 +575,48 @@ class RemoteWorker:
                 pass
         return False
 
+    # ── Kids asset download ───────────────────────────────────────────────────
+
+    def _download_kids_assets(self, job_data: dict) -> None:
+        """Download Kids story assets (images) from VPS to local storage.
+
+        For Kids jobs, the pipeline needs the images locally to convert them
+        to video clips (Ken Burns effect). This downloads each asset via the
+        worker-auth endpoint /api/kids/assets/{id}/download and saves to
+        {storage_root}/kids_assets/{storage_key}.
+        """
+        assets = job_data.get("story_assets", [])
+        if not assets:
+            log.warning("Kids job has no story_assets in job_data — pipeline will have no images")
+            return
+
+        kids_dir = self.storage_root / "kids_assets"
+        kids_dir.mkdir(parents=True, exist_ok=True)
+
+        for asset in assets:
+            asset_id = asset.get("id")
+            storage_key = asset.get("storage_key", "")
+            filename = asset.get("filename", f"asset_{asset_id}")
+
+            if not asset_id or not storage_key:
+                log.warning(f"Skipping Kids asset with missing id/storage_key: {asset}")
+                continue
+
+            local_path = kids_dir / storage_key
+            if local_path.exists():
+                log.info(f"Kids asset #{asset_id} already exists locally: {local_path}")
+                continue
+
+            try:
+                log.info(f"Downloading Kids asset #{asset_id} ({filename}) from VPS...")
+                resp = self.client.get(f"/api/kids/assets/{asset_id}/download")
+                resp.raise_for_status()
+                with open(local_path, "wb") as f:
+                    f.write(resp.content)
+                log.info(f"Downloaded Kids asset #{asset_id} → {local_path}")
+            except Exception as e:
+                log.error(f"Failed to download Kids asset #{asset_id}: {e}")
+
     # ── Confirm download (checksum) ──────────────────────────────────────────
 
     def confirm_download(self, source: dict, local_path: Path) -> bool:
@@ -1847,6 +1889,12 @@ class RemoteWorker:
         import os
         os.environ["GPCG_YOUTUBE_UPLOAD_ENABLED"] = "false"
 
+        # Kids: download story assets (images) from VPS before generation.
+        # Games: gameplay files are downloaded separately during mapping jobs.
+        job_domain = job_data.get("job", {}).get("domain", "games")
+        if job_domain == "kids":
+            self._download_kids_assets(job_data)
+
         self.update_job_status(job_id, status="running", stage="content_planning", progress=0.05)
         self.send_status("busy", "Gerando vídeo", job_id=job_id)
 
@@ -2043,20 +2091,44 @@ class RemoteWorker:
         # Games: gameplays/, mapped/
         # Kids: kids_assets/
         # Shared (cleaned for both): renders/, outputs/ (per-job, safe to clean)
+        #
+        # MULTI-USER SAFETY: The cleanup job carries "filenames" and
+        # "storage_keys" lists in artifacts — only files matching those
+        # names are deleted. This prevents deleting other users' files
+        # in a multi-user deployment. If the lists are empty (legacy job
+        # or no files to clean), we fall back to deleting all files in
+        # the domain-specific directories (single-user backward compat).
+
+        cleanup_filenames = set(artifacts.get("filenames", []))
+        cleanup_storage_keys = set(artifacts.get("storage_keys", []))
+        # Also derive filenames from storage_keys (worker may store by storage_key)
+        cleanup_names = cleanup_filenames | cleanup_storage_keys
+
+        def _should_delete(filename: str) -> bool:
+            """Check if a file should be deleted (user-scoped)."""
+            if not cleanup_names:
+                # No list provided — backward compat: delete all
+                return True
+            # Check if the filename matches any known filename or storage_key
+            # Files are stored as {source_id}_{original_filename} or {hash}_{filename}
+            for name in cleanup_names:
+                if filename == name or filename.endswith(name) or name in filename:
+                    return True
+            return False
 
         if old_domain == "games":
             # 1a. Clean gameplays directory (Games-specific)
             gameplays_dir = storage_root / "gameplays"
             if gameplays_dir.exists():
                 for f in gameplays_dir.iterdir():
-                    if f.is_file():
+                    if f.is_file() and _should_delete(f.name):
                         _safe_delete(f)
 
             # 1b. Clean mapped directory — analysis JSONs (Games-specific)
             mapped_dir = storage_root / "mapped"
             if mapped_dir.exists():
                 for f in mapped_dir.iterdir():
-                    if f.is_file():
+                    if f.is_file() and _should_delete(f.name):
                         _safe_delete(f)
 
         elif old_domain == "kids":
@@ -2066,7 +2138,7 @@ class RemoteWorker:
                 kids_assets_dir = storage_root / "data" / "kids_assets"
             if kids_assets_dir.exists():
                 for f in kids_assets_dir.iterdir():
-                    if f.is_file():
+                    if f.is_file() and _should_delete(f.name):
                         _safe_delete(f)
 
         # 3. Clean renders directory — intermediate render files (shared)

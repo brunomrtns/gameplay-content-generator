@@ -247,11 +247,11 @@ export function DashboardPage() {
           </div>
           <div className="space-y-2">
             <button
-              onClick={() => navigate("/content")}
+              onClick={() => navigate(isKidsDomain ? "/kids" : "/content")}
               className="flex w-full items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm transition-all hover:border-border-bright hover:bg-surface-hover"
             >
               <FileText className="h-4 w-4 text-accent" />
-              <span>Enviar gameplays</span>
+              <span>{isKidsDomain ? "Criar tópicos" : "Enviar gameplays"}</span>
             </button>
             <button
               onClick={() => navigate("/automation")}

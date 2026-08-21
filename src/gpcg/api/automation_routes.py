@@ -1637,21 +1637,33 @@ def dashboard(
         yt_connected = status.get("connected", False)
         yt_channel = status.get("channelTitle")
 
-    # Gameplays
-    total_gameplays = db.query(GameplaySource).filter(
-        GameplaySource.user_id == user.id
-    ).count()
-    processing_gameplays = db.query(GameplaySource).filter(
-        GameplaySource.user_id == user.id,
-        GameplaySource.ingestion_status.in_([
-            IngestionStatus.discovered.value,
-            IngestionStatus.probing.value,
-        ]),
-    ).count()
-    ready_gameplays = db.query(GameplaySource).filter(
-        GameplaySource.user_id == user.id,
-        GameplaySource.ingestion_status == IngestionStatus.ready.value,
-    ).count()
+    # Channel domain (needed to decide which stats to query)
+    from gpcg.core.models import ChannelProfile, ContentDomain
+    profile = db.query(ChannelProfile).filter(
+        ChannelProfile.user_id == user.id
+    ).first()
+    channel_domain = profile.domain if profile else ContentDomain.games.value
+
+    # Gameplays (only query for Games domain — avoids unnecessary queries for Kids)
+    if channel_domain == ContentDomain.games.value:
+        total_gameplays = db.query(GameplaySource).filter(
+            GameplaySource.user_id == user.id
+        ).count()
+        processing_gameplays = db.query(GameplaySource).filter(
+            GameplaySource.user_id == user.id,
+            GameplaySource.ingestion_status.in_([
+                IngestionStatus.discovered.value,
+                IngestionStatus.probing.value,
+            ]),
+        ).count()
+        ready_gameplays = db.query(GameplaySource).filter(
+            GameplaySource.user_id == user.id,
+            GameplaySource.ingestion_status == IngestionStatus.ready.value,
+        ).count()
+    else:
+        total_gameplays = 0
+        processing_gameplays = 0
+        ready_gameplays = 0
 
     # Jobs
     total_jobs = db.query(Job).filter(Job.user_id == user.id).count()
@@ -1706,13 +1718,6 @@ def dashboard(
     # Automation
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     auto_status = auto.status if auto else "idle"
-
-    # Channel domain
-    from gpcg.core.models import ChannelProfile, ContentDomain
-    profile = db.query(ChannelProfile).filter(
-        ChannelProfile.user_id == user.id
-    ).first()
-    channel_domain = profile.domain if profile else ContentDomain.games.value
 
     # Domain-aware stats: Games gets gameplay stats, Kids gets topic/asset stats
     result = {

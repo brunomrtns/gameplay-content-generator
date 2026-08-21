@@ -40,6 +40,7 @@ const STAGE_LABELS: Record<string, string> = {
   script_review: "Revisando roteiro",
   tts: "Sintetizando voz",
   gameplay_selection: "Selecionando cenas",
+  visual_selection: "Selecionando imagens",
   music_selection: "Selecionando música",
   render_plan: "Planejando renderização",
   render: "Renderizando vídeo",

@@ -242,6 +242,30 @@ def reset_channel_domain(
     # Each domain has its own cleanup function. We clean the domain the user
     # is switching AWAY from, not the target domain.
     old_domain = summary["old_domain"] or ContentDomain.games.value
+
+    # Collect filenames/storage_keys BEFORE deleting (needed for cleanup job)
+    cleanup_filenames: list[str] = []
+    cleanup_storage_keys: list[str] = []
+
+    if old_domain == ContentDomain.games.value:
+        from gpcg.domains.games.models import GameplaySource
+        for src in session.query(GameplaySource).filter(
+            GameplaySource.user_id == user_id
+        ).all():
+            if src.filename:
+                cleanup_filenames.append(src.filename)
+            if src.storage_key:
+                cleanup_storage_keys.append(src.storage_key)
+    elif old_domain == ContentDomain.kids.value:
+        from gpcg.domains.kids.models import StoryAsset
+        for asset in session.query(StoryAsset).filter(
+            StoryAsset.user_id == user_id
+        ).all():
+            if asset.filename:
+                cleanup_filenames.append(asset.filename)
+            if asset.storage_key:
+                cleanup_storage_keys.append(asset.storage_key)
+
     if old_domain == ContentDomain.games.value:
         summary.update(_delete_games_domain_data(session, user_id))
     elif old_domain == ContentDomain.kids.value:
@@ -263,11 +287,11 @@ def reset_channel_domain(
     session.flush()
 
     # ── 9b. Create cleanup_user_storage job for comprehensive worker cleanup ─
-    # This job tells workers to delete ALL files for this user from their
-    # local storage (gameplays, mapped, renders, outputs). It complements
-    # the per-source cleanup_gameplay jobs by ensuring no orphaned files
-    # remain even if per-source cleanup missed something.
+    # This job tells workers to delete files for this user from their
+    # local storage. It carries the list of filenames/storage_keys to delete
+    # so the worker can filter by user (multi-user safety).
     import uuid as _uuid
+
     user_storage_cleanup = Job(
         job_uuid=str(_uuid.uuid4()),
         type=JobType.cleanup_user_storage.value,
@@ -275,7 +299,12 @@ def reset_channel_domain(
         domain=new_domain,  # belongs to the new domain (cleanup is domain-agnostic)
         status=JobStatus.queued.value,
         priority=JobPriority.high.value,
-        artifacts={"user_id": user_id, "old_domain": old_domain},
+        artifacts={
+            "user_id": user_id,
+            "old_domain": old_domain,
+            "filenames": cleanup_filenames,
+            "storage_keys": cleanup_storage_keys,
+        },
     )
     session.add(user_storage_cleanup)
     summary["cleanup_jobs_created"] += 1

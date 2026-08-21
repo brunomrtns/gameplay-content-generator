@@ -195,9 +195,10 @@ class RenderPlanBuilder:
             )
             cumulative += scene_dur
 
-            # Mark assets as used
+            # Mark assets as used (skip for Kids clips where asset is None)
             for clip in scene_clips_list:
-                clip.asset.used_count += 1
+                if clip.asset is not None:
+                    clip.asset.used_count += 1
 
         if not scene_timeline:
             raise ValueError("no clips could be extracted — cannot build render plan")
