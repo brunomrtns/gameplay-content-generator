@@ -64,9 +64,13 @@ log = get_logger(__name__)
 VALID_DOMAINS = {d.value for d in ContentDomain}
 
 # Domains that are actually implemented with a working pipeline.
-# Only these can be selected as a target for domain switch.
-# Others are registered for future expansion but cannot be activated.
-IMPLEMENTED_DOMAINS = {"games"}
+# Imported from the domain registry to keep a single source of truth.
+# We import lazily to avoid circular imports (registry imports domain pipelines).
+def _get_implemented_domains() -> set[str]:
+    from gpcg.domains.registry import IMPLEMENTED_DOMAINS as _impl
+    return _impl
+
+IMPLEMENTED_DOMAINS = _get_implemented_domains()
 
 
 def reset_channel_domain(
@@ -117,6 +121,8 @@ def reset_channel_domain(
         "cleanup_jobs_created": 0,
         "games_deleted": 0,
         "gameplay_sources_deleted": 0,
+        "kids_topics_deleted": 0,
+        "story_assets_deleted": 0,
     }
 
     # ── 0. Load channel profile and record old domain ──────────────────────
@@ -232,15 +238,14 @@ def reset_channel_domain(
     ).delete(synchronize_session=False)
     session.flush()
 
-    # ── 8. Delete Games-specific data (if old domain was games) ────────────
-    # This is the domain-specific cleanup. For Games, we delete:
-    # - GameplayClipUsage, GameplayEventEmbedding, GameplayEvent
-    # - GameplayAsset, GameplayDownload
-    # - GameplaySource (soft-delete + cleanup job for worker files)
-    # - GameAlias, Game
+    # ── 8. Delete domain-specific data based on OLD domain ─────────────────
+    # Each domain has its own cleanup function. We clean the domain the user
+    # is switching AWAY from, not the target domain.
     old_domain = summary["old_domain"] or ContentDomain.games.value
     if old_domain == ContentDomain.games.value:
         summary.update(_delete_games_domain_data(session, user_id))
+    elif old_domain == ContentDomain.kids.value:
+        summary.update(_delete_kids_domain_data(session, user_id))
     session.flush()
 
     # ── 9. Reset ChannelProfile domain-specific fields + set new domain ────
@@ -289,7 +294,9 @@ def reset_channel_domain(
         f"{summary['content_plans_deleted']} plans, "
         f"{summary['facts_deleted']} facts, "
         f"{summary['knowledge_items_deleted']} knowledge items, "
-        f"{summary['gameplay_sources_deleted']} gameplay sources. "
+        f"{summary['gameplay_sources_deleted']} gameplay sources, "
+        f"{summary['kids_topics_deleted']} kids topics, "
+        f"{summary['story_assets_deleted']} story assets. "
         f"Created {summary['cleanup_jobs_created']} cleanup jobs. "
         f"Preserved {summary['videos_preserved_published']} published videos."
     )
@@ -392,3 +399,39 @@ def _delete_games_domain_data(session: Session, user_id: int) -> dict[str, Any]:
     session.flush()
 
     return result
+
+
+def _delete_kids_domain_data(session: Session, user_id: int) -> dict[str, Any]:
+    """Delete all Kids-specific data for a user.
+
+    Kids data is simpler than Games: just topics and story assets.
+    No events, no embeddings, no clip usage — images are simple assets.
+    The cleanup_user_storage job handles physical file deletion on workers.
+    """
+    from gpcg.domains.kids.models import KidsTopic, StoryAsset
+
+    result = {
+        "kids_topics_deleted": 0,
+        "story_assets_deleted": 0,
+    }
+
+    # Delete story assets first (FK to topics)
+    assets = session.query(StoryAsset).filter(
+        StoryAsset.user_id == user_id
+    ).all()
+    result["story_assets_deleted"] = len(assets)
+    for asset in assets:
+        session.delete(asset)
+    session.flush()
+
+    # Delete topics (cascade will handle any remaining assets)
+    topics = session.query(KidsTopic).filter(
+        KidsTopic.user_id == user_id
+    ).all()
+    result["kids_topics_deleted"] = len(topics)
+    for topic in topics:
+        session.delete(topic)
+    session.flush()
+
+    return result
+

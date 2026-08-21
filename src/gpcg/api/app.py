@@ -18,6 +18,7 @@ from gpcg.api.upload_routes import router as upload_router
 from gpcg.api.knowledge_routes import router as knowledge_router
 from gpcg.api.game_registry_routes import router as game_registry_router
 from gpcg.api.knowledge_item_routes import router as knowledge_item_router
+from gpcg.api.kids_routes import router as kids_router
 from gpcg.config import PROJECT_ROOT, get_settings
 from gpcg.infrastructure.database import init_db
 
@@ -57,6 +58,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge_router, prefix="/api")
     app.include_router(game_registry_router, prefix="/api")
     app.include_router(knowledge_item_router, prefix="/api")
+    app.include_router(kids_router, prefix="/api")
     app.include_router(routes.router, prefix="/api")
 
     # Health

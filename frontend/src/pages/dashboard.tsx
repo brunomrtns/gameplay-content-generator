@@ -102,16 +102,25 @@ export function DashboardPage() {
   }
 
   const gameplays = dash?.gameplays || { total: 0, processing: 0, ready: 0 };
+  const kids = dash?.kids || { total_topics: 0, total_assets: 0, ready_assets: 0 };
   const videos = dash?.videos || { total: 0, published: 0 };
   const jobs = dash?.jobs || { total: 0, running: 0 };
   const recentVideos = dash?.recent_videos || [];
+  const isKidsDomain = dash?.channel_domain === "kids";
 
-  const stats = [
-    { label: "Gameplays", value: gameplays.total, icon: Film, sub: `${gameplays.ready} prontos`, color: "text-accent" },
-    { label: "Processando", value: gameplays.processing, icon: Loader2, sub: gameplays.processing > 0 ? "em análise" : "tudo ok", color: "text-accent-warm" },
-    { label: "Vídeos produzidos", value: videos.total, icon: VideoIcon, sub: jobs.running > 0 ? "produzindo agora" : "em pausa", color: "text-accent" },
-    { label: "Publicados", value: videos.published, icon: Send, sub: "no YouTube", color: "text-accent-warm" },
-  ];
+  const stats = isKidsDomain
+    ? [
+        { label: "Tópicos", value: kids.total_topics, icon: FileText, sub: `${kids.ready_assets} imagens prontas`, color: "text-accent" },
+        { label: "Imagens", value: kids.total_assets, icon: Upload, sub: `${kids.ready_assets} prontas`, color: "text-accent-warm" },
+        { label: "Vídeos produzidos", value: videos.total, icon: VideoIcon, sub: jobs.running > 0 ? "produzindo agora" : "em pausa", color: "text-accent" },
+        { label: "Publicados", value: videos.published, icon: Send, sub: "no YouTube", color: "text-accent-warm" },
+      ]
+    : [
+        { label: "Gameplays", value: gameplays.total, icon: Film, sub: `${gameplays.ready} prontos`, color: "text-accent" },
+        { label: "Processando", value: gameplays.processing, icon: Loader2, sub: gameplays.processing > 0 ? "em análise" : "tudo ok", color: "text-accent-warm" },
+        { label: "Vídeos produzidos", value: videos.total, icon: VideoIcon, sub: jobs.running > 0 ? "produzindo agora" : "em pausa", color: "text-accent" },
+        { label: "Publicados", value: videos.published, icon: Send, sub: "no YouTube", color: "text-accent-warm" },
+      ];
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -122,7 +131,7 @@ export function DashboardPage() {
           <p className="mt-1 text-sm text-text-secondary">Sua máquina de produção de conteúdo</p>
           {dash?.channel_domain && (
             <span className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-accent/10 border border-accent/20 px-2 py-0.5 text-[10px] font-medium text-accent">
-              {dash.channel_domain === "games" ? "Games" : dash.channel_domain}
+              {dash.channel_domain === "games" ? "Games" : dash.channel_domain === "kids" ? "Kids" : dash.channel_domain}
             </span>
           )}
         </div>

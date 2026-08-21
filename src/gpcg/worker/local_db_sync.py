@@ -43,6 +43,30 @@ def _parse_dt(val):
         return None
 
 
+def _resolve_local_asset_path(storage_key: str, filename: str, storage_root: Path) -> Optional[str]:
+    """Resolve a VPS story asset path to a local file path.
+
+    Kids story assets (images) are stored in the kids_assets/ directory.
+    The VPS stores them at /app/data/kids_assets/{filename}, locally they
+    may be in {storage_root}/data/kids_assets/{filename} or
+    {storage_root}/kids_assets/{filename}.
+    """
+    if not filename:
+        return None
+
+    search_dirs = [
+        storage_root / "data" / "kids_assets",
+        storage_root / "kids_assets",
+    ]
+
+    for d in search_dirs:
+        p = d / filename
+        if p.exists():
+            return str(p)
+
+    return None
+
+
 def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Path) -> Optional[str]:
     """Resolve a VPS gameplay file path to a local file path.
 
@@ -136,6 +160,7 @@ def _create_temp_db(db_path: Path) -> sessionmaker:
     # Import ALL models so Base.metadata knows about every table
     import gpcg.core.models  # noqa: F401 — side effect: registers core tables
     import gpcg.domains.games.models  # noqa: F401 — side effect: registers games tables
+    import gpcg.domains.kids.models  # noqa: F401 — side effect: registers kids tables
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(
@@ -175,6 +200,7 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
     GameplayAsset,
     GameplayClipUsage,
 )
+    from gpcg.domains.kids.models import KidsTopic, StoryAsset
 
     SessionLocal = _create_temp_db(db_path)
     session = SessionLocal()
@@ -380,6 +406,47 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
         session.flush()
         log.info(f"populate_local_db: flushed {len(ki_list_raw)} knowledge_items")
 
+        # Kids domain data (topics + story assets) — only present for Kids jobs
+        kids_topic_data = job_data.get("kids_topic")
+        if kids_topic_data:
+            session.add(KidsTopic(
+                id=kids_topic_data["id"],
+                user_id=user_id,
+                title=kids_topic_data["title"],
+                slug=kids_topic_data.get("slug", ""),
+                category=kids_topic_data.get("category", "general"),
+                age_range=kids_topic_data.get("age_range", "3-6"),
+                description=kids_topic_data.get("description", ""),
+                metadata_json=kids_topic_data.get("metadata_json", {}),
+            ))
+            session.flush()
+
+        for asset_data in job_data.get("story_assets", []):
+            # Resolve local image path
+            storage_root_path = storage_root or Path("/media/bruno/ToshibaHD/gpcg")
+            local_path = _resolve_local_asset_path(
+                asset_data.get("storage_key", ""),
+                asset_data.get("filename", ""),
+                storage_root_path,
+            )
+            session.add(StoryAsset(
+                id=asset_data["id"],
+                user_id=user_id,
+                topic_id=asset_data["topic_id"],
+                filename=asset_data["filename"],
+                storage_key=asset_data.get("storage_key", ""),
+                file_hash=asset_data.get("file_hash", ""),
+                file_size=asset_data.get("file_size", 0),
+                width=asset_data.get("width", 0),
+                height=asset_data.get("height", 0),
+                processing_status=asset_data.get("processing_status", "ready"),
+                metadata_json={
+                    **asset_data.get("metadata_json", {}),
+                    "local_path": local_path,
+                },
+            ))
+        session.flush()
+
         # Content plan (if exists)
         plan_data = job_data.get("content_plan")
         if plan_data:
@@ -552,20 +619,15 @@ def run_generation_locally(
     get_settings.cache_clear()
 
     try:
-        from gpcg.application.generation_service import GenerationService
+        # Domain dispatch: select the right pipeline based on job.domain.
+        # This is the single dispatch point in the worker — no if/elif
+        # domain checks scattered around.
+        from gpcg.domains.registry import get_generation_service
 
-        gen = GenerationService(session_scope=temp_session_scope)
+        job_domain = job.get("domain", "games")
+        gen = get_generation_service(job_domain, session_scope=temp_session_scope)
 
-        if progress_callback:
-            # Hook into the pipeline progress
-            original_run = gen._run_pipeline
-
-            def _run_with_progress(job_id_inner, *args, **kwargs):
-                # The GenerationService updates job.stage/progress in the DB.
-                # We poll the DB to report progress.
-                return original_run(job_id_inner, *args, **kwargs)
-
-        log.info(f"Running GenerationService for job #{job_id} on local DB")
+        log.info(f"Running {type(gen).__name__} for job #{job_id} (domain={job_domain}) on local DB")
         gen.run_job(job_id)
 
         # Extract results from the local DB using the same temp session scope.

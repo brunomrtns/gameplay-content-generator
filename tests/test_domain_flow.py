@@ -113,20 +113,19 @@ def user_with_games_and_jobs(user_with_games, db_session):
 # ── Domain selection tests ───────────────────────────────────────────────────
 
 
-def test_games_is_only_implemented_domain():
-    """Games is the only implemented domain."""
-    assert IMPLEMENTED_DOMAINS == {"games"}
+def test_games_and_kids_are_implemented_domains():
+    """Games and Kids are both implemented domains."""
+    assert "games" in IMPLEMENTED_DOMAINS
+    assert "kids" in IMPLEMENTED_DOMAINS
 
 
 def test_non_implemented_domains_not_selectable():
     """Non-implemented domains are in VALID_DOMAINS but not in IMPLEMENTED_DOMAINS."""
     # They exist for future expansion
-    assert "kids" in VALID_DOMAINS
     assert "movies" in VALID_DOMAINS
     assert "conspiracy" in VALID_DOMAINS
     assert "technology" in VALID_DOMAINS
-    # But only Games is implemented
-    assert "kids" not in IMPLEMENTED_DOMAINS
+    # But they are NOT implemented
     assert "movies" not in IMPLEMENTED_DOMAINS
     assert "conspiracy" not in IMPLEMENTED_DOMAINS
     assert "technology" not in IMPLEMENTED_DOMAINS

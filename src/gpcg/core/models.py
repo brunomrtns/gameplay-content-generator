@@ -112,6 +112,7 @@ class JobStage(str, enum.Enum):
     script_review = "script_review"  # NEW: ScriptCritic PASS/REVISE
     tts = "tts"
     gameplay_selection = "gameplay_selection"
+    visual_selection = "visual_selection"  # Kids: image selection (analogous to gameplay_selection)
     music_selection = "music_selection"
     render_plan = "render_plan"
     render = "render"
@@ -357,7 +358,7 @@ class ContentPlan(Base):
     tone: Mapped[str] = mapped_column(String(50), default="curious")
     energy: Mapped[float] = mapped_column(Float, default=0.7)
     music_mood: Mapped[str] = mapped_column(String(50), default="neutral")
-    visual_strategy: Mapped[str] = mapped_column(String(50), default="gameplay_compilation")
+    visual_strategy: Mapped[str] = mapped_column(String(50), default="auto")
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 

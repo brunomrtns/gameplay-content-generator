@@ -1714,15 +1714,11 @@ def dashboard(
     ).first()
     channel_domain = profile.domain if profile else ContentDomain.games.value
 
-    return {
+    # Domain-aware stats: Games gets gameplay stats, Kids gets topic/asset stats
+    result = {
         "youtube_connected": yt_connected,
         "youtube_channel": yt_channel,
         "channel_domain": channel_domain,
-        "gameplays": {
-            "total": total_gameplays,
-            "processing": processing_gameplays,
-            "ready": ready_gameplays,
-        },
         "jobs": {
             "total": total_jobs,
             "running": running_jobs,
@@ -1734,6 +1730,39 @@ def dashboard(
         "automation_status": auto_status,
         "recent_videos": recent_list,
     }
+
+    if channel_domain == "games":
+        result["gameplays"] = {
+            "total": total_gameplays,
+            "processing": processing_gameplays,
+            "ready": ready_gameplays,
+        }
+    elif channel_domain == "kids":
+        # Kids domain stats: topics + story assets
+        from gpcg.domains.kids.models import KidsTopic, StoryAsset, AssetProcessingStatus
+        total_topics = db.query(KidsTopic).filter(
+            KidsTopic.user_id == user.id
+        ).count()
+        total_assets = db.query(StoryAsset).filter(
+            StoryAsset.user_id == user.id
+        ).count()
+        ready_assets = db.query(StoryAsset).filter(
+            StoryAsset.user_id == user.id,
+            StoryAsset.processing_status == AssetProcessingStatus.ready.value,
+        ).count()
+        result["kids"] = {
+            "total_topics": total_topics,
+            "total_assets": total_assets,
+            "ready_assets": ready_assets,
+        }
+    else:
+        result["gameplays"] = {
+            "total": total_gameplays,
+            "processing": processing_gameplays,
+            "ready": ready_gameplays,
+        }
+
+    return result
 
 
 @router.get("/health/problems")

@@ -1953,6 +1953,34 @@ def get_job_data(
         } for cu in clip_usages]
         data["gameplay_sources"].append(src_data)
 
+    # Kids domain data — only for Kids jobs (domain == "kids")
+    if job.domain == "kids":
+        from gpcg.domains.kids.models import KidsTopic, StoryAsset
+        topic_id = (_ensure_dict(job.artifacts) or {}).get("topic_id")
+        if topic_id:
+            topic = db.query(KidsTopic).filter(KidsTopic.id == topic_id).first()
+            if topic:
+                data["kids_topic"] = {
+                    "id": topic.id, "user_id": topic.user_id,
+                    "title": topic.title, "slug": topic.slug,
+                    "category": topic.category, "age_range": topic.age_range,
+                    "description": topic.description,
+                    "metadata_json": topic.metadata_json,
+                }
+                # Story assets for this topic
+                assets = db.query(StoryAsset).filter(
+                    StoryAsset.topic_id == topic.id,
+                    StoryAsset.processing_status == "ready",
+                ).all()
+                data["story_assets"] = [{
+                    "id": a.id, "user_id": a.user_id, "topic_id": a.topic_id,
+                    "filename": a.filename, "storage_key": a.storage_key,
+                    "file_hash": a.file_hash, "file_size": a.file_size,
+                    "width": a.width, "height": a.height,
+                    "processing_status": a.processing_status,
+                    "metadata_json": a.metadata_json,
+                } for a in assets]
+
     # Automation config (for video customization settings)
     automation = db.query(Automation).filter(Automation.user_id == job.user_id).first()
     if automation:

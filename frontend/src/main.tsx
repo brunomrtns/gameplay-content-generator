@@ -10,6 +10,7 @@ import { AutomationPage } from "@/pages/automation";
 import { VideosPage } from "@/pages/videos";
 import { IdeasPage } from "@/pages/ideas";
 import { AdminPage } from "@/pages/admin";
+import { KidsPage } from "@/pages/kids";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { Spinner } from "@/components/ui";
@@ -82,6 +83,7 @@ const router = createBrowserRouter(
           children: [
             { path: "/dashboard", element: <DashboardPage /> },
             { path: "/content", element: <ContentPage /> },
+            { path: "/kids", element: <KidsPage /> },
             { path: "/jobs", element: <JobsPage /> },
             { path: "/automation", element: <AutomationPage /> },
             { path: "/videos", element: <VideosPage /> },

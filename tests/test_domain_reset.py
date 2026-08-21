@@ -260,7 +260,7 @@ def test_reset_rejects_non_implemented_domain(db_session, user_with_games_data):
     """Reset to a valid but not-yet-implemented domain raises ValueError."""
     user_id = user_with_games_data
     with pytest.raises(ValueError, match="not yet implemented"):
-        reset_channel_domain(db_session, user_id, "kids", confirm=True)
+        reset_channel_domain(db_session, user_id, "movies", confirm=True)
 
 
 # ── Test 4: Reset cancels jobs ───────────────────────────────────────────────

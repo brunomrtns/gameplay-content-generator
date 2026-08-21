@@ -1,13 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { LayoutDashboard, FileText, Settings, Video, Shield, LogOut, ChevronDown, Zap, ListChecks, Lightbulb } from "lucide-react";
+import { LayoutDashboard, FileText, Settings, Video, Shield, LogOut, ChevronDown, Zap, ListChecks, Lightbulb, Baby } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { Toaster } from "sonner";
 import { UploadIndicator } from "@/components/upload-indicator";
 
-const NAV = [
+const GAMES_NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/content", label: "Conteúdo", icon: FileText },
   { to: "/ideas", label: "Ideias", icon: Lightbulb },
@@ -16,10 +16,24 @@ const NAV = [
   { to: "/videos", label: "Vídeos", icon: Video },
 ];
 
+const KIDS_NAV = [
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/kids", label: "Tópicos", icon: Baby },
+  { to: "/jobs", label: "Jobs", icon: ListChecks },
+  { to: "/automation", label: "Automação", icon: Settings },
+  { to: "/videos", label: "Vídeos", icon: Video },
+];
+
 export function Layout() {
   const { user, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [domain, setDomain] = useState<string>("games");
 
+  useEffect(() => {
+    api.getDashboard().then((d) => setDomain(d.channel_domain || "games")).catch(() => {});
+  }, []);
+
+  const NAV = domain === "kids" ? KIDS_NAV : GAMES_NAV;
   const navItems = [...NAV];
   if (user?.is_admin) {
     navItems.push({ to: "/admin", label: "Admin", icon: Shield });

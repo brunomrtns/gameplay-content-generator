@@ -520,4 +520,31 @@ export const api = {
     if (!res.ok) throw new Error(res.statusText);
     return res.json() as Promise<{ results: any[]; count: number }>;
   },
+
+  // ── Kids Domain ─────────────────────────────────────────────────────────
+  listKidsTopics: () => request<{ topics: any[] }>("/kids/topics"),
+  createKidsTopic: (data: { title: string; category?: string; age_range?: string; description?: string }) =>
+    request<any>("/kids/topics", { method: "POST", body: JSON.stringify(data) }),
+  deleteKidsTopic: (id: number) => request<any>(`/kids/topics/${id}`, { method: "DELETE" }),
+  listKidsAssets: (topicId: number) => request<{ assets: any[] }>(`/kids/topics/${topicId}/assets`),
+  uploadKidsAsset: async (topicId: number, file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${API_BASE}/kids/topics/${topicId}/assets`, {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || "Upload failed");
+    }
+    return res.json();
+  },
+  deleteKidsAsset: (id: number) => request<any>(`/kids/assets/${id}`, { method: "DELETE" }),
+  generateKidsVideo: (topicId: number) =>
+    request<{ job_id: number; topic_id: number }>("/kids/generate", {
+      method: "POST",
+      body: JSON.stringify({ topic_id: topicId }),
+    }),
 };

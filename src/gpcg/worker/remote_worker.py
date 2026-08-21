@@ -2001,12 +2001,13 @@ class RemoteWorker:
                 artifacts = {}
 
         user_id = artifacts.get("user_id") or job.get("user_id")
+        old_domain = artifacts.get("old_domain", "games")
         if not user_id:
             self.submit_job_result(job_id, status="failed", error="No user_id in cleanup job")
             return
 
         self.update_job_status(job_id, status="running", stage="cleanup", progress=0.1)
-        self.send_status("busy", f"Limpando storage do usuário #{user_id}", job_id=job_id)
+        self.send_status("busy", f"Limpando storage {old_domain} do usuário #{user_id}", job_id=job_id)
 
         deleted_files: list[str] = []
         errors: list[str] = []
@@ -2038,34 +2039,44 @@ class RemoteWorker:
                 log.warning(f"Failed to delete {path}: {e}")
                 errors.append(str(e))
 
-        # 1. Clean gameplays directory — files matching user pattern
-        gameplays_dir = storage_root / "gameplays"
-        if gameplays_dir.exists():
-            # Gameplay files are named: {source_id}_{filename}
-            # We don't have source_id→user mapping on the worker, so we
-            # delete ALL gameplay files. This is safe because domain reset
-            # only happens when switching away from Games, and ALL gameplays
-            # belong to the Games domain. If multi-user workers exist in
-            # the future, this should be scoped by user_id.
-            for f in gameplays_dir.iterdir():
-                if f.is_file():
-                    _safe_delete(f)
+        # Domain-aware cleanup: only clean directories belonging to old_domain.
+        # Games: gameplays/, mapped/
+        # Kids: kids_assets/
+        # Shared (cleaned for both): renders/, outputs/ (per-job, safe to clean)
 
-        # 2. Clean mapped directory — analysis JSONs
-        mapped_dir = storage_root / "mapped"
-        if mapped_dir.exists():
-            for f in mapped_dir.iterdir():
-                if f.is_file():
-                    _safe_delete(f)
+        if old_domain == "games":
+            # 1a. Clean gameplays directory (Games-specific)
+            gameplays_dir = storage_root / "gameplays"
+            if gameplays_dir.exists():
+                for f in gameplays_dir.iterdir():
+                    if f.is_file():
+                        _safe_delete(f)
 
-        # 3. Clean renders directory — intermediate render files
+            # 1b. Clean mapped directory — analysis JSONs (Games-specific)
+            mapped_dir = storage_root / "mapped"
+            if mapped_dir.exists():
+                for f in mapped_dir.iterdir():
+                    if f.is_file():
+                        _safe_delete(f)
+
+        elif old_domain == "kids":
+            # Clean kids_assets directory (Kids-specific)
+            kids_assets_dir = storage_root / "kids_assets"
+            if not kids_assets_dir.exists():
+                kids_assets_dir = storage_root / "data" / "kids_assets"
+            if kids_assets_dir.exists():
+                for f in kids_assets_dir.iterdir():
+                    if f.is_file():
+                        _safe_delete(f)
+
+        # 3. Clean renders directory — intermediate render files (shared)
         renders_dir = storage_root / "renders"
         if renders_dir.exists():
             for f in renders_dir.iterdir():
                 if f.is_file():
                     _safe_delete(f)
 
-        # 4. Clean outputs directory — final output files
+        # 4. Clean outputs directory — final output files (shared)
         outputs_dir = storage_root / "outputs"
         if outputs_dir.exists():
             for f in outputs_dir.iterdir():

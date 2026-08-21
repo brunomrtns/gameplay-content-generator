@@ -124,6 +124,7 @@ def init_db() -> None:
     """
     from gpcg.core.models import Base  # noqa: F401 — registers core models
     import gpcg.domains.games.models  # noqa: F401 — registers games models
+    import gpcg.domains.kids.models  # noqa: F401 — registers kids models
 
     engine = get_engine()
     Base.metadata.create_all(bind=engine)

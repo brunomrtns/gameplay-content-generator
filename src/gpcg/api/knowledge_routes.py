@@ -30,8 +30,8 @@ from gpcg.application.editorial_profile_service import (
 from gpcg.application.domain_reset_service import (
     reset_channel_domain,
     VALID_DOMAINS,
-    IMPLEMENTED_DOMAINS,
 )
+from gpcg.domains.registry import IMPLEMENTED_DOMAINS
 from gpcg.core.models import ChannelProfile, ContentDomain, User
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db, session_scope
@@ -171,15 +171,15 @@ def list_domains(
 ):
     """List all available content domains.
 
-    Only 'games' is fully implemented. Others are reserved for future use
-    but can be selected (the channel will start in a clean state).
+    Games and Kids are fully implemented. Others are reserved for future use
+    and cannot be selected until implemented.
     """
     domains = []
     for d in ContentDomain:
         domains.append({
             "value": d.value,
             "label": _DOMAIN_LABELS.get(d.value, d.value),
-            "implemented": d.value == ContentDomain.games.value,
+            "implemented": d.value in IMPLEMENTED_DOMAINS,
         })
     return {"domains": domains, "current": _get_current_domain(user.id)}
 
