@@ -319,6 +319,7 @@ def serialize_profile(profile: ChannelProfile) -> dict[str, Any]:
     return {
         "id": profile.id,
         "user_id": profile.user_id,
+        "domain": profile.domain,
         "channel_description": profile.channel_description,
         "niche": profile.niche,
         "target_audience": profile.target_audience,

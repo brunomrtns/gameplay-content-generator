@@ -120,6 +120,11 @@ export function DashboardPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
           <p className="mt-1 text-sm text-text-secondary">Sua máquina de produção de conteúdo</p>
+          {dash?.channel_domain && (
+            <span className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-accent/10 border border-accent/20 px-2 py-0.5 text-[10px] font-medium text-accent">
+              {dash.channel_domain === "games" ? "Games" : dash.channel_domain}
+            </span>
+          )}
         </div>
         <Button
           variant={automationRunning ? "danger" : "primary"}

@@ -29,6 +29,10 @@ import {
   Upload,
   Trash2,
   ListOrdered,
+  Globe,
+  AlertTriangle,
+  CheckCircle2,
+  X,
 } from "lucide-react";
 
 const CREATIVE_STYLES = [
@@ -108,6 +112,7 @@ export function AutomationPage() {
   const { data: automation } = usePoll(() => api.getAutomation(), 30000);
   const { data: games } = usePoll(() => api.listGames(), 15000);
   const { data: voices, setData: setVoices } = usePoll(() => api.listVoices(), 15000);
+  const { data: dashData } = usePoll(() => api.getDashboard(), 30000);
 
   const [config, setConfig] = useState<AutomationConfig>({});
   const [saving, setSaving] = useState(false);
@@ -231,6 +236,9 @@ export function AutomationPage() {
           </Button>
         </div>
       </div>
+
+      {/* Domain Section — destructive switch */}
+      <DomainSection currentDomain={dashData?.channel_domain} onResetDone={() => { window.location.reload(); }} />
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Left: settings */}
@@ -634,5 +642,249 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
       <span className="text-text-muted">{label}</span>
       <span className="font-medium text-text-secondary">{value}</span>
     </div>
+  );
+}
+
+// ── Domain Section — destructive domain switch ──────────────────────────────
+
+const DOMAIN_LABELS: Record<string, string> = {
+  games: "Games",
+  kids: "Kids",
+  movies: "Filmes & Séries",
+  conspiracy: "Mistérios & Teorias",
+  technology: "Tecnologia",
+};
+
+function DomainSection({ currentDomain, onResetDone }: { currentDomain?: string; onResetDone: () => void }) {
+  const [domains, setDomains] = useState<any[]>([]);
+  const [current, setCurrent] = useState<string>(currentDomain || "games");
+  const [loading, setLoading] = useState(true);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [selectedDomain, setSelectedDomain] = useState<string>("");
+  const [resetting, setResetting] = useState(false);
+  const [resetSummary, setResetSummary] = useState<any>(null);
+
+  useEffect(() => {
+    api.listDomains()
+      .then((res) => {
+        setDomains(res.domains);
+        setCurrent(res.current || currentDomain || "games");
+      })
+      .catch((err) => toast.error(err.message))
+      .finally(() => setLoading(false));
+  }, [currentDomain]);
+
+  const handleOpenConfirm = (domain: string) => {
+    if (domain === current) return;
+    setSelectedDomain(domain);
+    setShowConfirm(true);
+    setResetSummary(null);
+  };
+
+  const handleConfirmReset = async () => {
+    setResetting(true);
+    setResetSummary(null);
+    try {
+      const result = await api.resetDomain(selectedDomain, true);
+      setResetSummary(result);
+      toast.success(`Domínio alterado para ${DOMAIN_LABELS[selectedDomain] || selectedDomain}`);
+      // Reload after a short delay so the user sees the summary
+      setTimeout(() => onResetDone(), 2000);
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao trocar domínio");
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Card>
+        <div className="flex justify-center py-6"><Spinner className="h-6 w-6" /></div>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      <Card>
+        <SectionTitle
+          icon={Globe}
+          title="Domínio do Canal"
+          desc="Tipo de conteúdo que este canal produz. A troca é destrutiva."
+        />
+        <div className="space-y-4">
+          {/* Current domain badge */}
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3">
+            <CheckCircle2 className="h-5 w-5 text-accent" />
+            <div>
+              <p className="text-xs text-text-muted">Domínio atual</p>
+              <p className="text-sm font-semibold">{DOMAIN_LABELS[current] || current}</p>
+            </div>
+          </div>
+
+          {/* Domain selector */}
+          <div>
+            <label className="mb-2 block text-xs font-medium text-text-secondary">
+              Trocar para
+            </label>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {domains.map((d) => {
+                const isActive = d.value === current;
+                const isImplemented = d.implemented;
+                return (
+                  <button
+                    key={d.value}
+                    onClick={() => handleOpenConfirm(d.value)}
+                    disabled={isActive}
+                    className={`flex items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition-all ${
+                      isActive
+                        ? "border-accent/40 bg-accent/10 text-accent cursor-default"
+                        : "border-border bg-surface text-text-secondary hover:border-border-bright hover:bg-surface-hover"
+                    }`}
+                  >
+                    <span className="font-medium">{d.label}</span>
+                    {isActive ? (
+                      <CheckCircle2 className="h-4 w-4 text-accent" />
+                    ) : !isImplemented ? (
+                      <span className="text-[10px] text-text-muted">em breve</span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex items-start gap-2 rounded-lg border border-yellow-600/20 bg-yellow-600/5 px-3 py-2.5">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-500/80 mt-0.5" />
+            <p className="text-xs text-text-muted">
+              Trocar de domínio apaga todo o estado de produção do canal (mídias, jobs, conteúdo não publicado, conhecimento).
+              Vídeos já publicados no YouTube não são removidos.
+            </p>
+          </div>
+        </div>
+      </Card>
+
+      {/* Confirmation modal */}
+      {showConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in"
+          onClick={() => !resetting && setShowConfirm(false)}
+        >
+          <div
+            className="relative w-full max-w-lg rounded-2xl border border-border bg-surface overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-border px-5 py-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-yellow-500" />
+                <h2 className="text-base font-semibold">Confirmar troca de domínio</h2>
+              </div>
+              {!resetting && (
+                <button
+                  onClick={() => setShowConfirm(false)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-text-muted hover:bg-surface-hover hover:text-text"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            {/* Body */}
+            <div className="space-y-4 px-5 py-5">
+              {resetSummary ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-sm text-accent">
+                    <CheckCircle2 className="h-5 w-5" />
+                    <span className="font-semibold">Domínio alterado com sucesso!</span>
+                  </div>
+                  <div className="rounded-lg border border-border bg-surface-elevated p-3 text-xs space-y-1.5">
+                    <p className="text-text-muted">Resumo da limpeza:</p>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                      <span>Jobs cancelados:</span><span className="font-medium">{resetSummary.jobs_cancelled}</span>
+                      <span>Vídeos deletados:</span><span className="font-medium">{resetSummary.videos_deleted}</span>
+                      <span>Planos deletados:</span><span className="font-medium">{resetSummary.content_plans_deleted}</span>
+                      <span>Fatos deletados:</span><span className="font-medium">{resetSummary.facts_deleted}</span>
+                      <span>Documentos:</span><span className="font-medium">{resetSummary.documents_deleted}</span>
+                      <span>Itens de conhecimento:</span><span className="font-medium">{resetSummary.knowledge_items_deleted}</span>
+                      <span>Gameplays:</span><span className="font-medium">{resetSummary.gameplay_sources_deleted}</span>
+                      <span>Jobs de limpeza:</span><span className="font-medium">{resetSummary.cleanup_jobs_created}</span>
+                      <span>Vídeos preservados:</span><span className="font-medium">{resetSummary.videos_preserved_published}</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-text-muted">Recarregando página...</p>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 rounded-lg border border-border bg-surface-elevated px-4 py-3">
+                    <div className="text-center">
+                      <p className="text-xs text-text-muted">De</p>
+                      <p className="text-sm font-semibold">{DOMAIN_LABELS[current] || current}</p>
+                    </div>
+                    <div className="flex-1 text-center text-text-muted">→</div>
+                    <div className="text-center">
+                      <p className="text-xs text-text-muted">Para</p>
+                      <p className="text-sm font-semibold text-accent">{DOMAIN_LABELS[selectedDomain] || selectedDomain}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-text-secondary">Os seguintes dados serão permanentemente removidos:</p>
+                    <ul className="space-y-1.5 text-xs text-text-muted">
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Mídias importadas e armazenadas nos workers</li>
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Mídias em processo de importação</li>
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Jobs em fila e em execução</li>
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Conteúdo gerado não publicado</li>
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Dados específicos do domínio anterior</li>
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Conhecimento/RAG específico do domínio</li>
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Estado de produção e plano editorial</li>
+                    </ul>
+                  </div>
+
+                  <div className="flex items-start gap-2 rounded-lg border border-green-600/20 bg-green-600/5 px-3 py-2.5">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500/80 mt-0.5" />
+                    <p className="text-xs text-text-muted">
+                      Vídeos já publicados no YouTube <strong>não</strong> serão removidos.
+                      A conexão com YouTube não será alterada.
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border border-red-600/30 bg-red-600/10 px-3 py-2.5">
+                    <p className="text-xs text-red-400 font-medium">
+                      ⚠️ Esta operação não pode ser desfeita.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            {!resetSummary && (
+              <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
+                <Button
+                  variant="ghost"
+                  onClick={() => setShowConfirm(false)}
+                  disabled={resetting}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={handleConfirmReset}
+                  disabled={resetting}
+                >
+                  {resetting ? (
+                    <><Spinner className="h-4 w-4" /> Resetando...</>
+                  ) : (
+                    <><AlertTriangle className="h-4 w-4" /> Entendo e quero continuar</>
+                  )}
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

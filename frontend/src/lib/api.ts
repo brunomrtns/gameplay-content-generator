@@ -410,6 +410,15 @@ export const api = {
   updateChannelProfile: (data: Record<string, any>) =>
     request<any>("/channel/profile", { method: "PUT", body: JSON.stringify(data) }),
 
+  // ── Domain Management ──────────────────────────────────────────────────
+  listDomains: () =>
+    request<{ domains: any[]; current: string }>("/channel/domains"),
+  resetDomain: (new_domain: string, confirm: boolean) =>
+    request<any>("/channel/reset-domain", {
+      method: "POST",
+      body: JSON.stringify({ new_domain, confirm }),
+    }),
+
   // ── Knowledge Documents (RAG knowledge base — REMOVED) ────────────────
   // File-upload knowledge base has been removed. Use manual ideas instead.
 

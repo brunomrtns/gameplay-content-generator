@@ -44,6 +44,22 @@ class Base(DeclarativeBase):
 # ── Enums ─────────────────────────────────────────────────────────────────────
 
 
+class ContentDomain(str, enum.Enum):
+    """Content domain (niche) of a channel.
+
+    Determines which pipeline, media model, and editorial logic apply.
+    Games is the only fully implemented domain; others are reserved for
+    future use. The domain is a characteristic of the channel, NOT the user.
+    Switching domain is a destructive reset operation (see domain_reset_service).
+    """
+    games = "games"
+    # Reserved for future domains (not yet implemented):
+    kids = "kids"
+    movies = "movies"
+    conspiracy = "conspiracy"
+    technology = "technology"
+
+
 class FactVerification(str, enum.Enum):
     unverified = "unverified"
     verified = "verified"
@@ -571,6 +587,13 @@ class ChannelProfile(Base):
     # These fields define the channel's editorial identity. They are set by
     # the user (or by applying a preset) and persist until explicitly changed.
     # The system NEVER modifies these fields automatically.
+
+    # Content domain — determines which pipeline/media/editorial logic applies.
+    # Defaults to "games" (the only fully implemented domain). Switching domain
+    # is a destructive reset (see domain_reset_service). NOT coupled to YouTube.
+    domain: Mapped[str] = mapped_column(
+        String(30), default=ContentDomain.games.value, index=True
+    )
 
     # Free-form channel description — the "elevator pitch" of the channel.
     channel_description: Mapped[str] = mapped_column(Text, default="")

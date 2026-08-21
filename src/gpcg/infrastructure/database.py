@@ -204,6 +204,8 @@ def init_db() -> None:
     _ensure_column(engine, "channel_profiles", "diversity_strictness", "FLOAT DEFAULT 0.5")
     _ensure_column(engine, "channel_profiles", "learned_preferences", "JSON")
     _ensure_column(engine, "channel_profiles", "production_history_summary", "JSON")
+    # Domain model: channel domain (games, kids, movies, etc.)
+    _ensure_column(engine, "channel_profiles", "domain", "VARCHAR(30) DEFAULT 'games'")
     # ── Editorial Intelligence V2 — KnowledgeItem lifecycle ────────────────
     _ensure_column(engine, "knowledge_items", "freshness_score", "FLOAT DEFAULT 1.0")
     _ensure_column(engine, "knowledge_items", "lifecycle_stage", "VARCHAR(20) DEFAULT 'fresh'")

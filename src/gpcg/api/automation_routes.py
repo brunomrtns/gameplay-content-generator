@@ -1698,9 +1698,17 @@ def dashboard(
     auto = db.query(Automation).filter(Automation.user_id == user.id).first()
     auto_status = auto.status if auto else "idle"
 
+    # Channel domain
+    from gpcg.core.models import ChannelProfile, ContentDomain
+    profile = db.query(ChannelProfile).filter(
+        ChannelProfile.user_id == user.id
+    ).first()
+    channel_domain = profile.domain if profile else ContentDomain.games.value
+
     return {
         "youtube_connected": yt_connected,
         "youtube_channel": yt_channel,
+        "channel_domain": channel_domain,
         "gameplays": {
             "total": total_gameplays,
             "processing": processing_gameplays,
