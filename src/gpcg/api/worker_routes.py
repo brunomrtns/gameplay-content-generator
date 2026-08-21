@@ -291,6 +291,10 @@ def _requeue_stale_jobs_in_claim(db: Session) -> int:
 
     requeued = 0
     for job in stale_jobs:
+        # Never requeue a cancelled job — it was intentionally cancelled
+        # (e.g., by domain reset) and must not be revived.
+        if job.status == JobStatus.cancelled.value:
+            continue
         if job.attempts >= job.max_attempts:
             job.status = JobStatus.failed.value
             job.error = f"Max attempts ({job.max_attempts}) reached after stale worker recovery"
@@ -654,6 +658,7 @@ def _serialize_job(job: Job) -> dict:
         "job_uuid": job.job_uuid,
         "user_id": job.user_id,
         "type": job.type,
+        "domain": job.domain,
         "status": job.status,
         "stage": job.stage,
         "progress": job.progress,
@@ -748,10 +753,22 @@ def update_job_status(
 
     Called periodically during job execution. Updates the Job record and
     the associated GameplaySource processing_status if applicable.
+
+    GUARD: If the job has been cancelled (by domain reset or otherwise),
+    status updates are rejected with 409. This tells the worker to stop
+    processing — the job is no longer valid.
     """
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # Cancellation guard: if the job was cancelled, reject the status update.
+    # The worker should detect this and abort processing.
+    if job.status == JobStatus.cancelled.value:
+        raise HTTPException(
+            status_code=409,
+            detail="Job has been cancelled. Stop processing.",
+        )
 
     job.status = req.status
     if req.stage:
@@ -836,10 +853,46 @@ def submit_job_result(
 
     If status=completed, marks the job as completed and creates/updates a Video record.
     If status=failed, marks the job as failed with the error message.
+
+    GUARDS:
+    - Rejects results for cancelled jobs (409).
+    - Rejects results for jobs whose domain no longer matches the channel's
+      current domain (409) — prevents old-domain jobs from producing content
+      after a domain switch.
     """
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # ── Cancellation guard: reject results for already-cancelled jobs ─────────
+    if job.status == JobStatus.cancelled.value:
+        log.warning(f"Job #{job.id} result rejected: job is already cancelled")
+        raise HTTPException(
+            status_code=409,
+            detail="Job has been cancelled. Result rejected.",
+        )
+
+    # ── Domain guard: reject results from jobs belonging to a previous domain ─
+    if job.user_id:
+        from gpcg.core.models import ChannelProfile, ContentDomain
+        profile = db.query(ChannelProfile).filter(
+            ChannelProfile.user_id == job.user_id
+        ).first()
+        current_domain = profile.domain if profile else ContentDomain.games.value
+        if job.domain and job.domain != current_domain:
+            log.warning(
+                f"Job #{job.id} result rejected: job domain='{job.domain}' "
+                f"but channel domain='{current_domain}' (domain switch occurred)"
+            )
+            if job.status != JobStatus.cancelled.value:
+                job.status = JobStatus.cancelled.value
+                job.error = "Cancelled: channel domain changed"
+                job.completed_at = _utcnow()
+                db.commit()
+            raise HTTPException(
+                status_code=409,
+                detail="Job belongs to a previous domain. Result rejected.",
+            )
 
     job.status = req.status
     job.completed_at = _utcnow()
@@ -1653,11 +1706,21 @@ def create_mapping_job(
     source.processing_status = GameplayProcessingStatus.waiting_worker.value
 
     # Create mapping job
+    # Set domain from channel profile
+    from gpcg.core.models import ChannelProfile, ContentDomain
+    _domain = ContentDomain.games.value
+    if source.user_id:
+        _profile = db.query(ChannelProfile).filter(
+            ChannelProfile.user_id == source.user_id
+        ).first()
+        if _profile:
+            _domain = _profile.domain
     job = Job(
         job_uuid=str(uuid.uuid4()),
         type=JobType.mapping.value,
         status=JobStatus.queued.value,
         stage=JobStage.download.value,
+        domain=_domain,
         gameplay_source_id=source.id,
         user_id=source.user_id,
         game_id=source.game_id,
@@ -1704,6 +1767,18 @@ def get_job_data(
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # Domain guard: reject data fetch for cancelled or old-domain jobs
+    if job.status == JobStatus.cancelled.value:
+        raise HTTPException(status_code=409, detail="Job has been cancelled.")
+    if job.user_id:
+        from gpcg.core.models import ChannelProfile, ContentDomain
+        profile = db.query(ChannelProfile).filter(
+            ChannelProfile.user_id == job.user_id
+        ).first()
+        current_domain = profile.domain if profile else ContentDomain.games.value
+        if job.domain and job.domain != current_domain:
+            raise HTTPException(status_code=409, detail="Job belongs to a previous domain.")
 
     data: dict = {"job": _serialize_job(job)}
 
@@ -1935,6 +2010,9 @@ def sync_job_result(
     The worker runs GenerationService locally (against a temp DB) and then
     sends back the records it created/updated: ContentPlan, Script, Video,
     and updated Job artifacts.
+
+    GUARD: Rejects sync for cancelled jobs or jobs whose domain no longer
+    matches the channel's current domain.
     """
     from gpcg.core.models import ContentPlan, Script, VideoStatus
     from gpcg.core.models import Video as VideoModel
@@ -1942,6 +2020,18 @@ def sync_job_result(
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # Cancellation + domain guard (same as submit_job_result)
+    if job.status == JobStatus.cancelled.value:
+        raise HTTPException(status_code=409, detail="Job has been cancelled. Sync rejected.")
+    if job.user_id:
+        from gpcg.core.models import ChannelProfile, ContentDomain
+        profile = db.query(ChannelProfile).filter(
+            ChannelProfile.user_id == job.user_id
+        ).first()
+        current_domain = profile.domain if profile else ContentDomain.games.value
+        if job.domain and job.domain != current_domain:
+            raise HTTPException(status_code=409, detail="Job belongs to a previous domain. Sync rejected.")
 
     # Update job artifacts
     if req.artifacts:

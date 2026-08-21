@@ -333,11 +333,20 @@ def complete_upload(
         source_id = source.id
 
         # Create mapping job (replicates create_mapping_job logic inline)
+        from gpcg.core.models import ChannelProfile, ContentDomain
+        _domain = ContentDomain.games.value
+        if source.user_id:
+            _profile = session.query(ChannelProfile).filter(
+                ChannelProfile.user_id == source.user_id
+            ).first()
+            if _profile:
+                _domain = _profile.domain
         job = Job(
             job_uuid=str(uuid.uuid4()),
             type=JobType.mapping.value,
             status=JobStatus.queued.value,
             stage=JobStage.download.value,
+            domain=_domain,
             gameplay_source_id=source.id,
             user_id=source.user_id,
             game_id=source.game_id,

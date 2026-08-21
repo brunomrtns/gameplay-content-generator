@@ -671,11 +671,20 @@ def trigger_content_collection_worker(
     if not auto:
         raise HTTPException(status_code=404, detail="No running automation found")
 
+    # Set domain from channel profile
+    from gpcg.core.models import ChannelProfile, ContentDomain
+    _domain = ContentDomain.games.value
+    _profile = db.query(ChannelProfile).filter(
+        ChannelProfile.user_id == auto.user_id
+    ).first()
+    if _profile:
+        _domain = _profile.domain
     job = Job(
         job_uuid=str(uuid.uuid4()),
         type=JobType.content_collect.value,
         status=JobStatus.queued.value,
         stage="content_collection",
+        domain=_domain,
         priority=JobPriority.normal.value,
         required_capabilities=["content_intelligence"],
         user_id=auto.user_id,

@@ -52,6 +52,8 @@ from gpcg.domain.creative_plan import StoryConcept, VideoCreativePlan
 from gpcg.domain.game_repository import find_by_name
 from gpcg.core.models import (
     Automation,
+    ChannelProfile,
+    ContentDomain,
     ContentPlan,
     Fact,
     Job,
@@ -83,6 +85,16 @@ class GenerationError(Exception):
     def __init__(self, message: str, stage: str = JobStage.render.value):
         super().__init__(message)
         self.stage = stage
+
+
+def _get_user_domain(session, user_id: int) -> str:
+    """Get the current domain for a user's channel. Defaults to 'games'."""
+    if not user_id:
+        return ContentDomain.games.value
+    profile = session.query(ChannelProfile).filter(
+        ChannelProfile.user_id == user_id
+    ).first()
+    return profile.domain if profile else ContentDomain.games.value
 
 
 class GenerationService:
@@ -209,6 +221,7 @@ class GenerationService:
                 job_uuid=str(uuid.uuid4()),
                 user_id=user_id,
                 type=JobType.generate_short.value,
+                domain=_get_user_domain(session, user_id),
                 game_id=game.id,
                 status=JobStatus.queued.value,
                 stage=JobStage.content_planning.value,
@@ -308,6 +321,7 @@ class GenerationService:
                 job_uuid=str(uuid.uuid4()),
                 user_id=user_id,
                 type=JobType.curiosity_short.value,
+                domain=_get_user_domain(session, user_id),
                 game_id=None,
                 status=JobStatus.queued.value,
                 stage=JobStage.content_planning.value,

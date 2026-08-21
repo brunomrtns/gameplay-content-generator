@@ -732,14 +732,17 @@ function DomainSection({ currentDomain, onResetDone }: { currentDomain?: string;
               {domains.map((d) => {
                 const isActive = d.value === current;
                 const isImplemented = d.implemented;
+                const isDisabled = isActive || !isImplemented;
                 return (
                   <button
                     key={d.value}
-                    onClick={() => handleOpenConfirm(d.value)}
-                    disabled={isActive}
+                    onClick={() => isImplemented && handleOpenConfirm(d.value)}
+                    disabled={isDisabled}
                     className={`flex items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition-all ${
                       isActive
                         ? "border-accent/40 bg-accent/10 text-accent cursor-default"
+                        : !isImplemented
+                        ? "border-border bg-surface text-text-muted cursor-not-allowed opacity-50"
                         : "border-border bg-surface text-text-secondary hover:border-border-bright hover:bg-surface-hover"
                     }`}
                   >

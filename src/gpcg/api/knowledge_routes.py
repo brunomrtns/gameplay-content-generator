@@ -27,7 +27,11 @@ from gpcg.application.editorial_profile_service import (
     serialize_profile,
     update_structured_fields,
 )
-from gpcg.application.domain_reset_service import reset_channel_domain, VALID_DOMAINS
+from gpcg.application.domain_reset_service import (
+    reset_channel_domain,
+    VALID_DOMAINS,
+    IMPLEMENTED_DOMAINS,
+)
 from gpcg.core.models import ChannelProfile, ContentDomain, User
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db, session_scope
@@ -226,6 +230,12 @@ def reset_domain(
         raise HTTPException(
             422,
             f"Invalid domain '{new_domain}'. Valid: {sorted(VALID_DOMAINS)}",
+        )
+    if new_domain not in IMPLEMENTED_DOMAINS:
+        raise HTTPException(
+            422,
+            f"Domain '{new_domain}' is not yet implemented. "
+            f"Currently implemented: {sorted(IMPLEMENTED_DOMAINS)}",
         )
     if not confirm:
         raise HTTPException(

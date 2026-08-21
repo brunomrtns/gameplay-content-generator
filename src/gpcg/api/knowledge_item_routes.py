@@ -22,6 +22,8 @@ from gpcg.application.knowledge_item_service import (
     reject_item,
 )
 from gpcg.core.models import (
+    ChannelProfile,
+    ContentDomain,
     Job,
     JobPriority,
     JobStatus,
@@ -208,11 +210,19 @@ def trigger_content_collection(
             detail="Content collection job already queued or running",
         )
 
+    # Set domain from channel profile
+    _domain = ContentDomain.games.value
+    _profile = db.query(ChannelProfile).filter(
+        ChannelProfile.user_id == user.id
+    ).first()
+    if _profile:
+        _domain = _profile.domain
     job = Job(
         job_uuid=str(uuid.uuid4()),
         type=JobType.content_collect.value,
         status=JobStatus.queued.value,
         stage="content_collection",
+        domain=_domain,
         priority=JobPriority.normal.value,
         required_capabilities=["content_intelligence"],
         user_id=user.id,

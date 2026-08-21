@@ -432,6 +432,7 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
             user_id=user_id,
             job_uuid=job["job_uuid"],
             type=job["type"],
+            domain=job.get("domain", "games"),
             game_id=job.get("game_id"),
             content_plan_id=job.get("content_plan_id"),
             gameplay_source_id=job.get("gameplay_source_id"),

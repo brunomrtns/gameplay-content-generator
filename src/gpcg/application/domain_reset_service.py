@@ -63,6 +63,11 @@ log = get_logger(__name__)
 # Valid domain values (must match ContentDomain enum)
 VALID_DOMAINS = {d.value for d in ContentDomain}
 
+# Domains that are actually implemented with a working pipeline.
+# Only these can be selected as a target for domain switch.
+# Others are registered for future expansion but cannot be activated.
+IMPLEMENTED_DOMAINS = {"games"}
+
 
 def reset_channel_domain(
     session: Session,
@@ -90,6 +95,11 @@ def reset_channel_domain(
     if new_domain not in VALID_DOMAINS:
         raise ValueError(
             f"Invalid domain '{new_domain}'. Valid domains: {sorted(VALID_DOMAINS)}"
+        )
+    if new_domain not in IMPLEMENTED_DOMAINS:
+        raise ValueError(
+            f"Domain '{new_domain}' is not yet implemented. "
+            f"Currently implemented domains: {sorted(IMPLEMENTED_DOMAINS)}"
         )
 
     summary: dict[str, Any] = {
@@ -245,6 +255,25 @@ def reset_channel_domain(
         profile.custom_feeds = []
         # Keep free-text fields (niche, tone, etc.) — user may want to
         # reconfigure them, but they're not domain-specific per se.
+    session.flush()
+
+    # ── 9b. Create cleanup_user_storage job for comprehensive worker cleanup ─
+    # This job tells workers to delete ALL files for this user from their
+    # local storage (gameplays, mapped, renders, outputs). It complements
+    # the per-source cleanup_gameplay jobs by ensuring no orphaned files
+    # remain even if per-source cleanup missed something.
+    import uuid as _uuid
+    user_storage_cleanup = Job(
+        job_uuid=str(_uuid.uuid4()),
+        type=JobType.cleanup_user_storage.value,
+        user_id=user_id,
+        domain=new_domain,  # belongs to the new domain (cleanup is domain-agnostic)
+        status=JobStatus.queued.value,
+        priority=JobPriority.high.value,
+        artifacts={"user_id": user_id, "old_domain": old_domain},
+    )
+    session.add(user_storage_cleanup)
+    summary["cleanup_jobs_created"] += 1
     session.flush()
 
     # ── 10. Pause automation ───────────────────────────────────────────────

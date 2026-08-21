@@ -229,14 +229,14 @@ def test_channel_profile_defaults_to_games(db_session):
 def test_domain_can_be_changed(db_session, user_with_games_data):
     """Domain reset changes the channel's domain."""
     user_id = user_with_games_data
-    summary = reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    summary = reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     profile = db_session.query(ChannelProfile).filter(
         ChannelProfile.user_id == user_id
     ).first()
-    assert profile.domain == "kids"
-    assert summary["new_domain"] == "kids"
+    assert profile.domain == "games"
+    assert summary["new_domain"] == "games"
 
 
 # ── Test 3: Reset requires confirmation ──────────────────────────────────────
@@ -246,7 +246,7 @@ def test_reset_requires_confirmation(db_session, user_with_games_data):
     """Reset without confirm=True raises ValueError."""
     user_id = user_with_games_data
     with pytest.raises(ValueError, match="confirmation"):
-        reset_channel_domain(db_session, user_id, "kids", confirm=False)
+        reset_channel_domain(db_session, user_id, "games", confirm=False)
 
 
 def test_reset_rejects_invalid_domain(db_session, user_with_games_data):
@@ -256,22 +256,29 @@ def test_reset_rejects_invalid_domain(db_session, user_with_games_data):
         reset_channel_domain(db_session, user_id, "invalid_domain", confirm=True)
 
 
+def test_reset_rejects_non_implemented_domain(db_session, user_with_games_data):
+    """Reset to a valid but not-yet-implemented domain raises ValueError."""
+    user_id = user_with_games_data
+    with pytest.raises(ValueError, match="not yet implemented"):
+        reset_channel_domain(db_session, user_id, "kids", confirm=True)
+
+
 # ── Test 4: Reset cancels jobs ───────────────────────────────────────────────
 
 
 def test_reset_cancels_queued_and_running_jobs(db_session, user_with_games_data):
     """Queued and running jobs are cancelled by domain reset."""
     user_id = user_with_games_data
-    summary = reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    summary = reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     assert summary["jobs_cancelled"] == 2  # 1 queued + 1 running
 
-    # No non-cleanup jobs should be active
+    # No non-cleanup jobs should be active (cleanup jobs are allowed to be queued)
     remaining_active = db_session.query(Job).filter(
         Job.user_id == user_id,
         Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
-        Job.type != JobType.cleanup_gameplay.value,
+        ~Job.type.in_([JobType.cleanup_gameplay.value, JobType.cleanup_user_storage.value]),
     ).count()
     assert remaining_active == 0
 
@@ -288,7 +295,7 @@ def test_reset_cancels_queued_and_running_jobs(db_session, user_with_games_data)
 def test_reset_deletes_content_plans_and_scripts(db_session, user_with_games_data):
     """Content plans and scripts are deleted by domain reset."""
     user_id = user_with_games_data
-    reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     plans = db_session.query(ContentPlan).filter(
@@ -302,7 +309,7 @@ def test_reset_deletes_content_plans_and_scripts(db_session, user_with_games_dat
 def test_reset_deletes_facts(db_session, user_with_games_data):
     """Facts are deleted by domain reset."""
     user_id = user_with_games_data
-    reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     facts = db_session.query(Fact).filter(Fact.user_id == user_id).count()
@@ -312,7 +319,7 @@ def test_reset_deletes_facts(db_session, user_with_games_data):
 def test_reset_deletes_documents(db_session, user_with_games_data):
     """Documents are deleted by domain reset."""
     user_id = user_with_games_data
-    reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     docs = db_session.query(Document).filter(Document.user_id == user_id).count()
@@ -322,7 +329,7 @@ def test_reset_deletes_documents(db_session, user_with_games_data):
 def test_reset_deletes_knowledge_items(db_session, user_with_games_data):
     """Knowledge items, embeddings, and usage are deleted by domain reset."""
     user_id = user_with_games_data
-    reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     kis = db_session.query(KnowledgeItem).filter(
@@ -344,7 +351,7 @@ def test_reset_deletes_knowledge_items(db_session, user_with_games_data):
 def test_reset_deletes_channel_profile_embeddings(db_session, user_with_games_data):
     """Channel profile embeddings are deleted by domain reset."""
     user_id = user_with_games_data
-    reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     embs = db_session.query(ChannelProfileEmbedding).filter(
@@ -356,7 +363,7 @@ def test_reset_deletes_channel_profile_embeddings(db_session, user_with_games_da
 def test_reset_deletes_editorial_signals(db_session, user_with_games_data):
     """Editorial signals are deleted by domain reset."""
     user_id = user_with_games_data
-    reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     signals = db_session.query(EditorialSignal).filter(
@@ -369,20 +376,30 @@ def test_reset_deletes_editorial_signals(db_session, user_with_games_data):
 
 
 def test_reset_creates_cleanup_jobs(db_session, user_with_games_data):
-    """Cleanup jobs are created for each gameplay source."""
+    """Cleanup jobs are created for each gameplay source + 1 user storage cleanup."""
     user_id = user_with_games_data
-    summary = reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    summary = reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
-    assert summary["cleanup_jobs_created"] == 1  # 1 gameplay source
+    # 1 per-source cleanup_gameplay + 1 cleanup_user_storage
+    assert summary["cleanup_jobs_created"] == 2
 
-    cleanup_jobs = db_session.query(Job).filter(
+    gameplay_cleanup = db_session.query(Job).filter(
         Job.user_id == user_id,
         Job.type == JobType.cleanup_gameplay.value,
     ).all()
-    assert len(cleanup_jobs) == 1
-    assert cleanup_jobs[0].status == JobStatus.queued.value
-    assert cleanup_jobs[0].priority == JobPriority.high.value
+    assert len(gameplay_cleanup) == 1
+    assert gameplay_cleanup[0].status == JobStatus.queued.value
+    assert gameplay_cleanup[0].priority == JobPriority.high.value
+
+    storage_cleanup = db_session.query(Job).filter(
+        Job.user_id == user_id,
+        Job.type == JobType.cleanup_user_storage.value,
+    ).all()
+    assert len(storage_cleanup) == 1
+    assert storage_cleanup[0].status == JobStatus.queued.value
+    assert storage_cleanup[0].priority == JobPriority.high.value
+    assert storage_cleanup[0].artifacts.get("user_id") == user_id
 
 
 # ── Test 7: In-progress media imports don't persist ──────────────────────────
@@ -403,7 +420,7 @@ def test_reset_deletes_gameplay_sources(db_session, user_with_games_data):
     db_session.add(uploading_source)
     db_session.commit()
 
-    summary = reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    summary = reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     assert summary["gameplay_sources_deleted"] == 2  # original + uploading
@@ -417,7 +434,7 @@ def test_reset_deletes_gameplay_sources(db_session, user_with_games_data):
 def test_reset_deletes_gameplay_assets_events_embeddings(db_session, user_with_games_data):
     """All gameplay-related data (assets, events, embeddings, clip usage) is deleted."""
     user_id = user_with_games_data
-    reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     assert db_session.query(GameplayAsset).count() == 0
@@ -430,7 +447,7 @@ def test_reset_deletes_gameplay_assets_events_embeddings(db_session, user_with_g
 def test_reset_deletes_games_and_aliases(db_session, user_with_games_data):
     """Games and their aliases are deleted by domain reset."""
     user_id = user_with_games_data
-    summary = reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    summary = reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     assert summary["games_deleted"] == 1
@@ -446,9 +463,13 @@ def test_reset_deletes_games_and_aliases(db_session, user_with_games_data):
 
 
 def test_no_games_state_remains_after_reset(db_session, user_with_games_data):
-    """After resetting from Games to Kids, no Games-specific state remains."""
+    """After resetting (even to Games again), no old Games-specific state remains.
+
+    The reset clears all Games data regardless of the target domain. This is
+    the correct behavior: reset = full wipe, even if staying in the same domain.
+    """
     user_id = user_with_games_data
-    reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     # Check all Games-specific tables are empty for this user
@@ -466,7 +487,7 @@ def test_no_games_state_remains_after_reset(db_session, user_with_games_data):
     profile = db_session.query(ChannelProfile).filter(
         ChannelProfile.user_id == user_id
     ).first()
-    assert profile.domain == "kids"
+    assert profile.domain == "games"
     # Learned preferences should be reset
     assert profile.learned_preferences == {}
     assert profile.production_history_summary == {}
@@ -482,7 +503,7 @@ def test_youtube_not_affected_by_domain_reset(db_session, user_with_games_data):
     user.google_user_id = 42  # simulate connected YouTube
     db_session.commit()
 
-    reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     refreshed = db_session.get(User, user_id)
@@ -495,7 +516,7 @@ def test_youtube_not_affected_by_domain_reset(db_session, user_with_games_data):
 def test_published_videos_preserved(db_session, user_with_games_data):
     """Videos already published to YouTube are NOT deleted by domain reset."""
     user_id = user_with_games_data
-    summary = reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    summary = reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     assert summary["videos_preserved_published"] == 1
@@ -528,10 +549,10 @@ def test_games_domain_is_default(db_session):
 def test_reset_to_games_works(db_session, user_with_games_data):
     """Resetting to Games (even from Games) works without error."""
     user_id = user_with_games_data
-    # Reset to kids first
-    reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    # Reset to games (clears everything)
+    reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
-    # Then reset back to games
+    # Then reset to games again
     summary = reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
@@ -547,7 +568,7 @@ def test_reset_to_games_works(db_session, user_with_games_data):
 def test_automation_paused_after_reset(db_session, user_with_games_data):
     """Automation is paused after domain reset."""
     user_id = user_with_games_data
-    reset_channel_domain(db_session, user_id, "kids", confirm=True)
+    reset_channel_domain(db_session, user_id, "games", confirm=True)
     db_session.commit()
 
     auto = db_session.query(Automation).filter(
@@ -569,6 +590,8 @@ def test_reset_to_same_domain_still_cleans(db_session, user_with_games_data):
     assert summary["gameplay_sources_deleted"] == 1
     assert summary["jobs_cancelled"] == 2
     assert summary["content_plans_deleted"] == 1
+    # 1 per-source cleanup + 1 user storage cleanup
+    assert summary["cleanup_jobs_created"] == 2
 
     profile = db_session.query(ChannelProfile).filter(
         ChannelProfile.user_id == user_id

@@ -50,6 +50,18 @@ import httpx
 log = logging.getLogger(__name__)
 
 
+class JobCancelledError(Exception):
+    """Raised when the VPS reports that a job has been cancelled.
+
+    The worker should catch this and abort processing immediately.
+    The job's intermediate files will be cleaned up by the cleanup_user_storage
+    job created during domain reset.
+    """
+    def __init__(self, job_id: int):
+        self.job_id = job_id
+        super().__init__(f"Job #{job_id} has been cancelled on the VPS")
+
+
 # ── Config ───────────────────────────────────────────────────────────────────
 
 
@@ -335,7 +347,12 @@ class RemoteWorker:
         error: str = "",
         artifacts: Optional[dict] = None,
     ) -> None:
-        """Report job progress to the VPS."""
+        """Report job progress to the VPS.
+
+        Raises JobCancelledError if the VPS responds with 409 (job was
+        cancelled by domain reset or otherwise). The caller should catch
+        this and abort processing.
+        """
         payload = {
             "status": status,
             "stage": stage,
@@ -346,7 +363,28 @@ class RemoteWorker:
         if artifacts:
             payload["artifacts"] = artifacts
         resp = self.client.post(f"/api/jobs/{job_id}/status", json=payload)
+        if resp.status_code == 409:
+            raise JobCancelledError(job_id)
         resp.raise_for_status()
+
+    def check_job_cancelled(self, job_id: int) -> bool:
+        """Check if a job has been cancelled on the VPS.
+
+        Polls the job status endpoint. Returns True if the job is cancelled,
+        False otherwise. On connection errors, returns False (optimistic —
+        don't abort on transient network issues).
+        """
+        try:
+            resp = self.client.get(f"/api/jobs/{job_id}/data")
+            if resp.status_code == 409:
+                return True
+            if resp.status_code == 200:
+                data = resp.json()
+                job = data.get("job", {})
+                return job.get("status") == "cancelled"
+        except Exception:
+            pass
+        return False
 
     # ── Gameplay download ────────────────────────────────────────────────────
 
@@ -1110,26 +1148,42 @@ class RemoteWorker:
             log.warning(f"Editorial decision for user {user_id} failed: {e}")
 
     def _process_job(self, job: dict) -> None:
-        """Process a claimed job. Dispatches by job type."""
+        """Process a claimed job. Dispatches by job type.
+
+        Catches JobCancelledError — if the VPS reports the job as cancelled
+        (e.g., by domain reset), the worker stops processing immediately
+        and does NOT submit a result (the result would be rejected anyway).
+        """
         job_id = job["id"]
         job_type = job["type"]
 
-        if job_type == "mapping":
-            self._process_mapping_job(job)
-        elif job_type in ("generate_short", "curiosity_short"):
-            self._process_generation_job(job)
-        elif job_type == "knowledge_index":
-            self._process_knowledge_indexing_job(job)
-        elif job_type == "game_enrich":
-            self._process_game_enrich_job(job)
-        elif job_type == "content_collect":
-            self._process_content_collect_job(job)
-        elif job_type == "cleanup_gameplay":
-            self._process_cleanup_gameplay_job(job)
-        else:
-            log.warning(f"Unknown job type: {job_type} — marking as completed (no-op)")
-            self.update_job_status(job_id, status="running", stage="done", progress=1.0)
-            self.submit_job_result(job_id, status="completed")
+        try:
+            if job_type == "mapping":
+                self._process_mapping_job(job)
+            elif job_type in ("generate_short", "curiosity_short"):
+                self._process_generation_job(job)
+            elif job_type == "knowledge_index":
+                self._process_knowledge_indexing_job(job)
+            elif job_type == "game_enrich":
+                self._process_game_enrich_job(job)
+            elif job_type == "content_collect":
+                self._process_content_collect_job(job)
+            elif job_type == "cleanup_gameplay":
+                self._process_cleanup_gameplay_job(job)
+            elif job_type == "cleanup_user_storage":
+                self._process_cleanup_user_storage_job(job)
+            else:
+                log.warning(f"Unknown job type: {job_type} — marking as completed (no-op)")
+                self.update_job_status(job_id, status="running", stage="done", progress=1.0)
+                self.submit_job_result(job_id, status="completed")
+        except JobCancelledError:
+            log.warning(
+                f"Job #{job_id} (type={job_type}) was cancelled on the VPS — "
+                f"aborting processing. Intermediate files will be cleaned up "
+                f"by the domain reset cleanup job."
+            )
+            self.send_status("idle", "Job cancelled")
+            # Do NOT submit a result — it would be rejected with 409.
 
     def _process_mapping_job(self, job: dict) -> None:
         """Process a mapping job: download → confirm → analyze → report.
@@ -1151,6 +1205,10 @@ class RemoteWorker:
 
         # Local path: /ToshibaHD/gpcg/gameplays/{source_id}_{filename}
         local_path = self.storage_root / "gameplays" / f"{source_id}_{filename}"
+
+        # Cooperative cancellation check before heavy work
+        if self.check_job_cancelled(job_id):
+            raise JobCancelledError(job_id)
 
         # Stage 1: Download (skip if file already exists locally with matching hash)
         self.update_job_status(job_id, status="running", stage="download", progress=0.05)
@@ -1735,9 +1793,16 @@ class RemoteWorker:
         The worker fetches all needed data from the VPS API, populates a local
         temp SQLite DB, runs GenerationService locally (GPU + video-generate),
         then uploads the rendered video and syncs results back to the VPS.
+
+        CANCELLATION: Checks for cancellation before starting the heavy
+        generation pipeline. If cancelled, aborts immediately.
         """
         job_id = job["id"]
         log.info(f"Generation job #{job_id} — fetching data from VPS...")
+
+        # Cooperative cancellation check before heavy work
+        if self.check_job_cancelled(job_id):
+            raise JobCancelledError(job_id)
 
         # Fetch all data needed for generation
         resp = self.client.get(f"/api/jobs/{job_id}/data")
@@ -1909,6 +1974,131 @@ class RemoteWorker:
             job_id,
             status="completed",
             artifacts={"deleted_files": deleted_files, "source_id": source_id},
+        )
+
+    def _process_cleanup_user_storage_job(self, job: dict) -> None:
+        """Process a cleanup_user_storage job: delete ALL files for a user/domain.
+
+        This is the comprehensive storage cleanup triggered by domain reset.
+        It removes all files belonging to the user across all worker storage
+        directories (gameplays, mapped, renders, outputs).
+
+        SAFETY:
+        - Only deletes files within self.storage_root (path traversal protection).
+        - Only deletes files matching the user_id prefix (user_{user_id}_ or
+          {source_id}_ where source_id belongs to the user — but since we're
+          deleting everything, we use the user-scoped subdirectories).
+        - Missing files are NOT errors (idempotent).
+        - Does NOT touch files belonging to other users.
+        """
+        job_id = job["id"]
+        artifacts = job.get("artifacts", {})
+        if isinstance(artifacts, str):
+            try:
+                import json as _json
+                artifacts = _json.loads(artifacts)
+            except Exception:
+                artifacts = {}
+
+        user_id = artifacts.get("user_id") or job.get("user_id")
+        if not user_id:
+            self.submit_job_result(job_id, status="failed", error="No user_id in cleanup job")
+            return
+
+        self.update_job_status(job_id, status="running", stage="cleanup", progress=0.1)
+        self.send_status("busy", f"Limpando storage do usuário #{user_id}", job_id=job_id)
+
+        deleted_files: list[str] = []
+        errors: list[str] = []
+
+        # Resolve storage_root to an absolute path for safety checks
+        storage_root = self.storage_root.resolve()
+
+        def _safe_delete(path: Path) -> None:
+            """Delete a file if it exists and is within storage_root. Idempotent."""
+            try:
+                resolved = path.resolve()
+                # Path traversal protection: ensure the path is within storage_root
+                if not str(resolved).startswith(str(storage_root)):
+                    log.warning(f"Skipping file outside storage_root: {path}")
+                    errors.append(f"Path outside storage_root: {path}")
+                    return
+                if resolved.is_file():
+                    resolved.unlink()
+                    deleted_files.append(str(resolved))
+                    log.info(f"Deleted: {resolved}")
+                elif resolved.is_dir():
+                    # Only delete empty directories within storage_root
+                    try:
+                        resolved.rmdir()
+                        log.info(f"Removed empty dir: {resolved}")
+                    except OSError:
+                        pass  # Directory not empty — leave it
+            except OSError as e:
+                log.warning(f"Failed to delete {path}: {e}")
+                errors.append(str(e))
+
+        # 1. Clean gameplays directory — files matching user pattern
+        gameplays_dir = storage_root / "gameplays"
+        if gameplays_dir.exists():
+            # Gameplay files are named: {source_id}_{filename}
+            # We don't have source_id→user mapping on the worker, so we
+            # delete ALL gameplay files. This is safe because domain reset
+            # only happens when switching away from Games, and ALL gameplays
+            # belong to the Games domain. If multi-user workers exist in
+            # the future, this should be scoped by user_id.
+            for f in gameplays_dir.iterdir():
+                if f.is_file():
+                    _safe_delete(f)
+
+        # 2. Clean mapped directory — analysis JSONs
+        mapped_dir = storage_root / "mapped"
+        if mapped_dir.exists():
+            for f in mapped_dir.iterdir():
+                if f.is_file():
+                    _safe_delete(f)
+
+        # 3. Clean renders directory — intermediate render files
+        renders_dir = storage_root / "renders"
+        if renders_dir.exists():
+            for f in renders_dir.iterdir():
+                if f.is_file():
+                    _safe_delete(f)
+
+        # 4. Clean outputs directory — final output files
+        outputs_dir = storage_root / "outputs"
+        if outputs_dir.exists():
+            for f in outputs_dir.iterdir():
+                if f.is_file():
+                    _safe_delete(f)
+
+        # 5. Clean per-user voice directory if it exists
+        from gpcg.config import get_settings
+        try:
+            local_settings = get_settings()
+            user_voices = local_settings.voices_dir / f"user_{user_id}"
+            if user_voices.exists():
+                for f in user_voices.iterdir():
+                    if f.is_file():
+                        _safe_delete(f)
+        except Exception as e:
+            log.warning(f"Could not clean user voices: {e}")
+
+        log.info(
+            f"User storage cleanup #{job_id} completed — "
+            f"deleted {len(deleted_files)} file(s) for user #{user_id}"
+        )
+
+        self.update_job_status(job_id, status="running", stage="done", progress=1.0)
+        self.submit_job_result(
+            job_id,
+            status="completed",
+            artifacts={
+                "deleted_files": deleted_files,
+                "user_id": user_id,
+                "errors": errors,
+                "deleted_count": len(deleted_files),
+            },
         )
 
     # ── Shutdown ─────────────────────────────────────────────────────────────

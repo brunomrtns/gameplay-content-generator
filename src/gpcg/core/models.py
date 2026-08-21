@@ -79,6 +79,7 @@ class JobType(str, enum.Enum):
     game_enrich = "game_enrich"  # enrich a Game with Wikidata + Wikipedia data
     content_collect = "content_collect"  # collect external content (RSS) into KnowledgeItems
     cleanup_gameplay = "cleanup_gameplay"  # delete physical gameplay files from worker storage
+    cleanup_user_storage = "cleanup_user_storage"  # delete ALL files for a user/domain from worker storage
 
 
 class JobStatus(str, enum.Enum):
@@ -457,6 +458,13 @@ class Job(Base):
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     job_uuid: Mapped[str] = mapped_column(String(36), unique=True, index=True, default=lambda: str(uuid.uuid4()))
     type: Mapped[str] = mapped_column(String(30), default=JobType.generate_short.value, index=True)
+    # Domain the job belongs to. Set at creation time from ChannelProfile.domain.
+    # Used by the domain guard: if the channel's current domain != job.domain,
+    # the job result is rejected (prevents old-domain jobs from producing
+    # content after a domain switch).
+    domain: Mapped[str] = mapped_column(
+        String(30), default=ContentDomain.games.value, index=True
+    )
     game_id: Mapped[Optional[int]] = mapped_column(ForeignKey("games.id"), nullable=True, index=True)
     content_plan_id: Mapped[Optional[int]] = mapped_column(ForeignKey("content_plans.id"), nullable=True)
     # GameplaySource being processed (for mapping jobs)
