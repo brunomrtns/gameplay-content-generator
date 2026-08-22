@@ -32,6 +32,11 @@ def _validate_bi_user(request: Request) -> Optional[dict]:
 
     Returns the BI user object dict if valid, None otherwise.
     Caches the result on the request state to avoid duplicate calls.
+
+    Sends BOTH bi_auth (access token, 15min) and bi_refresh (refresh token,
+    7d) cookies so the Identity Service can transparently refresh expired
+    access tokens server-side. Without bi_refresh, the backend gets 401
+    every 15 minutes and forces a frontend roundtrip for refresh.
     """
     # Return cached result if available
     cached = getattr(request.state, _BI_USER_KEY, None)
@@ -42,11 +47,17 @@ def _validate_bi_user(request: Request) -> Optional[dict]:
     if not bi_auth:
         return None
 
+    # Also forward bi_refresh so BI Identity can refresh expired access tokens
+    bi_refresh = request.cookies.get("bi_refresh")
+    cookies = {"bi_auth": bi_auth}
+    if bi_refresh:
+        cookies["bi_refresh"] = bi_refresh
+
     settings = get_settings()
     try:
         resp = httpx.get(
             f"{settings.bi_identity_url}/api/auth/check",
-            cookies={"bi_auth": bi_auth},
+            cookies=cookies,
             timeout=10.0,
         )
     except httpx.HTTPError as exc:

@@ -18,16 +18,18 @@ import "./index.css";
 
 const SSO_LOGIN_URL = "/id/login?redirect=/gpcg/dashboard";
 
-/** Protected route wrapper — checks for user, calls /api/auth/me on mount.
- * If not authenticated, redirects to BI Identity login. */
+/** Protected route wrapper — validates session on every mount/refresh.
+ * Calls /api/auth/me to verify the SSO cookie is still valid, even if
+ * the user is in localStorage. This prevents stale sessions after refresh
+ * when the bi_auth cookie has expired (15min) but localStorage still has
+ * the user object. */
 function ProtectedRoute() {
   const user = useAuth((s) => s.user);
   const setUser = useAuth((s) => s.setUser);
   const logout = useAuth((s) => s.logout);
-  const [checking, setChecking] = useState(!user);
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    if (user) return; // already have user in store
     let cancelled = false;
     (async () => {
       try {
@@ -46,7 +48,7 @@ function ProtectedRoute() {
     return () => {
       cancelled = true;
     };
-  }, [user, setUser, logout]);
+  }, [setUser, logout]);
 
   if (checking) {
     return (
