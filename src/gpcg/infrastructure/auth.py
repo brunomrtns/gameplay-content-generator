@@ -120,6 +120,20 @@ def _find_or_create_local_user(bi_user: dict, db: Session) -> User:
         if user is None:
             raise  # Should not happen, but don't swallow the error
     log.info(f"Created local user '{email}' from BI Identity (bi_id={bi_id})")
+
+    # Ensure the user has a ChannelProfile (default: games domain)
+    from gpcg.core.models import ChannelProfile, ContentDomain
+    existing_profile = db.query(ChannelProfile).filter(
+        ChannelProfile.user_id == user.id
+    ).first()
+    if not existing_profile:
+        profile = ChannelProfile(
+            user_id=user.id,
+            domain=ContentDomain.games.value,
+        )
+        db.add(profile)
+        db.commit()
+
     return user
 
 

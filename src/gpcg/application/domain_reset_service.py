@@ -129,8 +129,12 @@ def reset_channel_domain(
     profile = session.query(ChannelProfile).filter(
         ChannelProfile.user_id == user_id
     ).first()
-    if profile:
-        summary["old_domain"] = profile.domain
+    if not profile:
+        # New user without a profile — create one with default domain
+        profile = ChannelProfile(user_id=user_id, domain=ContentDomain.games.value)
+        session.add(profile)
+        session.flush()
+    summary["old_domain"] = profile.domain
 
     # ── 1. Cancel all queued/running jobs for the user ──────────────────────
     active_jobs = session.query(Job).filter(
