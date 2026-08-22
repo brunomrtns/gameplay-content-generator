@@ -28,18 +28,25 @@ FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (cached unless apt packages change)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-# Copy source first (editable install needs the package directory)
+# Install Python dependencies — copy only pyproject.toml first so this layer
+# is cached and only rebuilt when dependencies change (not on every code change)
 COPY pyproject.toml ./
 COPY README.md ./
+# Create a minimal src/gpcg/__init__.py so editable install works without
+# copying all source files (which would invalidate the cache)
+RUN mkdir -p src/gpcg && echo "" > src/gpcg/__init__.py && \
+    pip install --no-cache-dir -e "." && \
+    rm -rf src/gpcg/__init__.py
+
+# Now copy the actual source code (this layer changes on every code edit,
+# but the pip install layer above is cached)
 COPY src/ ./src/
 COPY scripts/ ./scripts/
-RUN pip install --no-cache-dir -e "."
 
 # Copy built frontend
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist

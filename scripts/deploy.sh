@@ -241,9 +241,10 @@ if [[ "$NEEDS_BUILD" -eq 1 ]]; then
     err "  my-vps \"cd $VPS_PATH && docker compose -f docker-compose.prod.yml build\""
     exit 1
   fi
-  # Clean build cache after successful build — we don't reuse it and it
-  # can accumulate hundreds of GB over time. Free the space for video storage.
-  vps "docker builder prune -af 2>/dev/null" || true
+  # Prune dangling images only (not build cache) — build cache is needed
+  # for fast incremental rebuilds. Dangling images accumulate from previous
+  # builds and can waste disk space.
+  vps "docker image prune -f 2>/dev/null" || true
   ok "Imagens buildadas (gpcg-api:latest, gpcg-worker:latest)"
 
   # Salvar hash do deploy atual

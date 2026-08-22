@@ -65,12 +65,14 @@ def _validate_bi_user(request: Request) -> Optional[dict]:
         return None
 
     if resp.status_code != 200:
+        log.debug(f"BI Identity check returned {resp.status_code}")
         return None
 
     data = resp.json()
     # /api/auth/check returns the user object directly (not wrapped in {user: ...})
     bi_user = data.get("user") if "user" in data else data
     if not bi_user or not bi_user.get("email"):
+        log.warning("BI Identity check returned 200 but no user email")
         return None
 
     # Cache on request state
