@@ -71,7 +71,12 @@ def _find_or_create_local_user(bi_user: dict, db: Session) -> User:
     """Find or create a local User matching the BI user by email.
 
     Updates name and bi_identity_id if the BI user info has changed.
+    Commits the session to persist any changes (get_db() does not commit).
+    Handles race conditions where concurrent requests try to create the
+    same user — catches IntegrityError and retries the find.
     """
+    from sqlalchemy.exc import IntegrityError as _IntegrityError
+
     email = bi_user["email"].lower().strip()
     bi_id = str(bi_user.get("id", ""))
     name = bi_user.get("name") or email.split("@")[0]
@@ -87,7 +92,7 @@ def _find_or_create_local_user(bi_user: dict, db: Session) -> User:
             user.name = name
             changed = True
         if changed:
-            db.flush()
+            db.commit()
         return user
 
     # Create new local user.
@@ -105,7 +110,15 @@ def _find_or_create_local_user(bi_user: dict, db: Session) -> User:
         is_active=True,
     )
     db.add(user)
-    db.flush()
+    try:
+        db.commit()
+    except _IntegrityError:
+        # Race condition: another concurrent request created the user first.
+        # Rollback and re-query to get the existing user.
+        db.rollback()
+        user = db.query(User).filter(User.email == email).first()
+        if user is None:
+            raise  # Should not happen, but don't swallow the error
     log.info(f"Created local user '{email}' from BI Identity (bi_id={bi_id})")
     return user
 
