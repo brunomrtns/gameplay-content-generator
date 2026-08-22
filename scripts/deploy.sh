@@ -198,10 +198,10 @@ if [[ "$NO_BUILD" -eq 1 ]]; then
   NEEDS_RESTART=1  # sempre restart com --no-build para garantir
   log "Step 1b: Detecção pulada (--no-build)"
 else
-  # Computar hashes dos componentes
-  BACKEND_HASH=$(find "$PROJECT_ROOT/src" "$PROJECT_ROOT/pyproject.toml" "$PROJECT_ROOT/Dockerfile" -type f -not -path '*/__pycache__/*' 2>/dev/null | sort | xargs cat 2>/dev/null | md5sum | cut -d' ' -f1)
-  FRONTEND_HASH=$(find "$PROJECT_ROOT/frontend/src" "$PROJECT_ROOT/frontend/package.json" "$PROJECT_ROOT/frontend/package-lock.json" "$PROJECT_ROOT/frontend/vite.config.js" "$PROJECT_ROOT/frontend/tsconfig.json" -type f 2>/dev/null | sort | xargs cat 2>/dev/null | md5sum | cut -d' ' -f1)
-  DOCKER_HASH=$(md5sum "$PROJECT_ROOT/Dockerfile" "$PROJECT_ROOT/docker-compose.prod.yml" 2>/dev/null | md5sum | cut -d' ' -f1)
+  # Computar hashes dos componentes (use find with || true to handle missing files)
+  BACKEND_HASH=$(find "$PROJECT_ROOT/src" "$PROJECT_ROOT/pyproject.toml" "$PROJECT_ROOT/Dockerfile" -type f -not -path '*/__pycache__/*' 2>/dev/null | sort | xargs cat 2>/dev/null | md5sum | cut -d' ' -f1 || echo "err")
+  FRONTEND_HASH=$(find "$PROJECT_ROOT/frontend/src" "$PROJECT_ROOT/frontend/package.json" "$PROJECT_ROOT/frontend/package-lock.json" "$PROJECT_ROOT/frontend/vite.config.ts" "$PROJECT_ROOT/frontend/tsconfig.json" -type f 2>/dev/null | sort | xargs cat 2>/dev/null | md5sum | cut -d' ' -f1 || echo "err")
+  DOCKER_HASH=$(cat "$PROJECT_ROOT/Dockerfile" "$PROJECT_ROOT/docker-compose.prod.yml" 2>/dev/null | md5sum | cut -d' ' -f1 || echo "err")
   COMBINED_HASH="${BACKEND_HASH}:${FRONTEND_HASH}:${DOCKER_HASH}"
 
   # Ler hash do último deploy na VPS
