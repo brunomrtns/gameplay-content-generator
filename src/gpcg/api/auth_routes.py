@@ -13,11 +13,13 @@ from __future__ import annotations
 
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from gpcg.config import get_settings
 from gpcg.core.models import User, Automation
 from gpcg.infrastructure.auth import (
     get_admin_user,
@@ -146,9 +148,6 @@ def logout(request: Request):
     proper cookie clearing. This endpoint exists as a backend fallback and
     also revokes the refresh token server-side.
     """
-    import httpx
-    from gpcg.config import get_settings
-
     settings = get_settings()
     bi_auth = request.cookies.get("bi_auth")
     bi_refresh = request.cookies.get("bi_refresh")

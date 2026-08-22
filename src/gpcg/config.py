@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     gpcg_inbox_poll_interval: int = 30
     gpcg_inbox_stable_seconds: int = 10
     gpcg_inbox_min_size_mb: int = 5
+    # Disable inbox watcher on VPS (inbox is local to the GPU PC, not the VPS).
+    # When true, the worker skips inbox scanning entirely.
+    gpcg_inbox_watcher_enabled: bool = True
 
     # ── Local AI (Ollama) ────────────────────────────────────────────────────
     ollama_host: str = "http://localhost:11434"

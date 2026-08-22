@@ -72,12 +72,23 @@ services:
       GPCG_DIVERSITY_ENGINE_ENABLED: "true"
       GPCG_FEEDBACK_LOOP_ENABLED: "true"
       GPCG_EDITORIAL_EXPLORATION_FACTOR: "0.1"
+      # Disable inbox watcher on VPS — inbox is local to the GPU PC.
+      # The VPS worker only processes jobs queued by the API.
+      GPCG_INBOX_WATCHER_ENABLED: "false"
     volumes:
       - gpcg-data:/app/data
     networks:
       - trivestia-net
       - bi-net
     command: ["gpcg", "worker"]
+    # Worker não serve HTTP — usa healthcheck de processo em vez de HTTP.
+    # Verifica se o processo principal (gpcg worker) está rodando.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, sys; sys.exit(0 if os.path.exists('/proc/1/cmdline') and b'gpcg' in open('/proc/1/cmdline', 'rb').read() else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     deploy:
       resources:
         limits:

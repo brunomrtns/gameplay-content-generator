@@ -255,6 +255,7 @@ interface DomainContextValue {
 }
 
 const DEFAULT_DOMAIN = "games";
+const DOMAIN_STORAGE_KEY = "gpcg-domain";
 
 const DomainContext = createContext<DomainContextValue>({
   domain: DEFAULT_DOMAIN,
@@ -263,25 +264,44 @@ const DomainContext = createContext<DomainContextValue>({
 });
 
 export function DomainProvider({ children }: { children: ReactNode }) {
-  const [domain, setDomainState] = useState<string>(DEFAULT_DOMAIN);
+  // Initialize from localStorage to avoid theme flash on refresh.
+  // The backend fetch below will correct it if the domain changed server-side.
+  const [domain, setDomainState] = useState<string>(() => {
+    try {
+      return localStorage.getItem(DOMAIN_STORAGE_KEY) || DEFAULT_DOMAIN;
+    } catch {
+      return DEFAULT_DOMAIN;
+    }
+  });
+
+  // Apply theme immediately on mount (before fetch) to prevent flash
+  useEffect(() => {
+    applyTheme(domain);
+  }, [domain]);
 
   useEffect(() => {
-    // Fetch domain from backend on mount
+    // Fetch domain from backend to verify/sync with server state
     api.getDashboard()
       .then((d) => {
-        const domain = d.channel_domain || DEFAULT_DOMAIN;
-        setDomainState(domain);
-        applyTheme(domain);
+        const serverDomain = d.channel_domain || DEFAULT_DOMAIN;
+        if (serverDomain !== domain) {
+          setDomainState(serverDomain);
+        }
       })
       .catch(() => {
-        // If dashboard fails (e.g. not yet authenticated), use default
+        // If dashboard fails (e.g. not yet authenticated), keep cached domain
       });
   }, []);
 
   const setDomain = (newDomain: string) => {
     setDomainState(newDomain);
-    applyTheme(newDomain);
+    try { localStorage.setItem(DOMAIN_STORAGE_KEY, newDomain); } catch {}
   };
+
+  // Persist domain to localStorage whenever it changes
+  useEffect(() => {
+    try { localStorage.setItem(DOMAIN_STORAGE_KEY, domain); } catch {}
+  }, [domain]);
 
   const config = DOMAIN_CONFIGS[domain] || DOMAIN_CONFIGS[DEFAULT_DOMAIN];
 

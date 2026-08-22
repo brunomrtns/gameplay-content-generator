@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
+import { useDomain } from "@/lib/domain-config";
 import { usePoll } from "@/hooks/usePoll";
 import { Badge, Button, Card, Spinner, EmptyState } from "@/components/ui";
 import { WorkerStatusCard } from "@/components/worker-status";
@@ -41,6 +42,7 @@ const VIDEO_STATUS_CONFIG: Record<
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const { config } = useDomain();
   const { data: dash, loading, refetch } = usePoll(() => api.getDashboard(), 10000);
   const [toggling, setToggling] = useState(false);
   const [playing, setPlaying] = useState<any | null>(null);
@@ -106,7 +108,7 @@ export function DashboardPage() {
   const videos = dash?.videos || { total: 0, published: 0 };
   const jobs = dash?.jobs || { total: 0, running: 0 };
   const recentVideos = dash?.recent_videos || [];
-  const isKidsDomain = dash?.channel_domain === "kids";
+  const isKidsDomain = config.id === "kids";
 
   const stats = isKidsDomain
     ? [
@@ -131,7 +133,7 @@ export function DashboardPage() {
           <p className="mt-1 text-sm text-text-secondary">Sua máquina de produção de conteúdo</p>
           {dash?.channel_domain && (
             <span className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-accent/10 border border-accent/20 px-2 py-0.5 text-[10px] font-medium text-accent">
-              {dash.channel_domain === "games" ? "Games" : dash.channel_domain === "kids" ? "Kids" : dash.channel_domain}
+              {config.name}
             </span>
           )}
         </div>
@@ -251,7 +253,7 @@ export function DashboardPage() {
               className="flex w-full items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm transition-all hover:border-border-bright hover:bg-surface-hover"
             >
               <FileText className="h-4 w-4 text-accent" />
-              <span>{isKidsDomain ? "Criar tópicos" : "Enviar gameplays"}</span>
+              <span>{config.content.createLabel}</span>
             </button>
             <button
               onClick={() => navigate("/automation")}

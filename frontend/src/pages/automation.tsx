@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
+import { useDomain } from "@/lib/domain-config";
 import { usePoll } from "@/hooks/usePoll";
 import { Badge, Button, Card, Label, Select, Spinner } from "@/components/ui";
 import { SubtitlePreview } from "@/components/subtitle-preview";
@@ -109,6 +110,7 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 }
 
 export function AutomationPage() {
+  const { config: domainConfig } = useDomain();
   const { data: automation } = usePoll(() => api.getAutomation(), 30000);
   const { data: games } = usePoll(() => api.listGames(), 15000);
   const { data: voices, setData: setVoices } = usePoll(() => api.listVoices(), 15000);
@@ -244,7 +246,7 @@ export function AutomationPage() {
         {/* Left: settings */}
         <div className="lg:col-span-2 space-y-6">
           {/* Section 1: Conteúdo (Games-only — gameplay source selection) */}
-          {dashData?.channel_domain !== "kids" && (
+          {domainConfig.features.gameplayUpload && (
           <Card>
             <SectionTitle icon={Film} title="Conteúdo" desc="Qual gameplay usar como fonte" />
             <div className="space-y-4">

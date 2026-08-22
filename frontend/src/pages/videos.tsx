@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { api } from "@/lib/api";
+import { useDomain } from "@/lib/domain-config";
 import { usePoll } from "@/hooks/usePoll";
 import { Badge, Card, Spinner, EmptyState } from "@/components/ui";
 import { fmtDate, fmtDuration } from "@/lib/utils";
@@ -43,9 +44,9 @@ const canPublishModal = (v: any) =>
   v.storage_key && v.status !== "published";
 
 export function VideosPage() {
+  const { config } = useDomain();
   const { data: videos, loading, refetch } = usePoll(() => api.listVideos(), 10000);
-  const { data: dashData } = usePoll(() => api.getDashboard(), 30000);
-  const isKidsDomain = dashData?.channel_domain === "kids";
+  const isKidsDomain = config.id === "kids";
   const [search, setSearch] = useState("");
   const [playing, setPlaying] = useState<any | null>(null);
   const [publishing, setPublishing] = useState<number | null>(null);
@@ -591,7 +592,7 @@ export function VideosPage() {
                 {playing.clips_used?.length > 0 && (
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-1.5 text-[10px] font-medium text-text-muted uppercase tracking-wide">
-                      <Clapperboard className="h-3 w-3" /> {isKidsDomain ? "Imagens usadas" : "Trechos de gameplay"} ({playing.clips_used.length})
+                      <Clapperboard className="h-3 w-3" /> {config.content.assetLabelPlural === "imagens" ? "Imagens usadas" : "Trechos de gameplay"} ({playing.clips_used.length})
                     </div>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
                       {playing.clips_used.map((clip: any, i: number) => (
@@ -734,7 +735,7 @@ export function VideosPage() {
               <h3 className="text-lg font-semibold">Liberar trechos e ideia?</h3>
             </div>
             <p className="text-sm text-text-secondary">
-              Os trechos de {isKidsDomain ? "imagens" : "gameplay"} e a ideia de conteúdo usados neste vídeo
+              Os trechos de {config.content.sourceLabelPlural} e a ideia de conteúdo usados neste vídeo
               podem ser liberados para uso em vídeos futuros. Deseja liberá-los?
             </p>
             <div className="flex justify-end gap-2 pt-2">
@@ -784,7 +785,7 @@ export function VideosPage() {
                 antes de aprovar a geração.
               </p>
               <p className="text-sm text-text-secondary">
-                Os trechos de {isKidsDomain ? "imagens" : "gameplay"} usados neste vídeo serão liberados e poderão
+                Os trechos de {config.content.sourceLabelPlural} usados neste vídeo serão liberados e poderão
                 ser reutilizados na nova geração.
               </p>
               <p className="text-sm text-text-secondary">

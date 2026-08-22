@@ -58,9 +58,13 @@ def run_worker() -> None:
     last_inbox_scan = 0.0
     while True:
         try:
-            # Inbox scan on interval
+            # Inbox scan on interval (skip if disabled — e.g. on VPS where
+            # the inbox dir is local to the GPU PC, not the VPS filesystem)
             now = time.time()
-            if now - last_inbox_scan >= settings.gpcg_inbox_poll_interval:
+            if (
+                getattr(settings, "gpcg_inbox_watcher_enabled", True)
+                and now - last_inbox_scan >= settings.gpcg_inbox_poll_interval
+            ):
                 discovered = ingestion.scan_once()
                 if discovered:
                     log.info(f"inbox: {discovered} new recording(s) ingested")
