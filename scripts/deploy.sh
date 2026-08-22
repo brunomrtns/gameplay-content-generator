@@ -186,8 +186,44 @@ else
   exit 1
 fi
 
+# ── Step 1b: Detectar mudanças para deploy incremental ──────────────────────
+# Compara hashes dos diretórios-chave com o último deploy para decidir
+# se é necessário rebuildar o Docker e/ou reiniciar containers.
+NEEDS_BUILD=0
+NEEDS_RESTART=0
+NEEDS_NGINX=1  # nginx config é regenerado a cada deploy (barato)
+
+if [[ "$NO_BUILD" -eq 1 ]]; then
+  NEEDS_BUILD=0
+  NEEDS_RESTART=1  # sempre restart com --no-build para garantir
+  log "Step 1b: Detecção pulada (--no-build)"
+else
+  # Computar hashes dos componentes
+  BACKEND_HASH=$(find "$PROJECT_ROOT/src" "$PROJECT_ROOT/pyproject.toml" "$PROJECT_ROOT/Dockerfile" -type f -not -path '*/__pycache__/*' 2>/dev/null | sort | xargs cat 2>/dev/null | md5sum | cut -d' ' -f1)
+  FRONTEND_HASH=$(find "$PROJECT_ROOT/frontend/src" "$PROJECT_ROOT/frontend/package.json" "$PROJECT_ROOT/frontend/package-lock.json" "$PROJECT_ROOT/frontend/vite.config.js" "$PROJECT_ROOT/frontend/tsconfig.json" -type f 2>/dev/null | sort | xargs cat 2>/dev/null | md5sum | cut -d' ' -f1)
+  DOCKER_HASH=$(md5sum "$PROJECT_ROOT/Dockerfile" "$PROJECT_ROOT/docker-compose.prod.yml" 2>/dev/null | md5sum | cut -d' ' -f1)
+  COMBINED_HASH="${BACKEND_HASH}:${FRONTEND_HASH}:${DOCKER_HASH}"
+
+  # Ler hash do último deploy na VPS
+  LAST_HASH=$(vps "cat $VPS_PATH/.deploy-hash 2>/dev/null || echo 'none'")
+
+  if [[ "$LAST_HASH" == "$COMBINED_HASH" ]]; then
+    log "Step 1b: Nenhuma mudança detectada desde o último deploy"
+    log "  backend=$BACKEND_HASH frontend=$FRONTEND_HASH docker=$DOCKER_HASH"
+    NEEDS_BUILD=0
+    NEEDS_RESTART=0
+    # Ainda atualiza nginx (caso a config tenha mudado externamente)
+  else
+    log "Step 1b: Mudanças detectadas"
+    [[ "$LAST_HASH" == "none" ]] && log "  (primeiro deploy ou hash ausente)" || log "  anterior: $LAST_HASH"
+    log "  atual:    $COMBINED_HASH"
+    NEEDS_BUILD=1
+    NEEDS_RESTART=1
+  fi
+fi
+
 # ── Step 2: Build das imagens ────────────────────────────────────────────────
-if [[ "$NO_BUILD" -eq 0 ]]; then
+if [[ "$NEEDS_BUILD" -eq 1 ]]; then
   log "Step 2/7: Buildando imagens Docker na VPS (docker compose build)..."
 
   # Ensure the bi-net external network exists (for BI Identity Service communication)
@@ -209,23 +245,30 @@ if [[ "$NO_BUILD" -eq 0 ]]; then
   # can accumulate hundreds of GB over time. Free the space for video storage.
   vps "docker builder prune -af 2>/dev/null" || true
   ok "Imagens buildadas (gpcg-api:latest, gpcg-worker:latest)"
+
+  # Salvar hash do deploy atual
+  vps "echo '$COMBINED_HASH' > $VPS_PATH/.deploy-hash"
 else
-  log "Step 2/7: Build pulado (--no-build)"
+  log "Step 2/7: Build pulado (nenhuma mudança de código detectada)"
 fi
 
 # ── Step 3: Subir a stack ────────────────────────────────────────────────────
-log "Step 3/7: Subindo stack com docker compose..."
-COMPOSE_LOG=$(mktemp)
-COMPOSE_EXIT=0
-vps "cd $VPS_PATH && docker compose -f docker-compose.prod.yml up -d 2>&1; echo \"EXIT_CODE=\$?\"" > "$COMPOSE_LOG" 2>&1 || COMPOSE_EXIT=$?
-COMPOSE_REMOTE_EXIT=$(grep -oP 'EXIT_CODE=\K[0-9]+' "$COMPOSE_LOG" | tail -1)
-tail -20 "$COMPOSE_LOG"
-rm -f "$COMPOSE_LOG"
-if [[ "$COMPOSE_EXIT" -ne 0 || "$COMPOSE_REMOTE_EXIT" != "0" ]]; then
-  err "docker compose up FALHOU (exit: ${COMPOSE_REMOTE_EXIT:-$COMPOSE_EXIT})"
-  exit 1
+if [[ "$NEEDS_RESTART" -eq 1 ]]; then
+  log "Step 3/7: Subindo stack com docker compose..."
+  COMPOSE_LOG=$(mktemp)
+  COMPOSE_EXIT=0
+  vps "cd $VPS_PATH && docker compose -f docker-compose.prod.yml up -d 2>&1; echo \"EXIT_CODE=\$?\"" > "$COMPOSE_LOG" 2>&1 || COMPOSE_EXIT=$?
+  COMPOSE_REMOTE_EXIT=$(grep -oP 'EXIT_CODE=\K[0-9]+' "$COMPOSE_LOG" | tail -1)
+  tail -20 "$COMPOSE_LOG"
+  rm -f "$COMPOSE_LOG"
+  if [[ "$COMPOSE_EXIT" -ne 0 || "$COMPOSE_REMOTE_EXIT" != "0" ]]; then
+    err "docker compose up FALHOU (exit: ${COMPOSE_REMOTE_EXIT:-$COMPOSE_EXIT})"
+    exit 1
+  fi
+  ok "Stack iniciada"
+else
+  log "Step 3/7: Restart pulado (nenhuma mudança de código detectada)"
 fi
-ok "Stack iniciada"
 
 # ── Step 4: Atualizar nginx do trivestia-nginx ───────────────────────────────
 log "Step 4/7: Atualizando nginx com rotas do GPCG..."
