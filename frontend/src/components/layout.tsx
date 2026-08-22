@@ -1,51 +1,49 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { LayoutDashboard, FileText, Settings, Video, Shield, LogOut, ChevronDown, Zap, ListChecks, Lightbulb, Baby } from "lucide-react";
+import {
+  LayoutDashboard, FileText, Settings, Video, Shield, LogOut, ChevronDown,
+  Zap, ListChecks, Lightbulb, Baby, Film,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
-import { api, ssoLogout } from "@/lib/api";
+import { ssoLogout } from "@/lib/api";
+import { useDomain } from "@/lib/domain-config";
 import { Toaster } from "sonner";
 import { UploadIndicator } from "@/components/upload-indicator";
 
-const GAMES_NAV = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/content", label: "Conteúdo", icon: FileText },
-  { to: "/ideas", label: "Ideias", icon: Lightbulb },
-  { to: "/jobs", label: "Jobs", icon: ListChecks },
-  { to: "/automation", label: "Automação", icon: Settings },
-  { to: "/videos", label: "Vídeos", icon: Video },
-];
-
-const KIDS_NAV = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/kids", label: "Tópicos", icon: Baby },
-  { to: "/jobs", label: "Jobs", icon: ListChecks },
-  { to: "/automation", label: "Automação", icon: Settings },
-  { to: "/videos", label: "Vídeos", icon: Video },
-];
+// Map icon names from domain config to lucide components
+const ICON_MAP: Record<string, LucideIcon> = {
+  LayoutDashboard,
+  FileText,
+  Settings,
+  Video,
+  Lightbulb,
+  ListChecks,
+  Baby,
+  Film,
+  Zap,
+  Shield,
+};
 
 export function Layout() {
   const { user, logout } = useAuth();
+  const { config } = useDomain();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [domain, setDomain] = useState<string>("games");
 
-  useEffect(() => {
-    api.getDashboard().then((d) => setDomain(d.channel_domain || "games")).catch(() => {});
-  }, []);
-
-  const NAV = domain === "kids" ? KIDS_NAV : GAMES_NAV;
-  const navItems = [...NAV];
+  const navItems = config.navigation.map((n) => ({
+    ...n,
+    Icon: ICON_MAP[n.icon] || LayoutDashboard,
+  }));
   if (user?.is_admin) {
-    navItems.push({ to: "/admin", label: "Admin", icon: Shield });
+    navItems.push({ to: "/admin", label: "Admin", icon: "Shield", Icon: Shield });
   }
 
+  const LogoIcon = ICON_MAP[config.theme.logoIcon] || Zap;
+
   const handleLogout = async () => {
-    // Call BI Identity logout directly — this revokes the refresh token
-    // and clears the bi_auth/bi_refresh cookies via Set-Cookie headers.
     await ssoLogout();
-    // Clear local auth state (zustand persist localStorage)
     logout();
-    // Redirect to login page
     window.location.href = "/id/login?redirect=/gpcg/dashboard";
   };
 
@@ -57,11 +55,11 @@ export function Layout() {
           {/* Logo */}
           <div className="flex items-center gap-2.5">
             <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-surface-elevated border border-border">
-              <Zap className="h-4 w-4 text-accent" />
+              <LogoIcon className="h-4 w-4 text-accent" />
               <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent animate-pulse-glow" />
             </div>
             <span className="text-lg font-bold tracking-tight">
-              GPCG
+              {config.theme.appName}
             </span>
           </div>
 
@@ -80,7 +78,7 @@ export function Layout() {
                   )
                 }
               >
-                <n.icon className="h-4 w-4" />
+                <n.Icon className="h-4 w-4" />
                 {n.label}
               </NavLink>
             ))}
@@ -145,7 +143,7 @@ export function Layout() {
               )
             }
           >
-            <n.icon className="h-3.5 w-3.5" />
+            <n.Icon className="h-3.5 w-3.5" />
             {n.label}
           </NavLink>
         ))}

@@ -13,6 +13,7 @@ import { AdminPage } from "@/pages/admin";
 import { KidsPage } from "@/pages/kids";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { DomainProvider } from "@/lib/domain-config";
 import { Spinner } from "@/components/ui";
 import "./index.css";
 
@@ -81,7 +82,7 @@ const router = createBrowserRouter(
       element: <ProtectedRoute />,
       children: [
         {
-          element: <Layout />,
+          element: <DomainProvider><Layout /></DomainProvider>,
           children: [
             { path: "/dashboard", element: <DashboardPage /> },
             { path: "/content", element: <ContentPage /> },

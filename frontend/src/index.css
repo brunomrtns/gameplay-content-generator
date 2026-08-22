@@ -19,6 +19,8 @@
   --color-accent-hover: hsl(172, 72%, 52%);
   --color-accent-glow: hsla(172, 72%, 44%, 0.2);
   --color-accent-warm: hsl(38, 88%, 60%);
+  --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --radius-default: 0.75rem;
 }
 
 * {
