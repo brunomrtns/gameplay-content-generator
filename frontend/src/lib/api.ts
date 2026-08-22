@@ -74,6 +74,24 @@ async function tryRefreshSsoCookie(): Promise<boolean> {
   return _refreshing;
 }
 
+// Logout via BI Identity Service — revokes refresh token and clears SSO cookies.
+// This MUST call the BI Identity endpoint directly (not the GPCG proxy) because
+// only the BI Identity service can set Set-Cookie headers that clear the
+// domain-level bi_auth/bi_refresh cookies.
+export async function ssoLogout(): Promise<void> {
+  try {
+    await fetch("/id/api/auth/logout", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+  } catch {
+    // Even if the network call fails, the frontend will clear local state
+    // and redirect — the cookies will eventually expire on their own.
+  }
+}
+
 // Upload with progress reporting via XMLHttpRequest (fetch has no upload
 // progress event). Returns a promise that resolves with the parsed JSON
 // response and reports progress via the onProgress callback.

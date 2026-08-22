@@ -139,12 +139,37 @@ def get_me(user: User = Depends(get_current_user), request: Request = None):
 
 
 @router.post("/logout")
-def logout():
-    """Logout — the actual cookie clearing is handled by the BI Identity Service.
+def logout(request: Request):
+    """Logout — proxies to BI Identity Service to revoke tokens and clear cookies.
 
-    The frontend calls this then redirects to /id/login. The Identity Service
-    clears the bi_auth and bi_refresh cookies on its /id/logout endpoint.
+    The frontend SHOULD call /id/api/auth/logout directly (via ssoLogout) for
+    proper cookie clearing. This endpoint exists as a backend fallback and
+    also revokes the refresh token server-side.
     """
+    import httpx
+    from gpcg.config import get_settings
+
+    settings = get_settings()
+    bi_auth = request.cookies.get("bi_auth")
+    bi_refresh = request.cookies.get("bi_refresh")
+
+    # Forward the logout request to BI Identity so it revokes the refresh
+    # token and clears the SSO cookies. We pass both cookies so the Identity
+    # Service can identify the user.
+    if bi_auth or bi_refresh:
+        try:
+            httpx.post(
+                f"{settings.bi_identity_url}/api/auth/logout",
+                cookies={
+                    **({"bi_auth": bi_auth} if bi_auth else {}),
+                    **({"bi_refresh": bi_refresh} if bi_refresh else {}),
+                },
+                json={"refreshToken": bi_refresh} if bi_refresh else {},
+                timeout=5.0,
+            )
+        except Exception:
+            pass  # Best-effort — frontend also calls /id/api/auth/logout
+
     return {"redirect": "/id/login"}
 
 

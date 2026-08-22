@@ -3,7 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { LayoutDashboard, FileText, Settings, Video, Shield, LogOut, ChevronDown, Zap, ListChecks, Lightbulb, Baby } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
-import { api } from "@/lib/api";
+import { api, ssoLogout } from "@/lib/api";
 import { Toaster } from "sonner";
 import { UploadIndicator } from "@/components/upload-indicator";
 
@@ -40,12 +40,12 @@ export function Layout() {
   }
 
   const handleLogout = async () => {
-    try {
-      await api.logout();
-    } catch {
-      // ignore — logout endpoint may not be reachable
-    }
+    // Call BI Identity logout directly — this revokes the refresh token
+    // and clears the bi_auth/bi_refresh cookies via Set-Cookie headers.
+    await ssoLogout();
+    // Clear local auth state (zustand persist localStorage)
     logout();
+    // Redirect to login page
     window.location.href = "/id/login?redirect=/gpcg/dashboard";
   };
 
