@@ -309,7 +309,7 @@ The ideas should be kid-friendly and educational, not religious or political."""
     def _get_age_range(self, profile: ChannelProfile) -> str:
         """Get target age range from channel profile."""
         meta = profile.metadata_json or {}
-        return str(meta.get("kids_age_range", "3-6"))
+        return str(meta.get("age_range", meta.get("kids_age_range", "3-6")))
 
 
 class DiscoveryResult:

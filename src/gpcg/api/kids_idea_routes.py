@@ -80,7 +80,7 @@ def _get_safety_strictness(profile: ChannelProfile) -> float:
 def _get_age_range(profile: ChannelProfile) -> str:
     """Get target age range from channel profile metadata."""
     meta = profile.metadata_json or {}
-    return str(meta.get("kids_age_range", "3-6"))
+    return str(meta.get("age_range", meta.get("kids_age_range", "3-6")))
 
 
 def _idea_to_out(idea: KidsIdea) -> dict:

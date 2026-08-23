@@ -349,7 +349,7 @@ function ChannelConfigSection() {
   });
 
   const [kidsMeta, setKidsMeta] = useState({
-    kids_age_range: "3-6",
+    age_range: "3-6",
     categories: [] as string[],
     target_duration: 45,
   });
@@ -369,7 +369,7 @@ function ChannelConfigSection() {
         });
         const meta = p.metadata || {};
         setKidsMeta({
-          kids_age_range: meta.kids_age_range || "3-6",
+          age_range: meta.age_range || meta.kids_age_range || "3-6",
           categories: meta.categories || [],
           target_duration: meta.target_duration || 45,
         });
@@ -384,7 +384,7 @@ function ChannelConfigSection() {
       await api.updateChannelProfile({
         ...profileForm,
         metadata: {
-          kids_age_range: kidsMeta.kids_age_range,
+          age_range: kidsMeta.age_range,
           categories: kidsMeta.categories,
           target_duration: kidsMeta.target_duration,
         },
@@ -532,11 +532,12 @@ function ChannelConfigSection() {
             <div>
               <label className="mb-1 block text-xs font-medium text-text-secondary">Faixa etária alvo</label>
               <select
-                value={kidsMeta.kids_age_range}
-                onChange={(e) => setKidsMeta({ ...kidsMeta, kids_age_range: e.target.value })}
+                value={kidsMeta.age_range}
+                onChange={(e) => setKidsMeta({ ...kidsMeta, age_range: e.target.value })}
                 className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
               >
                 <option value="3-6">3-6 anos</option>
+                <option value="6-10">6-10 anos</option>
                 <option value="7-10">7-10 anos</option>
                 <option value="all">Todas as idades</option>
               </select>
