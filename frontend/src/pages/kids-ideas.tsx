@@ -74,6 +74,11 @@ export function KidsIdeasPage() {
   const [reconciling, setReconciling] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newIdeaTitle, setNewIdeaTitle] = useState("");
+  const [newIdeaDescription, setNewIdeaDescription] = useState("");
+  const [newIdeaCategory, setNewIdeaCategory] = useState("general");
+  const [creating, setCreating] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadData = useCallback(async () => {
@@ -198,6 +203,31 @@ export function KidsIdeasPage() {
     }
   };
 
+  const handleCreateIdea = async () => {
+    if (!newIdeaTitle.trim()) {
+      toast.error("Título é obrigatório");
+      return;
+    }
+    setCreating(true);
+    try {
+      await api.createKidsIdea({
+        title: newIdeaTitle.trim(),
+        description: newIdeaDescription.trim(),
+        category: newIdeaCategory,
+      });
+      toast.success("Ideia criada");
+      setNewIdeaTitle("");
+      setNewIdeaDescription("");
+      setNewIdeaCategory("general");
+      setShowCreateForm(false);
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao criar ideia");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const handleProduce = async (id: number) => {
     try {
       const result = await api.produceKidsIdea(id);
@@ -301,6 +331,12 @@ export function KidsIdeasPage() {
         </div>
         <div className="flex gap-2">
           <button
+            onClick={() => setShowCreateForm(!showCreateForm)}
+            className="rounded-lg border border-teal-500/30 bg-teal-500/10 px-4 py-2 text-sm font-medium text-teal-300 hover:bg-teal-500/20"
+          >
+            + Nova Ideia
+          </button>
+          <button
             onClick={() => setShowDiscover(!showDiscover)}
             className="rounded-lg border border-accent/30 bg-accent/10 px-4 py-2 text-sm font-medium text-accent hover:bg-accent/20"
           >
@@ -308,6 +344,73 @@ export function KidsIdeasPage() {
           </button>
         </div>
       </div>
+
+      {/* Create Manual Idea Form */}
+      {showCreateForm && (
+        <div className="rounded-lg border border-teal-500/30 bg-teal-500/5 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-text">Nova Ideia Manual</h3>
+            <button
+              onClick={() => {
+                setShowCreateForm(false);
+                setNewIdeaTitle("");
+                setNewIdeaDescription("");
+                setNewIdeaCategory("general");
+              }}
+              className="text-text-muted hover:text-text"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <input
+            type="text"
+            placeholder="Título da ideia"
+            value={newIdeaTitle}
+            onChange={(e) => setNewIdeaTitle(e.target.value)}
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40"
+          />
+          <textarea
+            placeholder="Descrição (opcional)"
+            value={newIdeaDescription}
+            onChange={(e) => setNewIdeaDescription(e.target.value)}
+            rows={3}
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 resize-none"
+          />
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1">Categoria</label>
+            <select
+              value={newIdeaCategory}
+              onChange={(e) => setNewIdeaCategory(e.target.value)}
+              className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
+            >
+              {TOPIC_LIBRARY_CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+              <option value="general">Geral</option>
+            </select>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => {
+                setShowCreateForm(false);
+                setNewIdeaTitle("");
+                setNewIdeaDescription("");
+                setNewIdeaCategory("general");
+              }}
+              className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleCreateIdea}
+              disabled={creating || !newIdeaTitle.trim()}
+              className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-500 disabled:opacity-50"
+            >
+              {creating ? "Criando..." : "Criar Ideia"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Discovery Panel */}
       {showDiscover && (
