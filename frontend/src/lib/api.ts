@@ -565,4 +565,36 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ topic_id: topicId }),
     }),
+
+  // ── Kids Ideas ──────────────────────────────────────────────────────────
+  listKidsIdeas: (params?: { status?: string; source?: string; limit?: number }) =>
+    request<{ ideas: any[]; total: number }>(
+      `/kids/ideas?${new URLSearchParams(params as any).toString()}`,
+    ),
+  createKidsIdea: (data: { title: string; description?: string; category?: string; suggested_age_range?: string }) =>
+    request<any>("/kids/ideas", { method: "POST", body: JSON.stringify(data) }),
+  scoreKidsIdea: (id: number) =>
+    request<any>(`/kids/ideas/${id}/score`, { method: "POST" }),
+  rejectKidsIdea: (id: number) =>
+    request<any>(`/kids/ideas/${id}/reject`, { method: "POST" }),
+  convertKidsIdea: (id: number) =>
+    request<any>(`/kids/ideas/${id}/convert`, { method: "POST", body: JSON.stringify({}) }),
+  produceKidsIdea: (id: number) =>
+    request<any>(`/kids/ideas/${id}/produce`, { method: "POST" }),
+  getKidsIdeaProvenance: (id: number) =>
+    request<any>(`/kids/ideas/${id}/provenance`),
+  discoverKidsIdeas: (data: { categories?: string[]; ideas_per_category?: number; include_seasonal?: boolean; include_topic_library?: boolean }) =>
+    request<any>("/kids/ideas/discover", { method: "POST", body: JSON.stringify(data) }),
+  getKidsIdeaQueue: () => request<{ queue: any[] }>("/kids/idea-queue"),
+  addKidsIdeaToQueue: (id: number) =>
+    request<any>(`/kids/idea-queue/add`, { method: "POST", body: JSON.stringify({ idea_id: id }) }),
+  removeKidsIdeaFromQueue: (id: number) =>
+    request<any>(`/kids/idea-queue/remove`, { method: "POST", body: JSON.stringify({ idea_id: id }) }),
+  reorderKidsIdeaQueue: (idea_ids: number[]) =>
+    request<any>(`/kids/idea-queue/reorder`, { method: "POST", body: JSON.stringify({ idea_ids }) }),
+  reconcileKidsIdeaQueue: () =>
+    request<any>(`/kids/idea-queue/reconcile`, { method: "POST" }),
+  getTopicLibrary: () => request<{ categories: any[] }>("/kids/topic-library"),
+  getSeasonalCalendar: (month?: number) =>
+    request<{ entries: any[] }>(`/kids/seasonal-calendar${month ? `?month=${month}` : ""}`),
 };

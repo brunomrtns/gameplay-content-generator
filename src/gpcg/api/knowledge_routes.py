@@ -115,6 +115,13 @@ def update_channel_profile(
         for field in free_text_fields:
             if field in data:
                 setattr(p, field, data[field])
+
+        # Update metadata_json (Kids-specific fields like kids_age_range, categories, etc.)
+        if "metadata" in data and isinstance(data["metadata"], dict):
+            meta = dict(p.metadata_json or {})
+            meta.update(data["metadata"])
+            p.metadata_json = meta
+
         session.flush()
 
         # Update structured fields via the service (with validation)

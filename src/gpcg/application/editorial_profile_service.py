@@ -336,5 +336,7 @@ def serialize_profile(profile: ChannelProfile) -> dict[str, Any]:
         # V2 learned
         "learned_preferences": profile.learned_preferences or {},
         "production_history_summary": profile.production_history_summary or {},
+        # Metadata (Kids-specific: kids_age_range, categories, etc.)
+        "metadata": profile.metadata_json or {},
         "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
     }
