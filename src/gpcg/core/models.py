@@ -80,6 +80,9 @@ class JobType(str, enum.Enum):
     content_collect = "content_collect"  # collect external content (RSS) into KnowledgeItems
     cleanup_gameplay = "cleanup_gameplay"  # delete physical gameplay files from worker storage
     cleanup_user_storage = "cleanup_user_storage"  # delete ALL files for a user/domain from worker storage
+    # Kids Idea System: discovery + scoring (run on VPS, no GPU)
+    kids_idea_discovery = "kids_idea_discovery"  # AI ideation + topic library + seasonal
+    kids_idea_score = "kids_idea_score"  # batch safety + scoring for discovered ideas
 
 
 class JobStatus(str, enum.Enum):

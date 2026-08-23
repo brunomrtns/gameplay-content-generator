@@ -321,11 +321,26 @@ def check_automation(
     V2: The editorial decision (which game, which topic) is now made by
     the remote worker, NOT on the VPS, because the LLM (Ollama) runs on
     the local PC. The VPS only checks if a job should be created.
+
+    V4: Domain-aware dispatch. Games users use the existing path (gameplays,
+    KnowledgeItem queue). Kids users use the new Kids path (StoryAssets,
+    KidsIdea queue).
     """
+    from gpcg.domains.automation_strategies import get_user_domain, KidsAutomationStrategy
+
     autos = db.query(Automation).filter(Automation.status == "running").all()
 
     pending = []
     for auto in autos:
+        # Domain dispatch: Kids users use the Kids strategy
+        domain = get_user_domain(db, auto.user_id)
+        if domain == "kids":
+            kids_pending = KidsAutomationStrategy.check(auto, db)
+            if kids_pending:
+                pending.append(kids_pending)
+            continue
+
+        # ── Games path (existing behavior, unchanged) ──────────────────────
         # Check if there's already an active job for this user
         active = db.query(Job).filter(
             Job.user_id == auto.user_id,
@@ -1167,6 +1182,10 @@ def create_job_from_automation(user_id: int) -> int | None:
     - automation.status == 'running'
     - não há job em andamento (queued/running) para o usuário
 
+    V4: Domain-aware dispatch. Games users use the existing path (gameplays,
+    KnowledgeItem queue). Kids users use the new Kids path (StoryAssets,
+    KidsIdea queue → KidsTopic → generate_short).
+
     O sistema decide autonomamente qual jogo e tema abordar, analisando:
     - quais jogos têm gameplays prontas
     - quais jogos têm conhecimento (facts, chunks)
@@ -1174,6 +1193,13 @@ def create_job_from_automation(user_id: int) -> int | None:
 
     Retorna o job_id ou None se não puder criar (sem gameplays, sem YouTube, etc).
     """
+    # Domain dispatch: Kids users use the Kids strategy
+    from gpcg.domains.automation_strategies import get_user_domain, KidsAutomationStrategy
+    with session_scope() as session:
+        domain = get_user_domain(session, user_id)
+        if domain == "kids":
+            return KidsAutomationStrategy.create_job(user_id)
+
     with session_scope() as session:
         user = session.get(User, user_id)
         if not user or not user.is_active:

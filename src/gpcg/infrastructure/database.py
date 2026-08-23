@@ -213,6 +213,12 @@ def init_db() -> None:
     _ensure_column(engine, "knowledge_items", "freshness_score", "FLOAT DEFAULT 1.0")
     _ensure_column(engine, "knowledge_items", "lifecycle_stage", "VARCHAR(20) DEFAULT 'fresh'")
     _ensure_column(engine, "knowledge_items", "feedback_adjustment", "FLOAT DEFAULT 0.0")
+    # ── Kids Idea System — KidsTopic traceability + editorial metadata ────
+    # kids_ideas table is created by create_all() above.
+    # KidsTopic: link back to originating KidsIdea + editorial metadata.
+    _ensure_column(engine, "kids_topics", "idea_id", "INTEGER")
+    _ensure_column(engine, "kids_topics", "editorial_intent", "VARCHAR(50) DEFAULT 'curiosity'")
+    _ensure_column(engine, "kids_topics", "educational_goal", "VARCHAR(50) DEFAULT 'general'")
     # V2: gameplay_clip_usage table is created by create_all() above
     # V2: data migrations (slug generation, aliases JSON → game_aliases, user_id deprecation)
     _migrate_v2_game_registry(engine)

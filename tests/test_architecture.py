@@ -179,13 +179,13 @@ def test_all_tables_registered_when_all_imported():
         "gameplay_assets", "gameplay_clip_usage", "gameplay_events",
         "gameplay_event_embeddings",
         # Kids
-        "kids_topics", "story_assets",
+        "kids_topics", "story_assets", "kids_ideas",
     }
 
     actual_tables = set(Base.metadata.tables.keys())
     missing = expected_tables - actual_tables
     assert not missing, f"Missing tables: {missing}"
-    assert len(actual_tables) == 26, f"Expected 26 tables, got {len(actual_tables)}"
+    assert len(actual_tables) == 27, f"Expected 27 tables, got {len(actual_tables)}"
 
 
 def test_core_models_owns_core_entities():

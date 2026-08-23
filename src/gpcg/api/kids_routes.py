@@ -342,6 +342,13 @@ def generate_kids_video(
 
     # Create the generation job
     import uuid as _uuid
+    artifacts = {
+        "topic_id": topic_id,
+        "topic_title": topic.title,
+    }
+    # Traceability: include idea_id if the topic was created from a KidsIdea
+    if topic.idea_id:
+        artifacts["idea_id"] = topic.idea_id
     job = Job(
         job_uuid=str(_uuid.uuid4()),
         type=JobType.generate_short.value,
@@ -349,10 +356,7 @@ def generate_kids_video(
         domain=ContentDomain.kids.value,
         status=JobStatus.queued.value,
         priority=JobPriority.normal.value,
-        artifacts={
-            "topic_id": topic_id,
-            "topic_title": topic.title,
-        },
+        artifacts=artifacts,
     )
     db.add(job)
     db.commit()
