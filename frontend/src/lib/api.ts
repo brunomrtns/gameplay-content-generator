@@ -568,10 +568,14 @@ export const api = {
     }),
 
   // ── Kids Ideas ──────────────────────────────────────────────────────────
-  listKidsIdeas: (params?: { status?: string; source?: string; limit?: number }) =>
-    request<{ ideas: any[]; total: number }>(
-      `/kids/ideas?${new URLSearchParams(params as any).toString()}`,
-    ),
+  listKidsIdeas: (params?: { status?: string; source?: string; limit?: number }) => {
+    const clean: Record<string, string> = {};
+    if (params?.status) clean.status = params.status;
+    if (params?.source) clean.source = params.source;
+    if (params?.limit) clean.limit = String(params.limit);
+    const qs = new URLSearchParams(clean).toString();
+    return request<{ ideas: any[]; total: number }>(`/kids/ideas${qs ? `?${qs}` : ""}`);
+  },
   createKidsIdea: (data: { title: string; description?: string; category?: string; suggested_age_range?: string }) =>
     request<any>("/kids/ideas", { method: "POST", body: JSON.stringify(data) }),
   scoreKidsIdea: (id: number) =>
