@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
 import { usePoll } from "@/hooks/usePoll";
 import { Badge, Button, Card, Spinner, EmptyState } from "@/components/ui";
@@ -12,19 +12,9 @@ import {
   Loader2,
   FileText,
   X,
-  Lightbulb,
   Settings,
-  ListChecks,
   Brain,
   Save,
-  Wand2,
-  ArrowUp,
-  ArrowDown,
-  Play,
-  CheckCircle,
-  XCircle,
-  Clock,
-  RefreshCw,
 } from "lucide-react";
 
 const CATEGORIES = [
@@ -59,44 +49,17 @@ const TOPIC_LIBRARY_CATEGORIES = [
   { value: "curiosity", label: "Curiosidades" },
 ];
 
-const IDEA_STATUS_LABELS: Record<string, string> = {
-  discovered: "Descoberta",
-  evaluated: "Avaliada",
-  queued: "Na Fila",
-  converted: "Convertida",
-  rejected: "Rejeitada",
-  expired: "Expirada",
-};
-
-const IDEA_STATUS_COLORS: Record<string, string> = {
-  discovered: "bg-blue-500/20 text-blue-300 border-blue-500/30",
-  evaluated: "bg-teal-500/20 text-teal-300 border-teal-500/30",
-  queued: "bg-purple-500/20 text-purple-300 border-purple-500/30",
-  converted: "bg-green-500/20 text-green-300 border-green-500/30",
-  rejected: "bg-red-500/20 text-red-300 border-red-500/30",
-  expired: "bg-gray-500/20 text-gray-300 border-gray-500/30",
-};
-
-const IDEA_SOURCE_LABELS: Record<string, string> = {
-  ai_ideation: "IA",
-  topic_library: "Biblioteca",
-  seasonal: "Sazonal",
-  manual: "Manual",
-};
-
-type Tab = "topics" | "ideas" | "queue" | "config";
+type Tab = "topics" | "config";
 
 export function KidsPage() {
   const [tab, setTab] = useState<Tab>("topics");
   const { data: topicsData, loading, refetch } = usePoll(() => api.listKidsTopics(), 15000);
   const [showCreate, setShowCreate] = useState(false);
-  const [selectedTopic, setSelectedTopic] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [generating, setGenerating] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Create form state
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("educational");
   const [ageRange, setAgeRange] = useState("3-6");
@@ -129,7 +92,6 @@ export function KidsPage() {
     try {
       await api.deleteKidsTopic(id);
       toast.success("Tópico excluído");
-      if (selectedTopic === id) setSelectedTopic(null);
       await refetch();
     } catch (err: any) {
       toast.error(err.message || "Erro ao excluir");
@@ -164,16 +126,6 @@ export function KidsPage() {
     }
   };
 
-  const handleDeleteAsset = async (assetId: number) => {
-    try {
-      await api.deleteKidsAsset(assetId);
-      toast.success("Imagem excluída");
-      await refetch();
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao excluir imagem");
-    }
-  };
-
   if (loading && !topicsData) {
     return (
       <div className="flex items-center justify-center py-32">
@@ -187,55 +139,176 @@ export function KidsPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Kids</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Tópicos Kids</h1>
           <p className="mt-1 text-sm text-text-secondary">
-            Produção de conteúdo educativo infantil — da ideia ao vídeo
+            Crie conteúdo educativo e divertido para crianças
           </p>
           <span className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-accent/10 border border-accent/20 px-2 py-0.5 text-[10px] font-medium text-accent">
             Kids
           </span>
         </div>
+        {tab === "topics" && (
+          <Button variant="primary" size="lg" onClick={() => setShowCreate(true)}>
+            <Plus className="h-4 w-4" /> Novo tópico
+          </Button>
+        )}
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border">
         <TabButton active={tab === "topics"} onClick={() => setTab("topics")} icon={<FileText className="h-4 w-4" />} label="Tópicos" />
-        <TabButton active={tab === "ideas"} onClick={() => setTab("ideas")} icon={<Lightbulb className="h-4 w-4" />} label="Ideias" />
-        <TabButton active={tab === "queue"} onClick={() => setTab("queue")} icon={<ListChecks className="h-4 w-4" />} label="Fila" />
-        <TabButton active={tab === "config"} onClick={() => setTab("config")} icon={<Settings className="h-4 w-4" />} label="Configuração" />
+        <TabButton active={tab === "config"} onClick={() => setTab("config")} icon={<Settings className="h-4 w-4" />} label="Configuração do Canal" />
       </div>
 
-      {/* Tab Content */}
       {tab === "topics" && (
-        <TopicsTab
-          topics={topics}
-          showCreate={showCreate}
-          setShowCreate={setShowCreate}
-          title={title}
-          setTitle={setTitle}
-          category={category}
-          setCategory={setCategory}
-          ageRange={ageRange}
-          setAgeRange={setAgeRange}
-          description={description}
-          setDescription={setDescription}
-          handleCreate={handleCreate}
-          handleDelete={handleDelete}
-          handleUpload={handleUpload}
-          handleGenerate={handleGenerate}
-          handleDeleteAsset={handleDeleteAsset}
-          creating={creating}
-          generating={generating}
-          uploading={uploading}
-          fileInputRef={fileInputRef}
-        />
+        <>
+          {/* Create dialog */}
+          {showCreate && (
+            <Card className="!p-6 border-accent/30">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold">Criar novo tópico</h3>
+                <button onClick={() => setShowCreate(false)} className="text-text-muted hover:text-text">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-medium text-text-secondary">Título</label>
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Ex: Dinossauros, Sistema Solar, ABC..."
+                    className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-medium text-text-secondary">Categoria</label>
+                    <select
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
+                    >
+                      {CATEGORIES.map((c) => (
+                        <option key={c.value} value={c.value}>{c.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-text-secondary">Faixa etária</label>
+                    <select
+                      value={ageRange}
+                      onChange={(e) => setAgeRange(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
+                    >
+                      {AGE_RANGES.map((a) => (
+                        <option key={a.value} value={a.value}>{a.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-text-secondary">Descrição (opcional)</label>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Descreva o tópico para ajudar o LLM..."
+                    rows={3}
+                    className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button>
+                  <Button variant="primary" onClick={handleCreate} disabled={creating || !title.trim()}>
+                    {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Criar"}
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Topics grid */}
+          {topics.length === 0 ? (
+            <EmptyState
+              icon={<FileText className="h-8 w-8" />}
+              title="Nenhum tópico ainda"
+              description="Crie seu primeiro tópico Kids ou vá à aba Ideias para descobrir conteúdo automaticamente."
+            />
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {topics.map((t: any) => (
+                <Card key={t.id} className="!p-5">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1">
+                      <h3 className="text-sm font-semibold">{t.title}</h3>
+                      <div className="mt-1 flex items-center gap-2">
+                        <Badge variant="info">{t.category}</Badge>
+                        <Badge variant="default">{t.age_range}</Badge>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDelete(t.id)}
+                      className="text-text-muted hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {t.description && (
+                    <p className="text-xs text-text-muted mb-3 line-clamp-2">{t.description}</p>
+                  )}
+
+                  <div className="flex items-center gap-2 mb-3">
+                    <ImageIcon className="h-4 w-4 text-text-muted" />
+                    <span className="text-xs text-text-secondary">{t.asset_count} imagem(ns)</span>
+                  </div>
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => e.target.files && handleUpload(t.id, e.target.files)}
+                  />
+
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                    >
+                      {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                      Imagens
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => handleGenerate(t.id)}
+                      disabled={generating === t.id || t.asset_count === 0}
+                    >
+                      {generating === t.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                      Gerar
+                    </Button>
+                  </div>
+
+                  {t.asset_count === 0 && (
+                    <p className="mt-2 text-[10px] text-text-muted">
+                      Envie imagens antes de gerar o vídeo.
+                    </p>
+                  )}
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
-      {tab === "ideas" && <IdeasTab />}
-
-      {tab === "queue" && <QueueTab />}
-
-      {tab === "config" && <ConfigTab />}
+      {tab === "config" && <ChannelConfigSection />}
     </div>
   );
 }
@@ -258,619 +331,15 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
   );
 }
 
-// ── Topics Tab ───────────────────────────────────────────────────────────────
+// ── Channel Config Section ───────────────────────────────────────────────────
 
-function TopicsTab(props: any) {
-  const {
-    topics, showCreate, setShowCreate, title, setTitle, category, setCategory,
-    ageRange, setAgeRange, description, setDescription, handleCreate,
-    handleDelete, handleUpload, handleGenerate, handleDeleteAsset,
-    creating, generating, uploading, fileInputRef,
-  } = props;
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-end">
-        <Button variant="primary" size="lg" onClick={() => setShowCreate(true)}>
-          <Plus className="h-4 w-4" /> Novo tópico
-        </Button>
-      </div>
-
-      {/* Create dialog */}
-      {showCreate && (
-        <Card className="!p-6 border-accent/30">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold">Criar novo tópico</h3>
-            <button onClick={() => setShowCreate(false)} className="text-text-muted hover:text-text">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs font-medium text-text-secondary">Título</label>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Ex: Dinossauros, Sistema Solar, ABC..."
-                className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs font-medium text-text-secondary">Categoria</label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c.value} value={c.value}>{c.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-text-secondary">Faixa etária</label>
-                <select
-                  value={ageRange}
-                  onChange={(e) => setAgeRange(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
-                >
-                  {AGE_RANGES.map((a) => (
-                    <option key={a.value} value={a.value}>{a.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-text-secondary">Descrição (opcional)</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Descreva o tópico para ajudar o LLM..."
-                rows={3}
-                className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button>
-              <Button variant="primary" onClick={handleCreate} disabled={creating || !title.trim()}>
-                {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Criar"}
-              </Button>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* Topics grid */}
-      {topics.length === 0 ? (
-        <EmptyState
-          icon={<FileText className="h-8 w-8" />}
-          title="Nenhum tópico ainda"
-          description="Crie seu primeiro tópico Kids ou use a aba Ideias para descobrir conteúdo automaticamente."
-        />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {topics.map((t: any) => (
-            <Card key={t.id} className="!p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex-1">
-                  <h3 className="text-sm font-semibold">{t.title}</h3>
-                  <div className="mt-1 flex items-center gap-2">
-                    <Badge variant="info">{t.category}</Badge>
-                    <Badge variant="default">{t.age_range}</Badge>
-                  </div>
-                </div>
-                <button
-                  onClick={() => handleDelete(t.id)}
-                  className="text-text-muted hover:text-red-400 transition-colors"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-
-              {t.description && (
-                <p className="text-xs text-text-muted mb-3 line-clamp-2">{t.description}</p>
-              )}
-
-              {/* Asset count + upload */}
-              <div className="flex items-center gap-2 mb-3">
-                <ImageIcon className="h-4 w-4 text-text-muted" />
-                <span className="text-xs text-text-secondary">{t.asset_count} imagem(ns)</span>
-              </div>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => e.target.files && handleUpload(t.id, e.target.files)}
-              />
-
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                >
-                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                  Imagens
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="flex-1"
-                  onClick={() => handleGenerate(t.id)}
-                  disabled={generating === t.id || t.asset_count === 0}
-                >
-                  {generating === t.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                  Gerar
-                </Button>
-              </div>
-
-              {t.asset_count === 0 && (
-                <p className="mt-2 text-[10px] text-text-muted">
-                  Envie imagens antes de gerar o vídeo.
-                </p>
-              )}
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Ideas Tab ────────────────────────────────────────────────────────────────
-
-function IdeasTab() {
-  const [ideas, setIdeas] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [discovering, setDiscovering] = useState(false);
-  const [scoring, setScoring] = useState<number | null>(null);
-  const [filterStatus, setFilterStatus] = useState<string>("");
-  const [showDiscover, setShowDiscover] = useState(false);
-  const [discoverCategories, setDiscoverCategories] = useState<string[]>([]);
-  const [discoverCount, setDiscoverCount] = useState(3);
-
-  const loadIdeas = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await api.listKidsIdeas({ status: filterStatus || undefined, limit: 100 });
-      setIdeas(res.ideas || []);
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao carregar ideias");
-    } finally {
-      setLoading(false);
-    }
-  }, [filterStatus]);
-
-  useEffect(() => {
-    loadIdeas();
-  }, [loadIdeas]);
-
-  const handleDiscover = async () => {
-    setDiscovering(true);
-    try {
-      const result = await api.discoverKidsIdeas({
-        categories: discoverCategories.length > 0 ? discoverCategories : undefined,
-        ideas_per_category: discoverCount,
-        include_seasonal: true,
-        include_topic_library: true,
-      });
-      toast.success(`${result.created_count} ideias criadas, ${result.skipped_count} duplicadas`);
-      setShowDiscover(false);
-      await loadIdeas();
-    } catch (err: any) {
-      toast.error(err.message || "Erro na descoberta");
-    } finally {
-      setDiscovering(false);
-    }
-  };
-
-  const handleScore = async (id: number) => {
-    setScoring(id);
-    try {
-      await api.scoreKidsIdea(id);
-      toast.success("Ideia avaliada!");
-      await loadIdeas();
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao avaliar");
-    } finally {
-      setScoring(null);
-    }
-  };
-
-  const handleReject = async (id: number) => {
-    try {
-      await api.rejectKidsIdea(id);
-      toast.success("Ideia rejeitada");
-      await loadIdeas();
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao rejeitar");
-    }
-  };
-
-  const handleProduce = async (id: number) => {
-    try {
-      const result = await api.produceKidsIdea(id);
-      toast.success(`Job #${result.job_id} criado! Tópico #${result.topic_id}`);
-      await loadIdeas();
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao produzir");
-    }
-  };
-
-  const handleAddToQueue = async (id: number) => {
-    try {
-      await api.addKidsIdeaToQueue(id);
-      toast.success("Adicionada à fila");
-      await loadIdeas();
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao adicionar à fila");
-    }
-  };
-
-  const scoreColor = (score: number) => {
-    if (score >= 70) return "text-green-400";
-    if (score >= 50) return "text-yellow-400";
-    if (score >= 30) return "text-orange-400";
-    return "text-red-400";
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Ideias Editoriais</h2>
-          <p className="text-sm text-text-muted">
-            Descubra, avalie e selecione ideias para produzir vídeos
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowDiscover(!showDiscover)}>
-            <Wand2 className="h-4 w-4" /> Descobrir
-          </Button>
-        </div>
-      </div>
-
-      {/* Discovery Panel */}
-      {showDiscover && (
-        <Card className="!p-6 border-accent/30">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold">Descoberta de Ideias</h3>
-            <button onClick={() => setShowDiscover(false)} className="text-text-muted hover:text-text">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs font-medium text-text-secondary mb-2 block">
-                Categorias (vazio = todas)
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {TOPIC_LIBRARY_CATEGORIES.map((c) => (
-                  <button
-                    key={c.value}
-                    onClick={() => {
-                      setDiscoverCategories((prev) =>
-                        prev.includes(c.value)
-                          ? prev.filter((v) => v !== c.value)
-                          : [...prev, c.value],
-                      );
-                    }}
-                    className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                      discoverCategories.includes(c.value)
-                        ? "border-accent bg-accent/10 text-accent"
-                        : "border-border bg-surface text-text-muted hover:text-text"
-                    }`}
-                  >
-                    {c.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-text-secondary">
-                Ideias por categoria (IA): {discoverCount}
-              </label>
-              <input
-                type="range"
-                min={1}
-                max={10}
-                value={discoverCount}
-                onChange={(e) => setDiscoverCount(Number(e.target.value))}
-                className="mt-1 w-full"
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setShowDiscover(false)}>Cancelar</Button>
-              <Button variant="primary" onClick={handleDiscover} disabled={discovering}>
-                {discovering ? <><Loader2 className="h-4 w-4 animate-spin" /> Descobrindo...</> : <><Sparkles className="h-4 w-4" /> Descobrir</>}
-              </Button>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* Filter */}
-      <div className="flex gap-3">
-        <select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
-        >
-          <option value="">Todos os status</option>
-          <option value="discovered">Descobertas</option>
-          <option value="evaluated">Avaliadas</option>
-          <option value="queued">Na Fila</option>
-          <option value="converted">Convertidas</option>
-          <option value="rejected">Rejeitadas</option>
-          <option value="expired">Expiradas</option>
-        </select>
-      </div>
-
-      {/* Ideas List */}
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <Spinner className="h-8 w-8" />
-        </div>
-      ) : ideas.length === 0 ? (
-        <EmptyState
-          icon={<Lightbulb className="h-8 w-8" />}
-          title="Nenhuma ideia ainda"
-          description="Clique em Descobrir para gerar ideias automaticamente via IA, biblioteca de tópicos e calendário sazonal."
-        />
-      ) : (
-        <div className="space-y-3">
-          {ideas.map((idea) => (
-            <Card key={idea.id} className="!p-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${IDEA_STATUS_COLORS[idea.status] || ""}`}>
-                      {IDEA_STATUS_LABELS[idea.status] || idea.status}
-                    </span>
-                    <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted">
-                      {IDEA_SOURCE_LABELS[idea.source] || idea.source}
-                    </span>
-                    {idea.category && (
-                      <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted">
-                        {idea.category}
-                      </span>
-                    )}
-                    {idea.final_score !== null && idea.final_score !== undefined && (
-                      <span className={`text-sm font-bold ${scoreColor(idea.final_score)}`}>
-                        Score: {idea.final_score.toFixed(0)}
-                      </span>
-                    )}
-                    {idea.safety_score !== null && idea.safety_score !== undefined && (
-                      <span className={`text-xs ${idea.safety_score >= 0.7 ? "text-green-400" : "text-red-400"}`}>
-                        Safety: {(idea.safety_score * 100).toFixed(0)}%
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="font-medium text-text mb-1">{idea.title}</h3>
-                  {idea.description && (
-                    <p className="text-sm text-text-muted line-clamp-2">{idea.description}</p>
-                  )}
-                  {idea.safety_flags && idea.safety_flags.length > 0 && (
-                    <p className="text-xs text-red-400 mt-1">
-                      Flags: {idea.safety_flags.join(", ")}
-                    </p>
-                  )}
-                </div>
-                <div className="flex flex-col gap-2 shrink-0">
-                  {idea.status === "discovered" && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleScore(idea.id)}
-                      disabled={scoring === idea.id}
-                    >
-                      {scoring === idea.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Brain className="h-3.5 w-3.5" />}
-                      Avaliar
-                    </Button>
-                  )}
-                  {idea.status === "evaluated" && (
-                    <>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleAddToQueue(idea.id)}
-                      >
-                        <ListChecks className="h-3.5 w-3.5" /> Fila
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleProduce(idea.id)}
-                      >
-                        <Play className="h-3.5 w-3.5" /> Produzir
-                      </Button>
-                    </>
-                  )}
-                  {idea.status === "converted" && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleProduce(idea.id)}
-                    >
-                      <Play className="h-3.5 w-3.5" /> Produzir
-                    </Button>
-                  )}
-                  {(idea.status === "discovered" || idea.status === "evaluated" || idea.status === "queued") && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleReject(idea.id)}
-                    >
-                      <XCircle className="h-3.5 w-3.5" /> Rejeitar
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Queue Tab ────────────────────────────────────────────────────────────────
-
-function QueueTab() {
-  const [queue, setQueue] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [reconciling, setReconciling] = useState(false);
-
-  const loadQueue = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await api.getKidsIdeaQueue();
-      setQueue(res.queue || []);
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao carregar fila");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadQueue();
-  }, [loadQueue]);
-
-  const handleRemove = async (id: number) => {
-    try {
-      await api.removeKidsIdeaFromQueue(id);
-      toast.success("Removida da fila");
-      await loadQueue();
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao remover");
-    }
-  };
-
-  const handleReconcile = async () => {
-    setReconciling(true);
-    try {
-      await api.reconcileKidsIdeaQueue();
-      toast.success("Fila reconciliada");
-      await loadQueue();
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao reconciliar");
-    } finally {
-      setReconciling(false);
-    }
-  };
-
-  const handleMove = async (index: number, direction: "up" | "down") => {
-    const newQueue = [...queue];
-    const swapIndex = direction === "up" ? index - 1 : index + 1;
-    if (swapIndex < 0 || swapIndex >= newQueue.length) return;
-    [newQueue[index], newQueue[swapIndex]] = [newQueue[swapIndex], newQueue[index]];
-    setQueue(newQueue);
-    try {
-      await api.reorderKidsIdeaQueue(newQueue.map((q) => q.id));
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao reordenar");
-      loadQueue();
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex justify-center py-12">
-        <Spinner className="h-8 w-8" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Fila de Produção Kids</h2>
-          <p className="text-sm text-text-muted">
-            {queue.length} {queue.length === 1 ? "ideia" : "ideias"} — consumidas em ordem pela automação
-          </p>
-        </div>
-        <Button variant="outline" onClick={handleReconcile} disabled={reconciling}>
-          {reconciling ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          Reconciliar
-        </Button>
-      </div>
-
-      {queue.length === 0 ? (
-        <EmptyState
-          icon={<ListChecks className="h-8 w-8" />}
-          title="Fila vazia"
-          description="Avalie ideias na aba Ideias e adicione-as à fila, ou use Reconciliar para preenchimento automático."
-        />
-      ) : (
-        <div className="space-y-2">
-          {queue.map((item, index) => (
-            <Card key={item.id} className="!p-3">
-              <div className="flex items-center gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent/20 text-xs font-bold text-accent">
-                  {index + 1}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-text line-clamp-1">{item.title}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    {item.final_score !== null && item.final_score !== undefined && (
-                      <span className="text-xs text-text-muted">Score: {item.final_score.toFixed(0)}</span>
-                    )}
-                    {item.category && (
-                      <span className="text-xs text-text-muted">{item.category}</span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => handleMove(index, "up")}
-                    disabled={index === 0}
-                    className="rounded p-1 text-text-muted hover:text-text disabled:opacity-30"
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => handleMove(index, "down")}
-                    disabled={index === queue.length - 1}
-                    className="rounded p-1 text-text-muted hover:text-text disabled:opacity-30"
-                  >
-                    <ArrowDown className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => handleRemove(item.id)}
-                    className="rounded p-1 text-text-muted hover:text-red-400"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Config Tab ───────────────────────────────────────────────────────────────
-
-function ConfigTab() {
+function ChannelConfigSection() {
   const [profile, setProfile] = useState<any>(null);
   const [automation, setAutomation] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingAuto, setSavingAuto] = useState(false);
 
-  // Profile form
   const [profileForm, setProfileForm] = useState({
     channel_description: "",
     niche: "",
@@ -881,14 +350,12 @@ function ConfigTab() {
     special_rules: "",
   });
 
-  // Kids metadata form
   const [kidsMeta, setKidsMeta] = useState({
     kids_age_range: "3-6",
     categories: [] as string[],
     target_duration: 45,
   });
 
-  // Automation Kids config
   const [autoConfig, setAutoConfig] = useState({
     kids_queue_mode: "manual",
     kids_auto_fill_queue: true,
@@ -957,7 +424,7 @@ function ConfigTab() {
       config.kids_max_queue_size = autoConfig.kids_max_queue_size;
       if (!config.kids_idea_queue) config.kids_idea_queue = [];
       await api.updateAutomation({ config });
-      toast.success("Configuração Kids salva");
+      toast.success("Configuração da fila salva");
     } catch (err: any) {
       toast.error(err.message || "Erro ao salvar configuração");
     } finally {
@@ -999,7 +466,7 @@ function ConfigTab() {
           <div>
             <h2 className="flex items-center gap-2 text-sm font-semibold">
               <Brain className="h-4 w-4 text-accent" />
-              Perfil Editorial do Canal
+              Identidade do Canal
             </h2>
             <p className="mt-1 text-xs text-text-muted">
               Define como a IA personaliza ideias e roteiros para o seu canal
@@ -1026,9 +493,7 @@ function ConfigTab() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">
-                Nicho
-              </label>
+              <label className="mb-1 block text-xs font-medium text-text-secondary">Nicho</label>
               <input
                 value={profileForm.niche}
                 onChange={(e) => setProfileForm({ ...profileForm, niche: e.target.value })}
@@ -1037,9 +502,7 @@ function ConfigTab() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">
-                Público-alvo
-              </label>
+              <label className="mb-1 block text-xs font-medium text-text-secondary">Público-alvo</label>
               <input
                 value={profileForm.target_audience}
                 onChange={(e) => setProfileForm({ ...profileForm, target_audience: e.target.value })}
@@ -1051,9 +514,7 @@ function ConfigTab() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">
-                Tom de voz
-              </label>
+              <label className="mb-1 block text-xs font-medium text-text-secondary">Tom de voz</label>
               <input
                 value={profileForm.tone_of_voice}
                 onChange={(e) => setProfileForm({ ...profileForm, tone_of_voice: e.target.value })}
@@ -1062,9 +523,7 @@ function ConfigTab() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">
-                Estilo de narrativa
-              </label>
+              <label className="mb-1 block text-xs font-medium text-text-secondary">Estilo de narrativa</label>
               <input
                 value={profileForm.narrative_style}
                 onChange={(e) => setProfileForm({ ...profileForm, narrative_style: e.target.value })}
@@ -1075,9 +534,7 @@ function ConfigTab() {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-text-secondary">
-              Objetivos de conteúdo
-            </label>
+            <label className="mb-1 block text-xs font-medium text-text-secondary">Objetivos de conteúdo</label>
             <input
               value={profileForm.content_goals}
               onChange={(e) => setProfileForm({ ...profileForm, content_goals: e.target.value })}
@@ -1108,9 +565,7 @@ function ConfigTab() {
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">
-                Faixa etária alvo
-              </label>
+              <label className="mb-1 block text-xs font-medium text-text-secondary">Faixa etária alvo</label>
               <select
                 value={kidsMeta.kids_age_range}
                 onChange={(e) => setKidsMeta({ ...kidsMeta, kids_age_range: e.target.value })}
@@ -1173,7 +628,7 @@ function ConfigTab() {
           <div>
             <h2 className="flex items-center gap-2 text-sm font-semibold">
               <Settings className="h-4 w-4 text-accent" />
-              Configuração da Fila de Automação
+              Fila de Automação
             </h2>
             <p className="mt-1 text-xs text-text-muted">
               Como a fila de ideias Kids é gerenciada pela automação
@@ -1187,9 +642,7 @@ function ConfigTab() {
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">
-                Modo da fila
-              </label>
+              <label className="mb-1 block text-xs font-medium text-text-secondary">Modo da fila</label>
               <select
                 value={autoConfig.kids_queue_mode}
                 onChange={(e) => setAutoConfig({ ...autoConfig, kids_queue_mode: e.target.value })}

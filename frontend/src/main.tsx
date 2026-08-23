@@ -11,6 +11,7 @@ import { VideosPage } from "@/pages/videos";
 import { IdeasPage } from "@/pages/ideas";
 import { AdminPage } from "@/pages/admin";
 import { KidsPage } from "@/pages/kids";
+import { KidsIdeasPage } from "@/pages/kids-ideas";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { DomainProvider } from "@/lib/domain-config";
@@ -87,6 +88,7 @@ const router = createBrowserRouter(
             { path: "/dashboard", element: <DashboardPage /> },
             { path: "/content", element: <ContentPage /> },
             { path: "/kids", element: <KidsPage /> },
+            { path: "/kids-ideas", element: <KidsIdeasPage /> },
             { path: "/jobs", element: <JobsPage /> },
             { path: "/automation", element: <AutomationPage /> },
             { path: "/videos", element: <VideosPage /> },

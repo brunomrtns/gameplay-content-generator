@@ -192,7 +192,7 @@ export const DOMAIN_CONFIGS: Record<string, DomainConfig> = {
     theme: KIDS_THEME,
     features: {
       gameplayUpload: false,
-      ideas: false,
+      ideas: true,
       topics: true,
       gameRegistry: false,
       knowledgeItems: false,
@@ -201,6 +201,7 @@ export const DOMAIN_CONFIGS: Record<string, DomainConfig> = {
     navigation: [
       { to: "/dashboard", label: "Dashboard", icon: "LayoutDashboard" },
       { to: "/kids", label: "Tópicos", icon: "Baby" },
+      { to: "/kids-ideas", label: "Ideias", icon: "Lightbulb" },
       { to: "/jobs", label: "Jobs", icon: "ListChecks" },
       { to: "/automation", label: "Automação", icon: "Settings" },
       { to: "/videos", label: "Vídeos", icon: "Video" },
