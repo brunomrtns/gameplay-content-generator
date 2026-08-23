@@ -1992,12 +1992,68 @@ class RemoteWorker:
 
         log.info(f"Kids discovery: collected {len(sync_ideas)} ideas locally")
 
+        # 4. Safety + Scoring (run locally with LLM, same as content_collect does)
+        self.update_job_status(job_id, status="running", stage="scoring", progress=0.85)
+        from gpcg.domains.kids.safety_filter import KidsSafetyFilter
+        from gpcg.domains.kids.scorer import KidsScorer
+
+        strictness = float(
+            (profile.metadata_json or {}).get("kids_safety_strictness", 0.7)
+        )
+        safety_filter = KidsSafetyFilter(llm=llm)
+        scorer = KidsScorer(llm=llm)
+
+        evaluated_ideas: list[dict] = []
+        rejected_count = 0
+        for idea_data in sync_ideas:
+            try:
+                safety_result = safety_filter.review(
+                    title=idea_data["title"],
+                    description=idea_data.get("description", ""),
+                    age_range=idea_data.get("suggested_age_range", age_range),
+                    strictness=strictness,
+                )
+                if not safety_result.safe:
+                    rejected_count += 1
+                    continue
+
+                score_result = scorer.score(
+                    title=idea_data["title"],
+                    description=idea_data.get("description", ""),
+                    age_range=idea_data.get("suggested_age_range", age_range),
+                    category=idea_data.get("category", ""),
+                    channel_context=channel_context,
+                )
+
+                idea_data["safety_score"] = safety_result.safety_score
+                idea_data["safety_flags"] = safety_result.flags
+                idea_data["safety_reviewed"] = True
+                idea_data["editorial_score"] = score_result.editorial_score_0_100
+                idea_data["age_fit_score"] = score_result.age_fit
+                idea_data["educational_value"] = score_result.educational_value
+                idea_data["curiosity_score"] = score_result.curiosity
+                idea_data["visual_potential"] = score_result.visual_potential
+                idea_data["final_score"] = score_result.final_score
+                idea_data["score_breakdown"] = score_result.breakdown
+                idea_data["evaluated"] = True
+                evaluated_ideas.append(idea_data)
+            except Exception as e:
+                log.warning(f"discovery.score_failed: title='{idea_data['title'][:40]}', error={e}")
+                # Keep the idea as discovered (no score) — better than dropping it
+                idea_data["evaluated"] = False
+                evaluated_ideas.append(idea_data)
+
+        log.info(
+            f"Kids discovery: {len(evaluated_ideas)} evaluated, "
+            f"{rejected_count} rejected by safety"
+        )
+
         # Sync ideas to VPS
         self.update_job_status(job_id, status="running", stage="sync", progress=0.9)
         try:
             sync_resp = self.client.post(
                 f"/api/jobs/{job_id}/sync-kids-ideas",
-                json={"ideas": sync_ideas},
+                json={"ideas": evaluated_ideas},
             )
             sync_resp.raise_for_status()
             sync_data = sync_resp.json()

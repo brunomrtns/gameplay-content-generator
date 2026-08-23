@@ -2861,6 +2861,18 @@ class KidsIdeaSyncItem(BaseModel):
     source: str = "ai_ideation"
     source_metadata: dict = {}
     content_hash: str = ""
+    # Optional: pre-evaluated by the worker (safety + scoring already done)
+    evaluated: bool = False
+    safety_score: Optional[float] = None
+    safety_flags: Optional[list] = None
+    safety_reviewed: bool = False
+    editorial_score: Optional[float] = None
+    age_fit_score: Optional[float] = None
+    educational_value: Optional[float] = None
+    curiosity_score: Optional[float] = None
+    visual_potential: Optional[float] = None
+    final_score: Optional[float] = None
+    score_breakdown: Optional[dict] = None
 
 
 class KidsDiscoverySyncRequest(BaseModel):
@@ -2884,6 +2896,7 @@ def sync_kids_ideas(
     """
     import gpcg.domains.kids.models  # noqa: F401 — ensure models are loaded
     from gpcg.domains.kids.idea_service import create_idea
+    from gpcg.domains.kids.models import KidsIdeaStatus
 
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
@@ -2911,6 +2924,30 @@ def sync_kids_ideas(
         if idea:
             created_count += 1
             created_titles.append(idea.title)
+            # If the worker already evaluated (safety + scoring), apply scores
+            if item.evaluated:
+                if item.safety_score is not None:
+                    idea.safety_score = item.safety_score
+                if item.safety_flags is not None:
+                    idea.safety_flags = item.safety_flags
+                idea.safety_reviewed = item.safety_reviewed
+                if item.editorial_score is not None:
+                    idea.editorial_score = item.editorial_score
+                if item.age_fit_score is not None:
+                    idea.age_fit_score = item.age_fit_score
+                if item.educational_value is not None:
+                    idea.educational_value = item.educational_value
+                if item.curiosity_score is not None:
+                    idea.curiosity_score = item.curiosity_score
+                if item.visual_potential is not None:
+                    idea.visual_potential = item.visual_potential
+                if item.final_score is not None:
+                    idea.final_score = item.final_score
+                if item.score_breakdown is not None:
+                    idea.score_breakdown = item.score_breakdown
+                # Transition: discovered → evaluated
+                if idea.status == KidsIdeaStatus.discovered.value:
+                    idea.status = KidsIdeaStatus.evaluated.value
         else:
             skipped_count += 1
 
