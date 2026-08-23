@@ -513,7 +513,7 @@ def reconcile_kids_queue(session: Session, user_id: int) -> int:
 
     cfg = dict(auto.config or {})
     queue_mode = cfg.get("kids_queue_mode", "automatic")
-    if queue_mode != "automatic" or not cfg.get("kids_auto_fill_queue", False):
+    if queue_mode not in ("automatic", "auto") or not cfg.get("kids_auto_fill_queue", False):
         return 0
 
     queue = cfg.get("kids_idea_queue", [])
