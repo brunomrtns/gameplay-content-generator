@@ -496,10 +496,12 @@ class TestKidsScorer:
         assert final > 0.8
 
     def test_compute_final_zero_dimension(self):
-        """A zero dimension makes final_score near zero (multiplicative)."""
+        """A zero core dimension significantly reduces final_score (weighted average)."""
         scorer = KidsScorer(llm=MagicMock())
         final = scorer._compute_final(0.0, 0.9, 0.9, 0.9, 0.9, 0.9)
-        assert final <= 0.15  # near zero due to multiplicative nature (capped bonus)
+        # editorial_quality has weight 0.30 out of total 2.0, so zeroing it
+        # removes ~15% of the weighted sum
+        assert final < 0.80  # significantly lower than all-0.9
 
     def test_compute_final_visual_bonus(self):
         """High visual_potential adds bonus."""

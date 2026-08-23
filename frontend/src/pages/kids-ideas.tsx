@@ -442,9 +442,9 @@ export function KidsIdeasPage() {
                         {item.category}
                       </span>
                     )}
-                    {item.final_score !== null && item.final_score !== undefined && (
-                      <span className={`text-sm font-bold ${scoreColor(item.final_score)}`}>
-                        Score: {item.final_score.toFixed(0)}
+                    {item.editorial_score !== null && item.editorial_score !== undefined && (
+                      <span className={`text-sm font-bold ${scoreColor(item.editorial_score)}`}>
+                        Score: {item.editorial_score.toFixed(0)}
                       </span>
                     )}
                   </div>

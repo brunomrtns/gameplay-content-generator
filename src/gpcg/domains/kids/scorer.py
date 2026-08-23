@@ -202,27 +202,25 @@ Score this idea."""
     ) -> float:
         """Compute final_score from dimensions.
 
-        Core: weighted product of quality × age_fit × educational × curiosity.
-        Modifiers: additive bonus from visual_potential and simplicity (capped).
+        Weighted average of all 6 dimensions (0.0-1.0).
+        Core dimensions have higher weights; modifiers are lower.
         """
-        # Core: weighted geometric mean (product preserves the multiplicative
-        # nature — if any dimension is 0, the score is 0)
-        core = (
-            editorial_quality ** _CORE_WEIGHTS["editorial_quality"]
-            * age_fit ** _CORE_WEIGHTS["age_fit"]
-            * educational_value ** _CORE_WEIGHTS["educational_value"]
-            * curiosity ** _CORE_WEIGHTS["curiosity"]
+        total_weight = (
+            _CORE_WEIGHTS["editorial_quality"]
+            + _CORE_WEIGHTS["age_fit"]
+            + _CORE_WEIGHTS["educational_value"]
+            + _CORE_WEIGHTS["curiosity"]
+            + _MODIFIER_WEIGHTS["visual_potential"]
+            + _MODIFIER_WEIGHTS["simplicity"]
         )
-
-        # Modifiers: bonus for visual_potential and simplicity
-        # Each modifier contributes up to its weight * (score - 0.5)
-        # Positive if score > 0.5, negative if < 0.5
-        visual_bonus = _MODIFIER_WEIGHTS["visual_potential"] * (visual_potential - 0.5)
-        simplicity_bonus = _MODIFIER_WEIGHTS["simplicity"] * (simplicity - 0.5)
-        total_bonus = visual_bonus + simplicity_bonus
-        total_bonus = max(-_MAX_MODIFIER_BONUS, min(_MAX_MODIFIER_BONUS, total_bonus))
-
-        final = core + total_bonus
+        final = (
+            editorial_quality * _CORE_WEIGHTS["editorial_quality"]
+            + age_fit * _CORE_WEIGHTS["age_fit"]
+            + educational_value * _CORE_WEIGHTS["educational_value"]
+            + curiosity * _CORE_WEIGHTS["curiosity"]
+            + visual_potential * _MODIFIER_WEIGHTS["visual_potential"]
+            + simplicity * _MODIFIER_WEIGHTS["simplicity"]
+        ) / total_weight
         return max(0.0, min(1.0, final))
 
     def _neutral_fallback(self, error: str) -> KidsScoreResult:
