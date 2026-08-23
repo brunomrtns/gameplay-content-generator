@@ -76,6 +76,10 @@ interface AutomationConfig extends VideoCustomization {
   queue_mode?: "manual" | "automatic";
   auto_fill_queue?: boolean;
   max_queue_size?: number;
+  // Kids: Queue mode + reconciliador
+  kids_queue_mode?: string;
+  kids_auto_fill_queue?: boolean;
+  kids_max_queue_size?: number;
 }
 
 function SectionTitle({ icon: Icon, title, desc }: { icon: any; title: string; desc?: string }) {
@@ -515,7 +519,8 @@ export function AutomationPage() {
             </p>
           </Card>
 
-          {/* Section 7: Fila de Produção */}
+          {/* Section 7: Fila de Produção (Games) */}
+          {domainConfig.features.gameplayUpload && (
           <Card>
             <SectionTitle icon={ListOrdered} title="Fila de Produção" desc="Como a automação escolhe o próximo vídeo" />
             <div className="space-y-4">
@@ -563,6 +568,54 @@ export function AutomationPage() {
               )}
             </div>
           </Card>
+          )}
+
+          {/* Section 7b: Fila de Produção (Kids) */}
+          {domainConfig.id === "kids" && (
+          <Card>
+            <SectionTitle icon={ListOrdered} title="Fila de Produção" desc="Como a automação escolhe o próximo vídeo Kids" />
+            <div className="space-y-4">
+              <div>
+                <Label>Modo da fila</Label>
+                <Select
+                  value={config.kids_queue_mode || "manual"}
+                  onChange={(v) => update("kids_queue_mode", v)}
+                >
+                  <option value="manual">Manual (apenas fila do usuário)</option>
+                  <option value="auto">Automático (preenche sozinho)</option>
+                </Select>
+                <p className="mt-1.5 text-xs text-text-muted">
+                  {config.kids_queue_mode === "auto"
+                    ? "Automático: o sistema preenche a fila com as melhores ideias avaliadas automaticamente."
+                    : "Manual: você adiciona ideias à fila manualmente. Quando a fila esvazia, a produção para."}
+                </p>
+              </div>
+
+              <div className="space-y-3 rounded-lg border border-border bg-surface-elevated/50 p-4">
+                <Toggle
+                  checked={config.kids_auto_fill_queue ?? true}
+                  onChange={(v) => update("kids_auto_fill_queue", v)}
+                  label="Preencher fila automaticamente com as melhores ideias avaliadas"
+                />
+                <div>
+                  <Label>Tamanho máximo da fila</Label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    placeholder="10"
+                    value={config.kids_max_queue_size || 10}
+                    onChange={(e) => update("kids_max_queue_size", Number(e.target.value))}
+                    className="h-11 w-full rounded-xl border border-border bg-bg/60 px-4 text-sm text-text placeholder:text-text-muted backdrop-blur-sm transition-all"
+                  />
+                  <p className="mt-1.5 text-xs text-text-muted">
+                    Quantas ideias avaliadas adicionar automaticamente (ordenadas por score).
+                  </p>
+                </div>
+              </div>
+            </div>
+          </Card>
+          )}
 
           {/* Section 8: YouTube */}
           <Card>

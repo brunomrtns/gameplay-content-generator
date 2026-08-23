@@ -335,10 +335,8 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
 
 function ChannelConfigSection() {
   const [profile, setProfile] = useState<any>(null);
-  const [automation, setAutomation] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
-  const [savingAuto, setSavingAuto] = useState(false);
 
   const [profileForm, setProfileForm] = useState({
     channel_description: "",
@@ -356,20 +354,10 @@ function ChannelConfigSection() {
     target_duration: 45,
   });
 
-  const [autoConfig, setAutoConfig] = useState({
-    kids_queue_mode: "manual",
-    kids_auto_fill_queue: true,
-    kids_max_queue_size: 10,
-  });
-
   useEffect(() => {
-    Promise.all([
-      api.getChannelProfile(),
-      api.getAutomation(),
-    ])
-      .then(([p, a]) => {
+    api.getChannelProfile()
+      .then((p) => {
         setProfile(p);
-        setAutomation(a);
         setProfileForm({
           channel_description: p.channel_description || "",
           niche: p.niche || "",
@@ -384,12 +372,6 @@ function ChannelConfigSection() {
           kids_age_range: meta.kids_age_range || "3-6",
           categories: meta.categories || [],
           target_duration: meta.target_duration || 45,
-        });
-        const cfg = a.config || {};
-        setAutoConfig({
-          kids_queue_mode: cfg.kids_queue_mode || "manual",
-          kids_auto_fill_queue: cfg.kids_auto_fill_queue ?? true,
-          kids_max_queue_size: cfg.kids_max_queue_size || 10,
         });
       })
       .catch((err) => toast.error(err.message))
@@ -412,23 +394,6 @@ function ChannelConfigSection() {
       toast.error(err.message || "Erro ao salvar perfil");
     } finally {
       setSavingProfile(false);
-    }
-  };
-
-  const handleSaveAuto = async () => {
-    setSavingAuto(true);
-    try {
-      const config = { ...(automation?.config || {}) };
-      config.kids_queue_mode = autoConfig.kids_queue_mode;
-      config.kids_auto_fill_queue = autoConfig.kids_auto_fill_queue;
-      config.kids_max_queue_size = autoConfig.kids_max_queue_size;
-      if (!config.kids_idea_queue) config.kids_idea_queue = [];
-      await api.updateAutomation({ config });
-      toast.success("Configuração da fila salva");
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao salvar configuração");
-    } finally {
-      setSavingAuto(false);
     }
   };
 
@@ -618,65 +583,6 @@ function ChannelConfigSection() {
                 </button>
               ))}
             </div>
-          </div>
-        </div>
-      </Card>
-
-      {/* Automation Kids Config */}
-      <Card>
-        <div className="mb-4 flex items-start justify-between">
-          <div>
-            <h2 className="flex items-center gap-2 text-sm font-semibold">
-              <Settings className="h-4 w-4 text-accent" />
-              Fila de Automação
-            </h2>
-            <p className="mt-1 text-xs text-text-muted">
-              Como a fila de ideias Kids é gerenciada pela automação
-            </p>
-          </div>
-          <Button size="sm" onClick={handleSaveAuto} disabled={savingAuto}>
-            {savingAuto ? <><Spinner className="h-3.5 w-3.5" /> Salvando...</> : <><Save className="h-3.5 w-3.5" /> Salvar</>}
-          </Button>
-        </div>
-
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">Modo da fila</label>
-              <select
-                value={autoConfig.kids_queue_mode}
-                onChange={(e) => setAutoConfig({ ...autoConfig, kids_queue_mode: e.target.value })}
-                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
-              >
-                <option value="manual">Manual (curadoria própria)</option>
-                <option value="auto">Automático (preenche sozinho)</option>
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">
-                Tamanho máximo da fila: {autoConfig.kids_max_queue_size}
-              </label>
-              <input
-                type="range"
-                min={1}
-                max={50}
-                value={autoConfig.kids_max_queue_size}
-                onChange={(e) => setAutoConfig({ ...autoConfig, kids_max_queue_size: Number(e.target.value) })}
-                className="mt-2 w-full"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="flex items-center gap-2 text-sm text-text cursor-pointer">
-              <input
-                type="checkbox"
-                checked={autoConfig.kids_auto_fill_queue}
-                onChange={(e) => setAutoConfig({ ...autoConfig, kids_auto_fill_queue: e.target.checked })}
-                className="rounded border-border"
-              />
-              Preencher fila automaticamente com as melhores ideias avaliadas
-            </label>
           </div>
         </div>
       </Card>
