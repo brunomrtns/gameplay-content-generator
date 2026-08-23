@@ -2789,3 +2789,204 @@ def panel_collect_ideas(
     db.commit()
     log.info(f"panel: content collection job #{job.id} created (by worker)")
     return {"ok": True, "job_id": job.id}
+
+
+# ── Kids Idea System: sync endpoints ──────────────────────────────────────────
+
+
+@router.get("/workers/channel-profile/{user_id}")
+def worker_get_channel_profile(
+    user_id: int,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Worker fetches a user's channel profile (worker-auth, not user-auth).
+
+    Used by kids_idea_discovery and kids_idea_score jobs to get the
+    editorial profile without needing user authentication.
+    """
+    from gpcg.core.models import ChannelProfile
+    profile = db.query(ChannelProfile).filter(
+        ChannelProfile.user_id == user_id
+    ).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Channel profile not found")
+    return {
+        "id": profile.id,
+        "user_id": profile.user_id,
+        "channel_description": profile.channel_description,
+        "niche": profile.niche,
+        "target_audience": profile.target_audience,
+        "tone_of_voice": profile.tone_of_voice,
+        "narrative_style": profile.narrative_style,
+        "content_goals": profile.content_goals,
+        "special_rules": profile.special_rules,
+        "metadata_json": profile.metadata_json,
+    }
+
+
+@router.get("/workers/kids-ideas/{idea_id}")
+def worker_get_kids_idea(
+    idea_id: int,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Worker fetches a KidsIdea by ID (worker-auth, not user-auth).
+
+    Used by kids_idea_score jobs to get the idea data without needing
+    user authentication.
+    """
+    import gpcg.domains.kids.models  # noqa: F401 — ensure models are loaded
+    from gpcg.domains.kids.models import KidsIdea
+    idea = db.query(KidsIdea).filter(KidsIdea.id == idea_id).first()
+    if not idea:
+        raise HTTPException(status_code=404, detail="KidsIdea not found")
+    return {
+        "id": idea.id,
+        "title": idea.title,
+        "description": idea.description,
+        "category": idea.category,
+        "suggested_age_range": idea.suggested_age_range,
+        "source": idea.source,
+        "status": idea.status,
+    }
+
+
+class KidsIdeaSyncItem(BaseModel):
+    """A single KidsIdea to sync from worker to VPS."""
+    title: str
+    description: str = ""
+    category: str = ""
+    suggested_age_range: str = "3-6"
+    source: str = "ai_ideation"
+    source_metadata: dict = {}
+    content_hash: str = ""
+
+
+class KidsDiscoverySyncRequest(BaseModel):
+    """Worker sends discovered KidsIdeas back to VPS."""
+    ideas: list[KidsIdeaSyncItem] = []
+    error: Optional[str] = None
+
+
+@router.post("/jobs/{job_id}/sync-kids-ideas")
+def sync_kids_ideas(
+    job_id: int,
+    req: KidsDiscoverySyncRequest,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Worker sends discovered KidsIdeas back to VPS.
+
+    The worker has run AI ideation + topic library + seasonal locally
+    (with LLM) and sends the structured ideas to VPS for storage.
+    Deduplication is handled by create_idea() on the VPS side.
+    """
+    import gpcg.domains.kids.models  # noqa: F401 — ensure models are loaded
+    from gpcg.domains.kids.idea_service import create_idea
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if req.error:
+        log.warning(f"Kids discovery job {job_id} failed: {req.error}")
+        return {"ok": False, "error": req.error}
+
+    created_count = 0
+    skipped_count = 0
+    created_titles: list[str] = []
+
+    for item in req.ideas:
+        idea = create_idea(
+            db, job.user_id,
+            title=item.title,
+            description=item.description,
+            category=item.category,
+            suggested_age_range=item.suggested_age_range,
+            source=item.source,
+            source_metadata=item.source_metadata,
+            skip_dedup=False,
+        )
+        if idea:
+            created_count += 1
+            created_titles.append(idea.title)
+        else:
+            skipped_count += 1
+
+    db.commit()
+    log.info(
+        f"Kids discovery synced to VPS for job {job_id}: "
+        f"created={created_count}, skipped={skipped_count}"
+    )
+    return {
+        "ok": True,
+        "created_count": created_count,
+        "skipped_count": skipped_count,
+        "created_titles": created_titles,
+    }
+
+
+class KidsScoreSyncRequest(BaseModel):
+    """Worker sends safety + scoring results back to VPS."""
+    idea_id: int
+    safety: dict = {}
+    scoring: dict = {}
+    status: str = "evaluated"
+    rejection_reason: Optional[str] = None
+    error: Optional[str] = None
+
+
+@router.post("/jobs/{job_id}/sync-kids-score")
+def sync_kids_score(
+    job_id: int,
+    req: KidsScoreSyncRequest,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Worker sends safety + scoring results back to VPS.
+
+    The worker has run KidsSafetyFilter and KidsScorer locally (with LLM)
+    and sends the results to VPS for storage on the KidsIdea record.
+    """
+    import gpcg.domains.kids.models  # noqa: F401 — ensure models are loaded
+    from gpcg.domains.kids.models import KidsIdea, KidsIdeaStatus
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if req.error:
+        log.warning(f"Kids scoring job {job_id} failed: {req.error}")
+        return {"ok": False, "error": req.error}
+
+    idea = db.query(KidsIdea).filter(KidsIdea.id == req.idea_id).first()
+    if not idea:
+        raise HTTPException(status_code=404, detail="KidsIdea not found")
+
+    # Update safety fields
+    safety = req.safety
+    idea.safety_score = safety.get("safety_score", 0.5)
+    idea.safety_flags = safety.get("flags", [])
+    idea.safety_reviewed = True
+
+    # Update scoring fields
+    scoring = req.scoring
+    idea.editorial_score = scoring.get("editorial_score_0_100", 50.0)
+    idea.age_fit_score = scoring.get("age_fit", 0.5)
+    idea.educational_value = scoring.get("educational_value", 0.5)
+    idea.curiosity_score = scoring.get("curiosity", 0.5)
+    idea.visual_potential = scoring.get("visual_potential", 0.5)
+    idea.final_score = scoring.get("final_score", 0.5)
+    idea.score_breakdown = scoring.get("breakdown", {})
+
+    # Update status
+    if safety.get("safe") is False:
+        idea.status = KidsIdeaStatus.rejected.value
+        idea.rejection_reason = f"Safety: {safety.get('reason', 'unsafe')}"
+    elif idea.status == KidsIdeaStatus.discovered.value:
+        idea.status = KidsIdeaStatus.evaluated.value
+
+    db.commit()
+    log.info(f"Kids scoring synced to VPS for idea #{req.idea_id} (job {job_id})")
+    return {"ok": True, "idea_id": req.idea_id, "status": idea.status}

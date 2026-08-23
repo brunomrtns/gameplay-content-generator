@@ -376,6 +376,7 @@ export const api = {
 
   // ── Jobs ───────────────────────────────────────────────────────────────
   listJobs: (status?: string) => request<any[]>(`/jobs${status ? `?status=${status}` : ""}`),
+  getJob: (id: number) => request<any>(`/jobs/${id}`),
   createJob: (game_id: number, opts?: Record<string, any>) =>
     request<any>("/jobs/generate", { method: "POST", body: form({ game_id, ...(opts || {}) }) }),
   createCuriosityJob: (background_game_id: number, fact_id?: number, opts?: Record<string, any>) =>

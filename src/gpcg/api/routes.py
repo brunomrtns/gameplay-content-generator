@@ -844,12 +844,42 @@ def list_jobs(
             "progress": j.progress,
             "attempts": j.attempts,
             "error": j.error,
+            "artifacts": j.artifacts,
             "created_at": j.created_at.isoformat() if j.created_at else None,
             "updated_at": j.updated_at.isoformat() if j.updated_at else None,
             "completed_at": j.completed_at.isoformat() if j.completed_at else None,
         }
         for j in jobs
     ]
+
+
+@router.get("/jobs/{job_id}")
+def get_job(
+    job_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get a single job by ID (for polling job status)."""
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job.user_id != user.id:
+        raise HTTPException(403, "Not your job")
+    return {
+        "id": job.id,
+        "job_uuid": job.job_uuid,
+        "type": job.type,
+        "game_id": job.game_id,
+        "status": job.status,
+        "stage": job.stage,
+        "progress": job.progress,
+        "attempts": job.attempts,
+        "error": job.error,
+        "artifacts": job.artifacts,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
 
 
 @router.post("/jobs/generate")

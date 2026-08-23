@@ -44,8 +44,6 @@ from gpcg.domains.kids.idea_service import (
     reject_idea,
     update_status,
 )
-from gpcg.domains.kids.safety_filter import KidsSafetyFilter
-from gpcg.domains.kids.scorer import KidsScorer
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db
 from gpcg.logging import get_logger
@@ -257,30 +255,42 @@ def discover_kids_ideas(
 ):
     """Trigger Kids idea discovery (AI ideation + topic library + seasonal).
 
-    Creates new KidsIdeas with status=discovered. Deduplication is automatic
-    — ideas with the same content_hash or high similarity to existing ideas
-    are skipped. Safety review and scoring are NOT done here — use
-    POST /kids/ideas/{id}/score for that.
+    Creates a kids_idea_discovery job for the remote worker to process.
+    The worker runs AI ideation (needs LLM) + topic library + seasonal
+    locally and syncs the created ideas back to the VPS.
+
+    Returns the job info immediately — the frontend should poll the job
+    status to know when discovery is complete.
     """
     profile = _require_kids_domain(user, db)
 
-    from gpcg.domains.kids.discovery import KidsIdeaDiscovery
+    import uuid
+    from gpcg.core.models import Job, JobType, JobStatus, JobPriority
 
-    discovery = KidsIdeaDiscovery()
-    result = discovery.discover(
-        db, user.id, profile,
-        categories=req.categories,
-        ideas_per_category=min(req.ideas_per_category, 10),  # cap at 10
-        include_seasonal=req.include_seasonal,
-        include_topic_library=req.include_topic_library,
+    job = Job(
+        job_uuid=str(uuid.uuid4()),
+        type=JobType.kids_idea_discovery.value,
+        status=JobStatus.queued.value,
+        stage="discovery",
+        domain=ContentDomain.kids.value,
+        user_id=user.id,
+        priority=JobPriority.normal.value,
+        artifacts={
+            "categories": req.categories,
+            "ideas_per_category": min(req.ideas_per_category, 10),
+            "include_seasonal": req.include_seasonal,
+            "include_topic_library": req.include_topic_library,
+        },
     )
+    db.add(job)
     db.commit()
+    db.refresh(job)
 
+    log.info(f"Created kids_idea_discovery job #{job.id} for user {user.id}")
     return {
-        "created_count": result.created_count,
-        "skipped_count": result.skipped_count,
-        "errors": result.errors,
-        "created_titles": result.created_titles,
+        "job_id": job.id,
+        "job_status": job.status,
+        "message": "Discovery job queued — worker will process it when available.",
     }
 
 
@@ -369,8 +379,12 @@ def score_kids_idea(
 ):
     """Trigger safety review + scoring for a KidsIdea.
 
-    This runs the KidsSafetyFilter and KidsScorer and updates the idea's
-    scores. If the idea fails safety, it's automatically rejected.
+    Creates a kids_idea_score job for the remote worker to process.
+    The worker runs the KidsSafetyFilter (LLM review) and KidsScorer
+    locally and syncs the results back to the VPS.
+
+    Returns the job info immediately — the frontend should poll the job
+    status to know when scoring is complete.
     """
     profile = _require_kids_domain(user, db)
     idea = get_by_id(db, idea_id)
@@ -380,85 +394,31 @@ def score_kids_idea(
     if idea.status == KidsIdeaStatus.converted.value:
         raise HTTPException(400, "Cannot score a converted idea")
 
-    strictness = _get_safety_strictness(profile)
-    age_range = idea.suggested_age_range or _get_age_range(profile)
-    channel_context = profile.to_prompt_context()
+    import uuid
+    from gpcg.core.models import Job, JobType, JobStatus, JobPriority
 
-    # 1. Safety review
-    safety_filter = KidsSafetyFilter()
-    safety_result = safety_filter.review(
-        title=idea.title,
-        description=idea.description,
-        age_range=age_range,
-        strictness=strictness,
-    )
-
-    idea.safety_score = safety_result.safety_score
-    idea.safety_flags = safety_result.flags
-    idea.safety_reviewed = True
-
-    if not safety_result.safe:
-        # Auto-reject
-        idea.status = KidsIdeaStatus.rejected.value
-        idea.rejection_reason = f"Safety: {safety_result.reason}"
-        db.commit()
-        return {
+    job = Job(
+        job_uuid=str(uuid.uuid4()),
+        type=JobType.kids_idea_score.value,
+        status=JobStatus.queued.value,
+        stage="scoring",
+        domain=ContentDomain.kids.value,
+        user_id=user.id,
+        priority=JobPriority.normal.value,
+        artifacts={
             "idea_id": idea_id,
-            "safety": {
-                "safe": False,
-                "safety_score": safety_result.safety_score,
-                "flags": safety_result.flags,
-                "reason": safety_result.reason,
-            },
-            "scoring": None,
-            "status": "rejected",
-        }
-
-    # 2. Scoring
-    scorer = KidsScorer()
-    score_result = scorer.score(
-        title=idea.title,
-        description=idea.description,
-        age_range=age_range,
-        category=idea.category,
-        channel_context=channel_context,
+        },
     )
-
-    idea.editorial_score = score_result.editorial_score_0_100
-    idea.age_fit_score = score_result.age_fit
-    idea.educational_value = score_result.educational_value
-    idea.curiosity_score = score_result.curiosity
-    idea.visual_potential = score_result.visual_potential
-    idea.final_score = score_result.final_score
-    idea.score_breakdown = score_result.breakdown
-
-    # Transition: discovered → evaluated
-    if idea.status == KidsIdeaStatus.discovered.value:
-        idea.status = KidsIdeaStatus.evaluated.value
-
+    db.add(job)
     db.commit()
+    db.refresh(job)
 
+    log.info(f"Created kids_idea_score job #{job.id} for idea #{idea_id}")
     return {
+        "job_id": job.id,
+        "job_status": job.status,
         "idea_id": idea_id,
-        "safety": {
-            "safe": True,
-            "safety_score": safety_result.safety_score,
-            "flags": safety_result.flags,
-            "age_suitability": safety_result.age_suitability,
-            "reason": safety_result.reason,
-        },
-        "scoring": {
-            "editorial_quality": score_result.editorial_quality,
-            "age_fit": score_result.age_fit,
-            "educational_value": score_result.educational_value,
-            "curiosity": score_result.curiosity,
-            "visual_potential": score_result.visual_potential,
-            "simplicity": score_result.simplicity,
-            "final_score": score_result.final_score,
-            "editorial_score_0_100": score_result.editorial_score_0_100,
-            "reason": score_result.reason,
-        },
-        "status": idea.status,
+        "message": "Scoring job queued — worker will process it when available.",
     }
 
 

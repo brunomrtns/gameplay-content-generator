@@ -1214,6 +1214,10 @@ class RemoteWorker:
                 self._process_cleanup_gameplay_job(job)
             elif job_type == "cleanup_user_storage":
                 self._process_cleanup_user_storage_job(job)
+            elif job_type == "kids_idea_discovery":
+                self._process_kids_idea_discovery_job(job)
+            elif job_type == "kids_idea_score":
+                self._process_kids_idea_score_job(job)
             else:
                 log.warning(f"Unknown job type: {job_type} — marking as completed (no-op)")
                 self.update_job_status(job_id, status="running", stage="done", progress=1.0)
@@ -1828,6 +1832,350 @@ class RemoteWorker:
         resp = self.client.post(f"/api/jobs/{job_id}/sync-knowledge-items", json=payload)
         resp.raise_for_status()
         return resp.json()
+
+    # ── Kids Idea System: discovery + scoring (run locally with LLM) ───────────
+
+    def _process_kids_idea_discovery_job(self, job: dict) -> None:
+        """Process a kids_idea_discovery job: run discovery locally → sync ideas.
+
+        Runs AI ideation + topic library + seasonal locally (with Ollama LLM).
+        Syncs the created ideas back to VPS via /jobs/{id}/sync-kids-ideas.
+        """
+        job_id = job["id"]
+        artifacts = job.get("artifacts") or {}
+
+        self.update_job_status(job_id, status="running", stage="discovery", progress=0.1)
+        self.send_status("busy", "Descobrindo ideias Kids", job_id=job_id)
+
+        # Fetch channel profile from VPS (worker-auth endpoint)
+        try:
+            resp = self.client.get(f"/api/workers/channel-profile/{job['user_id']}")
+            if resp.status_code != 200:
+                self.submit_job_result(job_id, status="failed", error="Could not fetch channel profile")
+                return
+            profile_data = resp.json()
+        except Exception as e:
+            self.submit_job_result(job_id, status="failed", error=f"Failed to fetch profile: {e}")
+            return
+
+        # Build a lightweight profile object for discovery
+        from gpcg.domains.kids.discovery import KidsIdeaDiscovery
+        from gpcg.infrastructure.llm import LLMClient
+
+        class _Profile:
+            """Minimal profile stub for headless discovery."""
+            def __init__(self, data: dict):
+                self.metadata_json = data.get("metadata_json") or data.get("metadata") or {}
+                self.channel_description = data.get("channel_description", "")
+                self.niche = data.get("niche", "")
+                self.target_audience = data.get("target_audience", "")
+                self.tone_of_voice = data.get("tone_of_voice", "")
+                self.narrative_style = data.get("narrative_style", "")
+                self.content_goals = data.get("content_goals", "")
+                self.special_rules = data.get("special_rules", "")
+
+            def to_prompt_context(self) -> str:
+                parts = []
+                if self.channel_description:
+                    parts.append(f"Channel: {self.channel_description}")
+                if self.niche:
+                    parts.append(f"Niche: {self.niche}")
+                if self.target_audience:
+                    parts.append(f"Audience: {self.target_audience}")
+                if self.tone_of_voice:
+                    parts.append(f"Tone: {self.tone_of_voice}")
+                if self.narrative_style:
+                    parts.append(f"Style: {self.narrative_style}")
+                if self.content_goals:
+                    parts.append(f"Goals: {self.content_goals}")
+                return " | ".join(parts) if parts else ""
+
+        profile = _Profile(profile_data)
+
+        # Init LLM (local Ollama)
+        try:
+            llm = LLMClient()
+        except Exception as e:
+            log.warning(f"LLM init failed for discovery: {e}")
+            llm = None
+
+        self.update_job_status(job_id, status="running", stage="discovery", progress=0.3)
+
+        # Run discovery locally — no DB session, collect results in memory
+        discovery = KidsIdeaDiscovery(llm=llm)
+
+        # We need a DB session for create_idea's dedup check.
+        # Use a local temp SQLite DB (same pattern as generation jobs).
+        # But discovery's create_idea checks for duplicates in the DB,
+        # and we don't have the VPS's ideas locally. So we'll collect
+        # the raw ideas and send them to VPS for dedup + storage.
+        categories = artifacts.get("categories")
+        ideas_per_category = artifacts.get("ideas_per_category", 3)
+        include_seasonal = artifacts.get("include_seasonal", True)
+        include_topic_library = artifacts.get("include_topic_library", True)
+
+        # Collect ideas without DB persistence
+        sync_ideas: list[dict] = []
+
+        from gpcg.domains.kids.topic_library import get_all_categories, get_category, get_seeds_for_category
+        from gpcg.domains.kids.seasonal_calendar import get_active_seasonal
+
+        # Determine categories
+        if categories:
+            cats = [get_category(c) for c in categories if get_category(c)]
+            cats = [c for c in cats if c is not None]
+        else:
+            cats = get_all_categories()
+
+        age_range = discovery._get_age_range(profile)
+        channel_context = profile.to_prompt_context()
+
+        # 1. AI Ideation
+        self.update_job_status(job_id, status="running", stage="discovery", progress=0.4)
+        for cat in cats:
+            try:
+                ai_ideas = discovery._ai_ideation(
+                    cat, age_range, channel_context, ideas_per_category
+                )
+                for idea_data in ai_ideas:
+                    sync_ideas.append({
+                        "title": idea_data["title"],
+                        "description": idea_data.get("description", ""),
+                        "category": idea_data.get("category", cat.name),
+                        "suggested_age_range": idea_data.get("suggested_age_range", age_range),
+                        "source": "ai_ideation",
+                        "source_metadata": {
+                            "category": cat.name,
+                            "channel_context": channel_context[:200],
+                        },
+                    })
+            except Exception as e:
+                log.warning(f"discovery.ai_ideation_failed: category={cat.name}, error={e}")
+
+        # 2. Topic Library seeds
+        self.update_job_status(job_id, status="running", stage="discovery", progress=0.6)
+        if include_topic_library:
+            for cat in cats:
+                for seed in get_seeds_for_category(cat.name):
+                    sync_ideas.append({
+                        "title": seed.title_hint,
+                        "description": seed.description,
+                        "category": cat.name,
+                        "suggested_age_range": age_range,
+                        "source": "topic_library",
+                        "source_metadata": {"category": cat.name, "seed": True},
+                    })
+
+        # 3. Seasonal
+        self.update_job_status(job_id, status="running", stage="discovery", progress=0.8)
+        if include_seasonal:
+            seasonal_entries = get_active_seasonal()
+            for entry in seasonal_entries:
+                try:
+                    seasonal_ideas = discovery._seasonal_ideation(
+                        entry, age_range, channel_context
+                    )
+                    for idea_data in seasonal_ideas:
+                        sync_ideas.append({
+                            "title": idea_data["title"],
+                            "description": idea_data.get("description", ""),
+                            "category": idea_data.get("category", entry.category),
+                            "suggested_age_range": idea_data.get("suggested_age_range", age_range),
+                            "source": "seasonal",
+                            "source_metadata": {
+                                "seasonal_entry": entry.name,
+                                "date": entry.date,
+                            },
+                        })
+                except Exception as e:
+                    log.warning(f"discovery.seasonal_failed: entry={entry.name}, error={e}")
+
+        log.info(f"Kids discovery: collected {len(sync_ideas)} ideas locally")
+
+        # Sync ideas to VPS
+        self.update_job_status(job_id, status="running", stage="sync", progress=0.9)
+        try:
+            sync_resp = self.client.post(
+                f"/api/jobs/{job_id}/sync-kids-ideas",
+                json={"ideas": sync_ideas},
+            )
+            sync_resp.raise_for_status()
+            sync_data = sync_resp.json()
+            log.info(f"Kids discovery synced to VPS: {sync_data}")
+        except Exception as e:
+            log.error(f"Failed to sync kids ideas to VPS: {e}")
+            self.submit_job_result(job_id, status="failed", error=f"Sync failed: {e}")
+            return
+
+        # Done
+        self.update_job_status(job_id, status="running", stage="done", progress=1.0)
+        self.submit_job_result(job_id, status="completed", artifacts={
+            "discovery_completed": True,
+            "ideas_collected": len(sync_ideas),
+            "created_count": sync_data.get("created_count", 0),
+            "skipped_count": sync_data.get("skipped_count", 0),
+        })
+        log.info(f"Kids discovery job #{job_id} completed: {len(sync_ideas)} ideas collected")
+
+    def _process_kids_idea_score_job(self, job: dict) -> None:
+        """Process a kids_idea_score job: run safety + scoring locally → sync.
+
+        Runs KidsSafetyFilter (LLM review) and KidsScorer locally (with Ollama).
+        Syncs the results back to VPS via /jobs/{id}/sync-kids-score.
+        """
+        job_id = job["id"]
+        artifacts = job.get("artifacts") or {}
+        idea_id = artifacts.get("idea_id")
+        if not idea_id:
+            self.submit_job_result(job_id, status="failed", error="No idea_id in job artifacts")
+            return
+
+        self.update_job_status(job_id, status="running", stage="scoring", progress=0.1)
+        self.send_status("busy", f"Avaliando ideia Kids #{idea_id}", job_id=job_id)
+
+        # Fetch the idea from VPS (worker-auth endpoint)
+        try:
+            resp = self.client.get(f"/api/workers/kids-ideas/{idea_id}")
+            if resp.status_code != 200:
+                self.submit_job_result(job_id, status="failed", error=f"Could not fetch idea #{idea_id}")
+                return
+            idea_data = resp.json()
+        except Exception as e:
+            self.submit_job_result(job_id, status="failed", error=f"Failed to fetch idea: {e}")
+            return
+
+        # Fetch channel profile from VPS (worker-auth endpoint)
+        try:
+            resp = self.client.get(f"/api/workers/channel-profile/{job['user_id']}")
+            if resp.status_code != 200:
+                self.submit_job_result(job_id, status="failed", error="Could not fetch channel profile")
+                return
+            profile_data = resp.json()
+        except Exception as e:
+            self.submit_job_result(job_id, status="failed", error=f"Failed to fetch profile: {e}")
+            return
+
+        meta = profile_data.get("metadata_json") or profile_data.get("metadata") or {}
+        strictness = float(meta.get("kids_safety_strictness", 0.7))
+        age_range = idea_data.get("suggested_age_range") or str(
+            meta.get("age_range", meta.get("kids_age_range", "3-6"))
+        )
+
+        # Build channel context
+        channel_context = " | ".join(
+            f"{k}: {v}" for k, v in [
+                ("Channel", profile_data.get("channel_description", "")),
+                ("Niche", profile_data.get("niche", "")),
+                ("Audience", profile_data.get("target_audience", "")),
+                ("Tone", profile_data.get("tone_of_voice", "")),
+            ] if v
+        )
+
+        # Init LLM (local Ollama)
+        try:
+            llm = LLMClient()
+        except Exception as e:
+            log.warning(f"LLM init failed for scoring: {e}")
+            llm = None
+
+        self.update_job_status(job_id, status="running", stage="scoring", progress=0.3)
+
+        # 1. Safety review
+        from gpcg.domains.kids.safety_filter import KidsSafetyFilter
+        safety_filter = KidsSafetyFilter(llm=llm)
+        safety_result = safety_filter.review(
+            title=idea_data["title"],
+            description=idea_data.get("description", ""),
+            age_range=age_range,
+            strictness=strictness,
+        )
+
+        safety_dict = {
+            "safe": safety_result.safe,
+            "safety_score": safety_result.safety_score,
+            "flags": safety_result.flags,
+            "age_suitability": safety_result.age_suitability,
+            "reason": safety_result.reason,
+        }
+
+        if not safety_result.safe:
+            # Auto-reject — no need for scoring
+            self.update_job_status(job_id, status="running", stage="sync", progress=0.9)
+            try:
+                sync_resp = self.client.post(
+                    f"/api/jobs/{job_id}/sync-kids-score",
+                    json={
+                        "idea_id": idea_id,
+                        "safety": safety_dict,
+                        "scoring": {},
+                        "status": "rejected",
+                    },
+                )
+                sync_resp.raise_for_status()
+            except Exception as e:
+                self.submit_job_result(job_id, status="failed", error=f"Sync failed: {e}")
+                return
+
+            self.update_job_status(job_id, status="running", stage="done", progress=1.0)
+            self.submit_job_result(job_id, status="completed", artifacts={
+                "idea_id": idea_id,
+                "safe": False,
+                "rejected": True,
+            })
+            log.info(f"Kids scoring job #{job_id}: idea #{idea_id} rejected (safety)")
+            return
+
+        # 2. Scoring
+        self.update_job_status(job_id, status="running", stage="scoring", progress=0.6)
+        from gpcg.domains.kids.scorer import KidsScorer
+        scorer = KidsScorer(llm=llm)
+        score_result = scorer.score(
+            title=idea_data["title"],
+            description=idea_data.get("description", ""),
+            age_range=age_range,
+            category=idea_data.get("category", ""),
+            channel_context=channel_context,
+        )
+
+        scoring_dict = {
+            "editorial_quality": score_result.editorial_quality,
+            "age_fit": score_result.age_fit,
+            "educational_value": score_result.educational_value,
+            "curiosity": score_result.curiosity,
+            "visual_potential": score_result.visual_potential,
+            "simplicity": score_result.simplicity,
+            "final_score": score_result.final_score,
+            "editorial_score_0_100": score_result.editorial_score_0_100,
+            "reason": score_result.reason,
+            "breakdown": score_result.breakdown,
+        }
+
+        # Sync results to VPS
+        self.update_job_status(job_id, status="running", stage="sync", progress=0.9)
+        try:
+            sync_resp = self.client.post(
+                f"/api/jobs/{job_id}/sync-kids-score",
+                json={
+                    "idea_id": idea_id,
+                    "safety": safety_dict,
+                    "scoring": scoring_dict,
+                    "status": "evaluated",
+                },
+            )
+            sync_resp.raise_for_status()
+        except Exception as e:
+            self.submit_job_result(job_id, status="failed", error=f"Sync failed: {e}")
+            return
+
+        # Done
+        self.update_job_status(job_id, status="running", stage="done", progress=1.0)
+        self.submit_job_result(job_id, status="completed", artifacts={
+            "idea_id": idea_id,
+            "safe": True,
+            "final_score": score_result.final_score,
+            "editorial_score_0_100": score_result.editorial_score_0_100,
+        })
+        log.info(f"Kids scoring job #{job_id}: idea #{idea_id} scored (final={score_result.final_score:.2f})")
 
     def _process_generation_job(self, job: dict) -> None:
         """Process a generation job: fetch data → run pipeline → upload video.

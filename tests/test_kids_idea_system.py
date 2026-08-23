@@ -848,60 +848,27 @@ class TestKidsIdeaAPI:
         resp = client.post("/api/kids/idea-queue/add", json={"idea_id": idea_id})
         assert resp.status_code == 400
 
-    def test_score_idea_with_mocked_llm(self, client):
-        """POST /api/kids/ideas/{id}/score with mocked LLM."""
+    def test_score_idea_creates_job(self, client):
+        """POST /api/kids/ideas/{id}/score creates a kids_idea_score job."""
         create_resp = client.post("/api/kids/ideas", json={"title": "Score test"})
         idea_id = create_resp.json()["id"]
 
-        # Mock both safety filter and scorer LLM calls
-        with patch("gpcg.infrastructure.llm.LLMClient.chat_json") as mock_chat:
-            # First call = safety, second = scoring
-            mock_chat.side_effect = [
-                {  # Safety response
-                    "safe": True,
-                    "safety_score": 0.95,
-                    "age_suitability": 0.9,
-                    "flags": [],
-                    "reason": "Safe",
-                },
-                {  # Scoring response
-                    "editorial_quality": 85,
-                    "age_fit": 90,
-                    "educational_value": 80,
-                    "curiosity": 95,
-                    "visual_potential": 70,
-                    "simplicity": 75,
-                    "reason": "Great idea",
-                },
-            ]
-            resp = client.post(f"/api/kids/ideas/{idea_id}/score")
+        resp = client.post(f"/api/kids/ideas/{idea_id}/score")
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["safety"]["safe"] is True
-        assert data["scoring"] is not None
-        assert data["status"] == "evaluated"
+        assert "job_id" in data
+        assert data["job_status"] == "queued"
+        assert data["idea_id"] == idea_id
 
-    def test_score_idea_auto_rejects_unsafe(self, client):
-        """POST /api/kids/ideas/{id}/score auto-rejects unsafe ideas."""
-        create_resp = client.post("/api/kids/ideas", json={"title": "Unsafe test"})
+    def test_score_idea_rejects_converted(self, client):
+        """POST /api/kids/ideas/{id}/score rejects already-converted ideas."""
+        create_resp = client.post("/api/kids/ideas", json={"title": "Converted idea"})
         idea_id = create_resp.json()["id"]
-
-        with patch("gpcg.infrastructure.llm.LLMClient.chat_json") as mock_chat:
-            mock_chat.return_value = {
-                "safe": False,
-                "safety_score": 0.2,
-                "age_suitability": 0.1,
-                "flags": ["violence"],
-                "reason": "Contains violent content",
-            }
-            resp = client.post(f"/api/kids/ideas/{idea_id}/score")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["safety"]["safe"] is False
-        assert data["status"] == "rejected"
-        assert data["scoring"] is None  # scoring was skipped
+        # Manually mark as converted via convert endpoint
+        client.post(f"/api/kids/ideas/{idea_id}/convert", json={})
+        resp = client.post(f"/api/kids/ideas/{idea_id}/score")
+        assert resp.status_code == 400
 
 
 # ── Topic Library tests ──────────────────────────────────────────────────────
@@ -1183,45 +1150,33 @@ class TestDiscoveryAPI:
         assert "all" in data
         assert len(data["all"]) >= 5
 
-    def test_discover_endpoint(self, client):
-        """POST /api/kids/ideas/discover creates ideas."""
-        with patch("gpcg.infrastructure.llm.LLMClient.chat_json") as mock_chat:
-            mock_chat.return_value = {
-                "ideas": [
-                    {
-                        "title": "Como os peixes nadam?",
-                        "description": "Natação dos peixes",
-                        "category": "ocean",
-                        "suggested_age_range": "3-6",
-                    },
-                ]
-            }
-            resp = client.post("/api/kids/ideas/discover", json={
-                "categories": ["ocean"],
-                "ideas_per_category": 1,
-                "include_seasonal": False,
-                "include_topic_library": False,
-            })
+    def test_discover_endpoint_creates_job(self, client):
+        """POST /api/kids/ideas/discover creates a discovery job (not synchronous)."""
+        resp = client.post("/api/kids/ideas/discover", json={
+            "categories": ["ocean"],
+            "ideas_per_category": 1,
+            "include_seasonal": False,
+            "include_topic_library": False,
+        })
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["created_count"] >= 1
-        assert data["skipped_count"] >= 0
+        assert "job_id" in data
+        assert data["job_status"] == "queued"
 
-    def test_discover_topic_library_only(self, client):
-        """POST /api/kids/ideas/discover with topic_library only."""
-        with patch("gpcg.infrastructure.llm.LLMClient.chat_json") as mock_chat:
-            mock_chat.return_value = {"ideas": []}
-            resp = client.post("/api/kids/ideas/discover", json={
-                "categories": ["animals"],
-                "ideas_per_category": 0,
-                "include_seasonal": False,
-                "include_topic_library": True,
-            })
+    def test_discover_endpoint_topic_library_only(self, client):
+        """POST /api/kids/ideas/discover with topic_library only creates a job."""
+        resp = client.post("/api/kids/ideas/discover", json={
+            "categories": ["animals"],
+            "ideas_per_category": 0,
+            "include_seasonal": False,
+            "include_topic_library": True,
+        })
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["created_count"] > 0  # topic library seeds
+        assert "job_id" in data
+        assert data["job_status"] == "queued"
 
 
 # ── Queue Reconciliation tests ───────────────────────────────────────────────

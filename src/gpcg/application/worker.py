@@ -167,6 +167,8 @@ def _claim_next_job() -> Optional[int]:
         JobType.mapping.value,
         JobType.game_enrich.value,
         JobType.content_collect.value,
+        JobType.kids_idea_discovery.value,
+        JobType.kids_idea_score.value,
     }
 
     with session_scope() as session:

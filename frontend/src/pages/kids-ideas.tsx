@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { Spinner } from "@/components/ui";
 import { toast } from "sonner";
@@ -15,6 +15,7 @@ import {
   X,
   RefreshCw,
   Sparkles,
+  Clock,
 } from "lucide-react";
 
 const TOPIC_LIBRARY_CATEGORIES = [
@@ -64,7 +65,8 @@ export function KidsIdeasPage() {
   const [queue, setQueue] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [discovering, setDiscovering] = useState(false);
-  const [scoring, setScoring] = useState<number | null>(null);
+  const [discoveryJobId, setDiscoveryJobId] = useState<number | null>(null);
+  const [scoring, setScoring] = useState<Record<number, number>>({}); // ideaId → jobId
   const [filterStatus, setFilterStatus] = useState<string>("");
   const [showDiscover, setShowDiscover] = useState(false);
   const [discoverCategories, setDiscoverCategories] = useState<string[]>([]);
@@ -72,6 +74,7 @@ export function KidsIdeasPage() {
   const [reconciling, setReconciling] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -93,6 +96,70 @@ export function KidsIdeasPage() {
     loadData();
   }, [loadData]);
 
+  // Poll for job completion (discovery + scoring)
+  useEffect(() => {
+    const activeJobs: number[] = [];
+    if (discoveryJobId) activeJobs.push(discoveryJobId);
+    Object.values(scoring).forEach((jid) => activeJobs.push(jid));
+    if (activeJobs.length === 0) {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+      return;
+    }
+
+    if (!pollRef.current) {
+      pollRef.current = setInterval(async () => {
+        // Poll discovery job
+        if (discoveryJobId) {
+          try {
+            const job = await api.getJob(discoveryJobId);
+            if (job.status === "completed") {
+              const created = job.artifacts?.created_count ?? 0;
+              const skipped = job.artifacts?.skipped_count ?? 0;
+              toast.success(`Descoberta concluída: ${created} criadas, ${skipped} duplicadas`);
+              setDiscoveryJobId(null);
+              setDiscovering(false);
+              await loadData();
+            } else if (job.status === "failed") {
+              toast.error(`Descoberta falhou: ${job.error || "erro desconhecido"}`);
+              setDiscoveryJobId(null);
+              setDiscovering(false);
+            }
+          } catch { /* ignore poll errors */ }
+        }
+        // Poll scoring jobs
+        const newScoring = { ...scoring };
+        let scoringChanged = false;
+        for (const [ideaIdStr, jobId] of Object.entries(newScoring)) {
+          const ideaId = Number(ideaIdStr);
+          try {
+            const job = await api.getJob(jobId);
+            if (job.status === "completed") {
+              toast.success(`Ideia #${ideaId} avaliada!`);
+              delete newScoring[ideaId];
+              scoringChanged = true;
+              await loadData();
+            } else if (job.status === "failed") {
+              toast.error(`Avaliação da ideia #${ideaId} falhou: ${job.error || ""}`);
+              delete newScoring[ideaId];
+              scoringChanged = true;
+            }
+          } catch { /* ignore poll errors */ }
+        }
+        if (scoringChanged) setScoring(newScoring);
+      }, 3000);
+    }
+
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [discoveryJobId, scoring, loadData]);
+
   const handleDiscover = async () => {
     setDiscovering(true);
     try {
@@ -102,26 +169,22 @@ export function KidsIdeasPage() {
         include_seasonal: true,
         include_topic_library: true,
       });
-      toast.success(`${result.created_count} ideias criadas, ${result.skipped_count} duplicadas`);
+      setDiscoveryJobId(result.job_id);
+      toast.info(`Job #${result.job_id} na fila — o worker vai processar`);
       setShowDiscover(false);
-      await loadData();
     } catch (err: any) {
       toast.error(err.message || "Erro na descoberta");
-    } finally {
       setDiscovering(false);
     }
   };
 
   const handleScore = async (id: number) => {
-    setScoring(id);
     try {
-      await api.scoreKidsIdea(id);
-      toast.success("Ideia avaliada!");
-      await loadData();
+      const result = await api.scoreKidsIdea(id);
+      setScoring((prev) => ({ ...prev, [id]: result.job_id }));
+      toast.info(`Avaliação na fila (job #${result.job_id})`);
     } catch (err: any) {
       toast.error(err.message || "Erro ao avaliar");
-    } finally {
-      setScoring(null);
     }
   };
 
@@ -306,7 +369,14 @@ export function KidsIdeasPage() {
               disabled={discovering}
               className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
             >
-              {discovering ? "Descobrindo..." : "Descobrir"}
+              {discovering ? (
+                <span className="flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5 animate-pulse" />
+                  Job na fila...
+                </span>
+              ) : (
+                "Descobrir"
+              )}
             </button>
           </div>
         </div>
@@ -473,10 +543,10 @@ export function KidsIdeasPage() {
                   {idea.status === "discovered" && (
                     <button
                       onClick={() => handleScore(idea.id)}
-                      disabled={scoring === idea.id}
+                      disabled={!!scoring[idea.id]}
                       className="rounded-lg bg-accent/80 px-3 py-1.5 text-xs font-medium text-white hover:bg-accent disabled:opacity-50"
                     >
-                      {scoring === idea.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Brain className="h-3.5 w-3.5" />}
+                      {scoring[idea.id] ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Brain className="h-3.5 w-3.5" />}
                       {" "}Avaliar
                     </button>
                   )}
