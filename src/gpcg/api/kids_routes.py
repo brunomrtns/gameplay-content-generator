@@ -7,6 +7,7 @@ domain is "kids". The frontend shows/hides them based on the current domain.
 from __future__ import annotations
 
 import hashlib
+import uuid as _uuid
 from pathlib import Path
 from typing import Optional
 
@@ -24,7 +25,12 @@ from gpcg.core.models import (
     JobPriority,
     User,
 )
-from gpcg.domains.kids.models import KidsTopic, StoryAsset, AssetProcessingStatus
+from gpcg.domains.kids.models import (
+    KidsTopic,
+    StoryAsset,
+    AssetProcessingStatus,
+    AssetMediaKind,
+)
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db
 from gpcg.logging import get_logger
@@ -32,6 +38,13 @@ from gpcg.logging import get_logger
 log = get_logger(__name__)
 
 router = APIRouter()
+
+
+# Allowed MIME types for Kids media uploads
+_IMAGE_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
+_VIDEO_MIMES = {"video/mp4", "video/webm", "video/quicktime", "video/x-matroska", "video/avi"}
+_ALLOWED_MIMES = _IMAGE_MIMES | _VIDEO_MIMES
+_MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GiB
 
 
 # ── Models ───────────────────────────────────────────────────────────────────
@@ -156,7 +169,7 @@ def delete_topic(
     if not topic:
         raise HTTPException(404, "Topic not found")
 
-    # Delete physical asset files
+    # Delete physical asset files (including thumbnails)
     settings = get_settings()
     assets = db.query(StoryAsset).filter(StoryAsset.topic_id == topic_id).all()
     for asset in assets:
@@ -167,6 +180,13 @@ def delete_topic(
                     p.unlink()
                 except OSError as e:
                     log.warning(f"Failed to delete asset {p}: {e}")
+        if asset.thumbnail_key:
+            t = settings.data_dir / "kids_assets" / asset.thumbnail_key
+            if t.exists():
+                try:
+                    t.unlink()
+                except OSError as e:
+                    log.warning(f"Failed to delete thumbnail {t}: {e}")
 
     db.delete(topic)  # cascade deletes assets
     db.commit()
@@ -183,7 +203,17 @@ async def upload_asset(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Upload an image asset for a Kids topic."""
+    """Upload a media asset (image or video) for a Kids topic.
+
+    Images are probed synchronously (PIL dimensions) and marked ``ready``
+    immediately. Videos are saved to disk and a ``kids_asset_process`` job
+    is created — the worker will download the video, run FFprobe for
+    metadata (duration, dimensions, codec, audio), generate a thumbnail,
+    and sync the results back.
+
+    Upload is streamed in 1 MiB chunks (NOT loaded into RAM) so large
+    video files don't OOM the VPS. Hashing is incremental for dedup.
+    """
     _require_kids_domain(user, db)
     topic = db.query(KidsTopic).filter(
         KidsTopic.id == topic_id,
@@ -192,57 +222,155 @@ async def upload_asset(
     if not topic:
         raise HTTPException(404, "Topic not found")
 
-    # Read file
-    content = await file.read()
-    if not content:
-        raise HTTPException(400, "Empty file")
+    # Determine media kind from content type
+    content_type = (file.content_type or "").lower()
+    if content_type not in _ALLOWED_MIMES:
+        raise HTTPException(
+            422,
+            f"Tipo de arquivo não suportado: {content_type or 'desconhecido'}. "
+            f"Use imagens (PNG, JPEG, WebP, GIF) ou vídeos (MP4, WebM, MOV, MKV)."
+        )
+    media_kind = (
+        AssetMediaKind.video.value if content_type in _VIDEO_MIMES
+        else AssetMediaKind.image.value
+    )
 
-    # Compute hash for dedup
-    file_hash = hashlib.sha256(content).hexdigest()
-
-    # Save to kids_assets directory
     settings = get_settings()
     assets_dir = settings.data_dir / "kids_assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
 
-    # Use hash prefix to avoid collisions
-    storage_key = f"{file_hash[:8]}_{file.filename}"
-    file_path = assets_dir / storage_key
-    file_path.write_bytes(content)
-
-    # Probe image dimensions
-    width, height = 0, 0
+    # Stream upload to disk in chunks (same pattern as /gameplays/upload).
+    # Hash incrementally as we go so we can dedup without a second pass.
+    filename = file.filename or f"upload.{media_kind}"
+    hasher = hashlib.sha256()
+    file_size = 0
+    tmp_path = assets_dir / f".{filename}.uploading.part"
     try:
-        from PIL import Image
-        import io
-        img = Image.open(io.BytesIO(content))
-        width, height = img.size
+        with open(tmp_path, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)  # 1 MiB chunks
+                if not chunk:
+                    break
+                hasher.update(chunk)
+                out.write(chunk)
+                file_size += len(chunk)
+                if file_size > _MAX_FILE_SIZE:
+                    raise HTTPException(413, "Arquivo muito grande (máx 2 GiB)")
+    except HTTPException:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
     except Exception:
-        pass  # Not a valid image or PIL not available
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
 
+    file_hash = hasher.hexdigest()
+
+    # Dedup: same user + same hash = already uploaded
+    existing = db.query(StoryAsset).filter(
+        StoryAsset.user_id == user.id,
+        StoryAsset.file_hash == file_hash,
+    ).first()
+    if existing:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(409, "Este arquivo já foi enviado")
+
+    # Rename .part → final name (hash prefix avoids collisions)
+    safe_name = f"{file_hash[:8]}_{filename}"
+    file_path = assets_dir / safe_name
+    tmp_path.rename(file_path)
+    storage_key = safe_name
+
+    if media_kind == AssetMediaKind.image.value:
+        # Images: probe dimensions synchronously with PIL (lightweight, no GPU)
+        width, height = 0, 0
+        try:
+            from PIL import Image
+            import io
+            with open(file_path, "rb") as f:
+                img = Image.open(io.BytesIO(f.read()))
+                width, height = img.size
+        except Exception:
+            pass  # Not a valid image or PIL not available
+
+        asset = StoryAsset(
+            user_id=user.id,
+            topic_id=topic_id,
+            filename=filename,
+            storage_key=storage_key,
+            file_hash=file_hash,
+            file_size=file_size,
+            width=width,
+            height=height,
+            media_kind=media_kind,
+            processing_status=AssetProcessingStatus.ready.value,
+        )
+        db.add(asset)
+        db.commit()
+        db.refresh(asset)
+        log.info(f"Uploaded Kids image asset #{asset.id} for topic #{topic_id}: {filename}")
+        return {
+            "id": asset.id,
+            "filename": asset.filename,
+            "storage_key": asset.storage_key,
+            "media_kind": asset.media_kind,
+            "width": asset.width,
+            "height": asset.height,
+            "processing_status": asset.processing_status,
+        }
+
+    # Videos: save record as "queued" and create a processing job.
+    # The worker will download → FFprobe → thumbnail → sync metadata → ready.
     asset = StoryAsset(
         user_id=user.id,
         topic_id=topic_id,
-        filename=file.filename,
+        filename=filename,
         storage_key=storage_key,
         file_hash=file_hash,
-        file_size=len(content),
-        width=width,
-        height=height,
-        processing_status=AssetProcessingStatus.ready.value,
+        file_size=file_size,
+        media_kind=media_kind,
+        processing_status=AssetProcessingStatus.queued.value,
     )
     db.add(asset)
+    db.flush()
+
+    job = Job(
+        job_uuid=str(_uuid.uuid4()),
+        type=JobType.kids_asset_process.value,
+        user_id=user.id,
+        domain=ContentDomain.kids.value,
+        status=JobStatus.queued.value,
+        priority=JobPriority.normal.value,
+        artifacts={
+            "asset_id": asset.id,
+            "topic_id": topic_id,
+            "media_kind": media_kind,
+            "filename": filename,
+            "file_hash": file_hash,
+        },
+    )
+    db.add(job)
     db.commit()
     db.refresh(asset)
+    db.refresh(job)
 
-    log.info(f"Uploaded Kids asset #{asset.id} for topic #{topic_id}: {file.filename}")
+    log.info(
+        f"Uploaded Kids video asset #{asset.id} for topic #{topic_id}: {filename} "
+        f"→ processing job #{job.id} queued"
+    )
     return {
         "id": asset.id,
         "filename": asset.filename,
         "storage_key": asset.storage_key,
-        "width": asset.width,
-        "height": asset.height,
+        "media_kind": asset.media_kind,
+        "file_size": asset.file_size,
         "processing_status": asset.processing_status,
+        "job_id": job.id,
     }
 
 
@@ -269,9 +397,15 @@ def list_assets(
             "id": a.id,
             "filename": a.filename,
             "storage_key": a.storage_key,
+            "media_kind": a.media_kind,
             "width": a.width,
             "height": a.height,
+            "duration": a.duration,
+            "has_audio": a.has_audio,
+            "thumbnail_key": a.thumbnail_key,
             "processing_status": a.processing_status,
+            "process_error": a.process_error,
+            "file_size": a.file_size,
             "created_at": a.created_at.isoformat() if a.created_at else None,
         } for a in assets]
     }
@@ -283,7 +417,11 @@ def delete_asset(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a single story asset."""
+    """Delete a single story asset and its thumbnail.
+
+    Also cancels any pending ``kids_asset_process`` job for this asset
+    so a worker doesn't try to process a deleted file.
+    """
     _require_kids_domain(user, db)
     asset = db.query(StoryAsset).filter(
         StoryAsset.id == asset_id,
@@ -292,7 +430,18 @@ def delete_asset(
     if not asset:
         raise HTTPException(404, "Asset not found")
 
-    # Delete physical file
+    # Cancel pending processing jobs for this asset
+    pending_jobs = db.query(Job).filter(
+        Job.type == JobType.kids_asset_process.value,
+        Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
+    ).all()
+    for j in pending_jobs:
+        artifacts = j.artifacts or {}
+        if artifacts.get("asset_id") == asset_id:
+            j.status = JobStatus.cancelled.value
+    db.flush()
+
+    # Delete physical files (asset + thumbnail)
     settings = get_settings()
     if asset.storage_key:
         p = settings.data_dir / "kids_assets" / asset.storage_key
@@ -301,10 +450,41 @@ def delete_asset(
                 p.unlink()
             except OSError as e:
                 log.warning(f"Failed to delete asset file {p}: {e}")
+    if asset.thumbnail_key:
+        t = settings.data_dir / "kids_assets" / asset.thumbnail_key
+        if t.exists():
+            try:
+                t.unlink()
+            except OSError as e:
+                log.warning(f"Failed to delete thumbnail {t}: {e}")
 
     db.delete(asset)
     db.commit()
     return {"deleted": True}
+
+
+# ── Thumbnail serving (frontend) ─────────────────────────────────────────────
+
+
+@router.get("/kids/assets/thumbnail/{thumbnail_key:path}")
+def serve_thumbnail(
+    thumbnail_key: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Serve a thumbnail image for a Kids video asset (frontend display)."""
+    _require_kids_domain(user, db)
+    settings = get_settings()
+    thumb_path = settings.data_dir / "kids_assets" / thumbnail_key
+    if not thumb_path.exists():
+        raise HTTPException(404, "Thumbnail not found")
+
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        str(thumb_path),
+        media_type="image/jpeg",
+        filename=thumbnail_key,
+    )
 
 
 # ── Generation route ─────────────────────────────────────────────────────────

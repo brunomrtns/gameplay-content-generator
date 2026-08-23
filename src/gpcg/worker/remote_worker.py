@@ -1218,6 +1218,8 @@ class RemoteWorker:
                 self._process_kids_idea_discovery_job(job)
             elif job_type == "kids_idea_score":
                 self._process_kids_idea_score_job(job)
+            elif job_type == "kids_asset_process":
+                self._process_kids_asset_process_job(job)
             else:
                 log.warning(f"Unknown job type: {job_type} — marking as completed (no-op)")
                 self.update_job_status(job_id, status="running", stage="done", progress=1.0)
@@ -2232,6 +2234,234 @@ class RemoteWorker:
             "editorial_score_0_100": score_result.editorial_score_0_100,
         })
         log.info(f"Kids scoring job #{job_id}: idea #{idea_id} scored (final={score_result.final_score:.2f})")
+
+    # ── Kids asset processing: video → FFprobe + thumbnail ────────────────────
+
+    def _process_kids_asset_process_job(self, job: dict) -> None:
+        """Process a kids_asset_process job: download video → FFprobe → thumbnail → sync.
+
+        Downloads the uploaded video from the VPS, runs FFprobe to extract
+        metadata (duration, dimensions, codec, audio presence), generates
+        a thumbnail with FFmpeg, uploads the thumbnail back, and syncs
+        the metadata to the VPS so the StoryAsset is marked ``ready``.
+
+        If FFprobe/FFmpeg are not available, the asset is still marked
+        ready with zero metadata — the pipeline can still use the raw
+        video file. This is a graceful degradation, not a hard failure.
+        """
+        job_id = job["id"]
+        artifacts = job.get("artifacts") or {}
+        asset_id = artifacts.get("asset_id")
+        if not asset_id:
+            self.submit_job_result(job_id, status="failed", error="No asset_id in job artifacts")
+            return
+
+        filename = artifacts.get("filename", f"asset_{asset_id}")
+        file_hash = artifacts.get("file_hash", "")
+
+        self.update_job_status(job_id, status="running", stage="download", progress=0.1)
+        self.send_status("busy", f"Processando mídia Kids: {filename}", job_id=job_id)
+
+        # Download the video from VPS
+        kids_dir = self.storage_root / "kids_assets"
+        kids_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use storage_key from artifacts if available, else derive from hash+filename
+        storage_key = artifacts.get("storage_key", f"{file_hash[:8]}_{filename}")
+        local_path = kids_dir / storage_key
+
+        if not local_path.exists():
+            try:
+                log.info(f"Downloading Kids video asset #{asset_id} ({filename}) from VPS...")
+                resp = self.client.get(f"/api/kids/assets/{asset_id}/download")
+                resp.raise_for_status()
+                with open(local_path, "wb") as f:
+                    f.write(resp.content)
+                log.info(f"Downloaded Kids video asset #{asset_id} → {local_path}")
+            except Exception as e:
+                error = f"Failed to download asset #{asset_id}: {e}"
+                log.error(error)
+                self._submit_kids_asset_error(job_id, asset_id, error)
+                return
+        else:
+            log.info(f"Kids video asset #{asset_id} already cached locally: {local_path}")
+
+        # Verify checksum if we have a hash
+        if file_hash:
+            sha256 = hashlib.sha256()
+            with open(local_path, "rb") as f:
+                while chunk := f.read(1024 * 1024):
+                    sha256.update(chunk)
+            actual_hash = sha256.hexdigest()
+            if actual_hash.lower() != file_hash.lower():
+                error = f"Checksum mismatch for asset #{asset_id}: expected {file_hash[:16]}... got {actual_hash[:16]}..."
+                log.error(error)
+                self._submit_kids_asset_error(job_id, asset_id, error)
+                return
+
+        self.update_job_status(job_id, status="running", stage="mapping", progress=0.4)
+
+        # Run FFprobe to extract metadata
+        width, height, duration, codec, has_audio = 0, 0, 0.0, "", False
+        try:
+            width, height, duration, codec, has_audio = self._ffprobe_video(local_path)
+            log.info(
+                f"FFprobe asset #{asset_id}: {width}x{height} {duration:.1f}s "
+                f"codec={codec} audio={has_audio}"
+            )
+        except Exception as e:
+            log.warning(f"FFprobe failed for asset #{asset_id}: {e} — continuing with zero metadata")
+
+        self.update_job_status(job_id, status="running", stage="render", progress=0.7)
+
+        # Generate thumbnail with FFmpeg (best-effort, non-fatal)
+        thumbnail_key = ""
+        try:
+            thumbnail_key = self._generate_thumbnail(local_path, asset_id, kids_dir)
+            if thumbnail_key:
+                # Upload thumbnail to VPS
+                thumb_path = kids_dir / thumbnail_key
+                with open(thumb_path, "rb") as f:
+                    files = {"file": (thumbnail_key, f, "image/jpeg")}
+                    resp = self.client.post(
+                        f"/api/kids/assets/{asset_id}/thumbnail",
+                        files=files,
+                    )
+                    resp.raise_for_status()
+                log.info(f"Uploaded thumbnail for asset #{asset_id}: {thumbnail_key}")
+        except Exception as e:
+            log.warning(f"Thumbnail generation failed for asset #{asset_id}: {e} — non-fatal")
+
+        # Sync metadata to VPS
+        self.update_job_status(job_id, status="running", stage="sync", progress=0.9)
+        try:
+            resp = self.client.post(
+                f"/api/kids/assets/{asset_id}/process-result",
+                json={
+                    "asset_id": asset_id,
+                    "width": width,
+                    "height": height,
+                    "duration": duration,
+                    "codec": codec,
+                    "has_audio": has_audio,
+                    "thumbnail_key": thumbnail_key,
+                    "error": "",
+                },
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            error = f"Failed to sync process result: {e}"
+            log.error(error)
+            self._submit_kids_asset_error(job_id, asset_id, error)
+            return
+
+        self.update_job_status(job_id, status="running", stage="done", progress=1.0)
+        self.submit_job_result(job_id, status="completed", artifacts={
+            "asset_id": asset_id,
+            "media_kind": "video",
+            "width": width,
+            "height": height,
+            "duration": duration,
+            "has_audio": has_audio,
+            "thumbnail_key": thumbnail_key,
+        })
+        log.info(f"Kids asset process job #{job_id}: asset #{asset_id} ready")
+
+    def _submit_kids_asset_error(self, job_id: int, asset_id: int, error: str) -> None:
+        """Submit a processing error to the VPS and mark the job as failed."""
+        try:
+            self.client.post(
+                f"/api/kids/assets/{asset_id}/process-result",
+                json={"asset_id": asset_id, "error": error},
+            )
+        except Exception:
+            pass  # Best-effort — the job failure is reported below
+        self.submit_job_result(job_id, status="failed", error=error)
+
+    @staticmethod
+    def _ffprobe_video(path: Path) -> tuple:
+        """Run FFprobe on a video file and return (width, height, duration, codec, has_audio).
+
+        Uses subprocess to call ffprobe (must be installed on the worker).
+        Returns zeros/empty if ffprobe is not available or fails.
+        """
+        import subprocess as _sp
+        import json as _json
+
+        # Check if ffprobe is available
+        try:
+            _sp.run(["ffprobe", "-version"], capture_output=True, check=True)
+        except (FileNotFoundError, _sp.CalledProcessError):
+            raise RuntimeError("ffprobe not available on worker")
+
+        cmd = [
+            "ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_format", "-show_streams", str(path),
+        ]
+        result = _sp.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffprobe failed: {result.stderr[:200]}")
+
+        data = _json.loads(result.stdout)
+        width = height = 0
+        duration = 0.0
+        codec = ""
+        has_audio = False
+
+        for stream in data.get("streams", []):
+            if stream.get("codec_type") == "video":
+                width = int(stream.get("width", 0))
+                height = int(stream.get("height", 0))
+                codec = stream.get("codec_name", "")
+            elif stream.get("codec_type") == "audio":
+                has_audio = True
+
+        fmt = data.get("format", {})
+        duration = float(fmt.get("duration", 0.0))
+
+        return width, height, duration, codec, has_audio
+
+    @staticmethod
+    def _generate_thumbnail(video_path: Path, asset_id: int, output_dir: Path) -> str:
+        """Generate a thumbnail from a video using FFmpeg.
+
+        Extracts a frame at 1 second (or 10% of duration for short clips).
+        Returns the thumbnail filename (relative to output_dir), or empty
+        string if generation failed.
+        """
+        import subprocess as _sp
+
+        try:
+            _sp.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        except (FileNotFoundError, _sp.CalledProcessError):
+            return ""
+
+        thumb_name = f"thumb_{asset_id}.jpg"
+        thumb_path = output_dir / thumb_name
+
+        # Extract frame at 1s (or 0.5s for very short videos)
+        cmd = [
+            "ffmpeg", "-y", "-i", str(video_path),
+            "-ss", "00:00:01", "-frames:v", "1",
+            "-vf", "scale=320:-1",
+            "-q:v", "2",
+            str(thumb_path),
+        ]
+        result = _sp.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0 or not thumb_path.exists():
+            # Try at 0s (some videos are shorter than 1s)
+            cmd = [
+                "ffmpeg", "-y", "-i", str(video_path),
+                "-ss", "00:00:00", "-frames:v", "1",
+                "-vf", "scale=320:-1",
+                "-q:v", "2",
+                str(thumb_path),
+            ]
+            result = _sp.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0 or not thumb_path.exists():
+                return ""
+
+        return thumb_name if thumb_path.exists() else ""
 
     def _process_generation_job(self, job: dict) -> None:
         """Process a generation job: fetch data → run pipeline → upload video.

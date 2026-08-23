@@ -32,10 +32,28 @@ from gpcg.core.models import Base, _utcnow
 
 
 class AssetProcessingStatus(str, enum.Enum):
-    """Lifecycle of a story asset from upload to ready-to-use."""
+    """Lifecycle of a story asset from upload to ready-to-use.
+
+    Images are probed synchronously on the VPS (PIL is lightweight) and
+    go straight to ``ready``. Videos require worker-side processing
+    (FFprobe for metadata, thumbnail extraction) and go through the
+    full lifecycle::
+
+        uploading → queued → processing → ready
+                                    ↓
+                                  failed
+    """
     uploading = "uploading"
+    queued = "queued"        # video uploaded, waiting for worker to process
+    processing = "processing"  # worker is running FFprobe/thumbnail
     ready = "ready"
     failed = "failed"
+
+
+class AssetMediaKind(str, enum.Enum):
+    """Type of media stored in a StoryAsset."""
+    image = "image"
+    video = "video"
 
 
 class KidsIdeaStatus(str, enum.Enum):
@@ -119,11 +137,27 @@ class KidsTopic(Base):
 
 
 class StoryAsset(Base):
-    """An image/illustration uploaded for a Kids topic.
+    """A media asset uploaded for a Kids topic.
 
-    Replaces GameplaySource in the Kids domain. Instead of video clips
-    with events and analysis, Kids uses simple images displayed during
-    narration.
+    Supports both images and videos. Images are probed synchronously
+    (PIL dimensions) and marked ``ready`` immediately. Videos require
+    worker-side processing (FFprobe metadata + thumbnail extraction)
+    via a ``kids_asset_process`` job — the VPS creates the job at
+    upload completion and the worker processes it when online.
+
+    Lifecycle for videos::
+
+        uploading → queued → processing → ready
+                                    ↓
+                                  failed
+
+    Lifecycle for images::
+
+        uploading → ready
+
+    Replaces GameplaySource in the Kids domain. Unlike gameplay (which
+    is analyzed for events/clips and then discarded), Kids assets are
+    reusable source material persisted on the VPS.
     """
     __tablename__ = "story_assets"
 
@@ -138,9 +172,19 @@ class StoryAsset(Base):
     width: Mapped[int] = mapped_column(Integer, default=0)
     height: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Media type and video-specific metadata (populated by worker for videos)
+    media_kind: Mapped[str] = mapped_column(
+        String(10), default=AssetMediaKind.image.value
+    )
+    duration: Mapped[float] = mapped_column(Float, default=0.0)  # seconds (video only)
+    codec: Mapped[str] = mapped_column(String(50), default="")  # e.g. "h264", "png"
+    has_audio: Mapped[bool] = mapped_column(Boolean, default=False)
+    thumbnail_key: Mapped[str] = mapped_column(String(500), default="")  # relative path to thumbnail
+
     processing_status: Mapped[str] = mapped_column(
         String(20), default=AssetProcessingStatus.uploading.value
     )
+    process_error: Mapped[str] = mapped_column(Text, default="")
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
@@ -148,7 +192,7 @@ class StoryAsset(Base):
     topic: Mapped["KidsTopic"] = relationship(back_populates="assets")
 
     def __repr__(self) -> str:
-        return f"<StoryAsset #{self.id} [{self.filename}]>"
+        return f"<StoryAsset #{self.id} [{self.media_kind}] {self.filename}>"
 
 
 class KidsIdea(Base):

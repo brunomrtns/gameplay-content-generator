@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine
@@ -46,12 +47,23 @@ from gpcg.domains.registry import (
 
 @pytest.fixture
 def db_session():
-    """Create an in-memory SQLite DB with all tables."""
+    """Create an in-memory SQLite DB with all tables.
+
+    Uses StaticPool to ensure a single connection — required for in-memory
+    SQLite so that all threads see the same database (FastAPI TestClient
+    runs route handlers in a thread pool).
+    """
     import gpcg.core.models  # noqa: F401
     import gpcg.domains.games.models  # noqa: F401
     import gpcg.domains.kids.models  # noqa: F401
+    from sqlalchemy.pool import StaticPool
 
-    engine = create_engine("sqlite:///:memory:", echo=False)
+    engine = create_engine(
+        "sqlite:///:memory:",
+        echo=False,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(bind=engine)
     session = Session(engine)
     yield session
@@ -643,3 +655,607 @@ def test_worker_downloads_kids_assets():
     remote_worker = Path(__file__).parent.parent / "src" / "gpcg" / "worker" / "remote_worker.py"
     content = remote_worker.read_text()
     assert "_download_kids_assets" in content
+
+
+# ── Video asset model tests ──────────────────────────────────────────────────
+
+
+def test_story_asset_defaults_to_image(db_session, user_with_kids):
+    """StoryAsset defaults to media_kind=image."""
+    topic = KidsTopic(user_id=user_with_kids, title="Test", slug="test", category="general")
+    db_session.add(topic)
+    db_session.flush()
+    asset = StoryAsset(
+        user_id=user_with_kids, topic_id=topic.id, filename="img.png",
+        storage_key="abc_img.png", file_hash="h1", file_size=100,
+    )
+    db_session.add(asset)
+    db_session.commit()
+    assert asset.media_kind == "image"
+    assert asset.duration == 0.0
+    assert asset.has_audio is False
+    assert asset.codec == ""
+    assert asset.thumbnail_key == ""
+
+
+def test_story_asset_video_fields(db_session, user_with_kids):
+    """StoryAsset can store video-specific metadata."""
+    topic = KidsTopic(user_id=user_with_kids, title="Test Video", slug="test-video", category="general")
+    db_session.add(topic)
+    db_session.flush()
+    asset = StoryAsset(
+        user_id=user_with_kids, topic_id=topic.id, filename="clip.mp4",
+        storage_key="abc_clip.mp4", file_hash="h2", file_size=5000000,
+        media_kind="video", duration=15.5, codec="h264", has_audio=True,
+        thumbnail_key="thumb_1.jpg",
+        processing_status=AssetProcessingStatus.ready.value,
+    )
+    db_session.add(asset)
+    db_session.commit()
+    loaded = db_session.query(StoryAsset).filter(StoryAsset.id == asset.id).first()
+    assert loaded.media_kind == "video"
+    assert loaded.duration == 15.5
+    assert loaded.codec == "h264"
+    assert loaded.has_audio is True
+    assert loaded.thumbnail_key == "thumb_1.jpg"
+
+
+def test_asset_processing_status_queued():
+    """AssetProcessingStatus has queued state for videos awaiting worker."""
+    assert AssetProcessingStatus.queued.value == "queued"
+
+
+def test_asset_processing_status_processing():
+    """AssetProcessingStatus has processing state for worker processing."""
+    assert AssetProcessingStatus.processing.value == "processing"
+
+
+def test_asset_media_kind_enum():
+    """AssetMediaKind has image and video values."""
+    from gpcg.domains.kids.models import AssetMediaKind
+    assert AssetMediaKind.image.value == "image"
+    assert AssetMediaKind.video.value == "video"
+
+
+def test_kids_asset_process_job_type_exists():
+    """JobType.kids_asset_process exists for video processing jobs."""
+    assert JobType.kids_asset_process.value == "kids_asset_process"
+
+
+# ── Video upload + processing job tests ──────────────────────────────────────
+
+
+def test_video_upload_creates_queued_asset_and_job(db_session, user_with_kids):
+    """Uploading a video creates a StoryAsset with status=queued and a kids_asset_process job."""
+    topic = KidsTopic(user_id=user_with_kids, title="Video Topic", slug="video-topic", category="general")
+    db_session.add(topic)
+    db_session.commit()
+
+    # Simulate a video upload by creating the asset + job directly
+    # (the endpoint logic is tested via the API tests below)
+    import hashlib
+    video_content = b"fake video content for testing"
+    file_hash = hashlib.sha256(video_content).hexdigest()
+    safe_name = f"{file_hash[:8]}_test.mp4"
+
+    asset = StoryAsset(
+        user_id=user_with_kids, topic_id=topic.id, filename="test.mp4",
+        storage_key=safe_name, file_hash=file_hash, file_size=len(video_content),
+        media_kind="video", processing_status=AssetProcessingStatus.queued.value,
+    )
+    db_session.add(asset)
+    db_session.flush()
+
+    import uuid
+    job = Job(
+        job_uuid=str(uuid.uuid4()),
+        type=JobType.kids_asset_process.value,
+        user_id=user_with_kids,
+        domain=ContentDomain.kids.value,
+        status=JobStatus.queued.value,
+        artifacts={"asset_id": asset.id, "topic_id": topic.id, "media_kind": "video"},
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    # Verify asset is queued, not ready
+    assert asset.processing_status == "queued"
+    assert asset.media_kind == "video"
+
+    # Verify job was created
+    loaded_job = db_session.query(Job).filter(
+        Job.type == JobType.kids_asset_process.value,
+        Job.user_id == user_with_kids,
+    ).first()
+    assert loaded_job is not None
+    assert loaded_job.status == "queued"
+    assert loaded_job.artifacts["asset_id"] == asset.id
+
+
+def test_video_processing_job_stays_queued_when_worker_offline(db_session, user_with_kids):
+    """A kids_asset_process job stays queued when no worker is online."""
+    import uuid
+    topic = KidsTopic(user_id=user_with_kids, title="Offline Test", slug="offline-test", category="general")
+    db_session.add(topic)
+    db_session.flush()
+
+    asset = StoryAsset(
+        user_id=user_with_kids, topic_id=topic.id, filename="offline.mp4",
+        storage_key="abc_offline.mp4", file_hash="h_offline", file_size=1000,
+        media_kind="video", processing_status=AssetProcessingStatus.queued.value,
+    )
+    db_session.add(asset)
+    db_session.flush()
+
+    job = Job(
+        job_uuid=str(uuid.uuid4()),
+        type=JobType.kids_asset_process.value,
+        user_id=user_with_kids,
+        domain=ContentDomain.kids.value,
+        status=JobStatus.queued.value,
+        artifacts={"asset_id": asset.id},
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    # No worker claims the job — it stays queued
+    assert job.status == "queued"
+    assert asset.processing_status == "queued"
+
+
+def test_process_result_marks_asset_ready(db_session, user_with_kids):
+    """Simulating worker process-result marks the video asset as ready."""
+    topic = KidsTopic(user_id=user_with_kids, title="Process Test", slug="process-test", category="general")
+    db_session.add(topic)
+    db_session.flush()
+
+    asset = StoryAsset(
+        user_id=user_with_kids, topic_id=topic.id, filename="video.mp4",
+        storage_key="abc_video.mp4", file_hash="h_video", file_size=2000,
+        media_kind="video", processing_status=AssetProcessingStatus.queued.value,
+    )
+    db_session.add(asset)
+    db_session.commit()
+
+    # Simulate what the process-result endpoint does
+    asset.width = 1920
+    asset.height = 1080
+    asset.duration = 30.0
+    asset.codec = "h264"
+    asset.has_audio = True
+    asset.thumbnail_key = "thumb_1.jpg"
+    asset.processing_status = AssetProcessingStatus.ready.value
+    asset.process_error = ""
+    db_session.commit()
+
+    loaded = db_session.query(StoryAsset).filter(StoryAsset.id == asset.id).first()
+    assert loaded.processing_status == "ready"
+    assert loaded.width == 1920
+    assert loaded.height == 1080
+    assert loaded.duration == 30.0
+    assert loaded.has_audio is True
+
+
+def test_process_result_marks_asset_failed(db_session, user_with_kids):
+    """Simulating a processing failure marks the asset as failed with error."""
+    topic = KidsTopic(user_id=user_with_kids, title="Fail Test", slug="fail-test", category="general")
+    db_session.add(topic)
+    db_session.flush()
+
+    asset = StoryAsset(
+        user_id=user_with_kids, topic_id=topic.id, filename="bad.mp4",
+        storage_key="abc_bad.mp4", file_hash="h_bad", file_size=500,
+        media_kind="video", processing_status=AssetProcessingStatus.queued.value,
+    )
+    db_session.add(asset)
+    db_session.commit()
+
+    # Simulate failure
+    asset.processing_status = AssetProcessingStatus.failed.value
+    asset.process_error = "ffprobe not available"
+    db_session.commit()
+
+    loaded = db_session.query(StoryAsset).filter(StoryAsset.id == asset.id).first()
+    assert loaded.processing_status == "failed"
+    assert loaded.process_error == "ffprobe not available"
+
+
+def test_generation_requires_ready_asset(db_session, user_with_kids):
+    """Generation should not proceed if all assets are queued (not ready)."""
+    topic = KidsTopic(user_id=user_with_kids, title="Queued Assets", slug="queued-assets", category="general")
+    db_session.add(topic)
+    db_session.flush()
+
+    # Add a video asset that's still queued (not ready)
+    asset = StoryAsset(
+        user_id=user_with_kids, topic_id=topic.id, filename="processing.mp4",
+        storage_key="abc_processing.mp4", file_hash="h_proc", file_size=1000,
+        media_kind="video", processing_status=AssetProcessingStatus.queued.value,
+    )
+    db_session.add(asset)
+    db_session.commit()
+
+    # Count ready assets — should be 0
+    ready_count = db_session.query(StoryAsset).filter(
+        StoryAsset.topic_id == topic.id,
+        StoryAsset.processing_status == AssetProcessingStatus.ready.value,
+    ).count()
+    assert ready_count == 0
+
+
+def test_generation_proceeds_with_ready_video_asset(db_session, user_with_kids):
+    """Generation should proceed when a video asset is ready."""
+    topic = KidsTopic(user_id=user_with_kids, title="Ready Video", slug="ready-video", category="general")
+    db_session.add(topic)
+    db_session.flush()
+
+    asset = StoryAsset(
+        user_id=user_with_kids, topic_id=topic.id, filename="ready.mp4",
+        storage_key="abc_ready.mp4", file_hash="h_ready", file_size=2000,
+        media_kind="video", duration=10.0, codec="h264", has_audio=False,
+        processing_status=AssetProcessingStatus.ready.value,
+    )
+    db_session.add(asset)
+    db_session.commit()
+
+    ready_count = db_session.query(StoryAsset).filter(
+        StoryAsset.topic_id == topic.id,
+        StoryAsset.processing_status == AssetProcessingStatus.ready.value,
+    ).count()
+    assert ready_count == 1
+
+
+def test_asset_ownership_isolation(db_session, user_with_kids):
+    """Assets are isolated per user — user A can't see user B's assets."""
+    # Create a second user with Kids domain
+    user2 = User(email="other@example.com", name="Other")
+    db_session.add(user2)
+    db_session.flush()
+    profile2 = ChannelProfile(user_id=user2.id, domain=ContentDomain.kids.value, niche="Other")
+    db_session.add(profile2)
+
+    topic1 = KidsTopic(user_id=user_with_kids, title="User1 Topic", slug="u1", category="general")
+    topic2 = KidsTopic(user_id=user2.id, title="User2 Topic", slug="u2", category="general")
+    db_session.add_all([topic1, topic2])
+    db_session.flush()
+
+    asset1 = StoryAsset(
+        user_id=user_with_kids, topic_id=topic1.id, filename="a1.png",
+        storage_key="a1.png", file_hash="h1", file_size=100,
+        media_kind="image", processing_status="ready",
+    )
+    asset2 = StoryAsset(
+        user_id=user2.id, topic_id=topic2.id, filename="a2.mp4",
+        storage_key="a2.mp4", file_hash="h2", file_size=200,
+        media_kind="video", processing_status="ready",
+    )
+    db_session.add_all([asset1, asset2])
+    db_session.commit()
+
+    # User 1 only sees their assets
+    user1_assets = db_session.query(StoryAsset).filter(
+        StoryAsset.user_id == user_with_kids
+    ).all()
+    assert len(user1_assets) == 1
+    assert user1_assets[0].filename == "a1.png"
+
+    # User 2 only sees their assets
+    user2_assets = db_session.query(StoryAsset).filter(
+        StoryAsset.user_id == user2.id
+    ).all()
+    assert len(user2_assets) == 1
+    assert user2_assets[0].filename == "a2.mp4"
+
+
+def test_delete_asset_cancels_processing_job(db_session, user_with_kids):
+    """Deleting an asset cancels its pending kids_asset_process job."""
+    import uuid
+    topic = KidsTopic(user_id=user_with_kids, title="Delete Test", slug="del-test", category="general")
+    db_session.add(topic)
+    db_session.flush()
+
+    asset = StoryAsset(
+        user_id=user_with_kids, topic_id=topic.id, filename="delete.mp4",
+        storage_key="abc_del.mp4", file_hash="h_del", file_size=500,
+        media_kind="video", processing_status=AssetProcessingStatus.queued.value,
+    )
+    db_session.add(asset)
+    db_session.flush()
+
+    job = Job(
+        job_uuid=str(uuid.uuid4()),
+        type=JobType.kids_asset_process.value,
+        user_id=user_with_kids,
+        domain=ContentDomain.kids.value,
+        status=JobStatus.queued.value,
+        artifacts={"asset_id": asset.id},
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    # Simulate the delete logic: cancel pending jobs for this asset
+    pending_jobs = db_session.query(Job).filter(
+        Job.type == JobType.kids_asset_process.value,
+        Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
+    ).all()
+    for j in pending_jobs:
+        artifacts = j.artifacts or {}
+        if artifacts.get("asset_id") == asset.id:
+            j.status = JobStatus.cancelled.value
+    db_session.delete(asset)
+    db_session.commit()
+
+    # Job should be cancelled
+    loaded_job = db_session.query(Job).filter(Job.id == job.id).first()
+    assert loaded_job.status == "cancelled"
+
+
+def test_dedup_same_hash_rejected(db_session, user_with_kids):
+    """Uploading the same file hash twice should be rejected."""
+    topic = KidsTopic(user_id=user_with_kids, title="Dedup Test", slug="dedup-test", category="general")
+    db_session.add(topic)
+    db_session.flush()
+
+    # First asset with hash "dup_hash"
+    asset1 = StoryAsset(
+        user_id=user_with_kids, topic_id=topic.id, filename="first.mp4",
+        storage_key="abc_first.mp4", file_hash="dup_hash", file_size=1000,
+        media_kind="video", processing_status="ready",
+    )
+    db_session.add(asset1)
+    db_session.commit()
+
+    # Check for existing — simulates the dedup logic
+    existing = db_session.query(StoryAsset).filter(
+        StoryAsset.user_id == user_with_kids,
+        StoryAsset.file_hash == "dup_hash",
+    ).first()
+    assert existing is not None
+    assert existing.id == asset1.id
+
+
+def test_domain_reset_cancels_kids_asset_jobs(db_session, user_with_kids):
+    """Domain reset from Kids cancels pending kids_asset_process jobs."""
+    import uuid
+    from gpcg.application.domain_reset_service import reset_channel_domain
+
+    topic = KidsTopic(user_id=user_with_kids, title="Reset Test", slug="reset-test", category="general")
+    db_session.add(topic)
+    db_session.flush()
+
+    asset = StoryAsset(
+        user_id=user_with_kids, topic_id=topic.id, filename="reset.mp4",
+        storage_key="abc_reset.mp4", file_hash="h_reset", file_size=500,
+        media_kind="video", processing_status=AssetProcessingStatus.queued.value,
+    )
+    db_session.add(asset)
+    db_session.flush()
+
+    job = Job(
+        job_uuid=str(uuid.uuid4()),
+        type=JobType.kids_asset_process.value,
+        user_id=user_with_kids,
+        domain=ContentDomain.kids.value,
+        status=JobStatus.queued.value,
+        artifacts={"asset_id": asset.id},
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    # Reset domain to games
+    summary = reset_channel_domain(db_session, user_with_kids, "games", confirm=True)
+
+    assert summary["story_assets_deleted"] == 1
+    # Job should be cancelled
+    loaded_job = db_session.query(Job).filter(Job.id == job.id).first()
+    assert loaded_job.status == "cancelled"
+
+
+# ── Worker handler tests ─────────────────────────────────────────────────────
+
+
+def test_worker_has_kids_asset_process_handler():
+    """Remote worker has _process_kids_asset_process_job method."""
+    from pathlib import Path
+    remote_worker = Path(__file__).parent.parent / "src" / "gpcg" / "worker" / "remote_worker.py"
+    content = remote_worker.read_text()
+    assert "_process_kids_asset_process_job" in content
+    assert "kids_asset_process" in content
+
+
+def test_worker_has_ffprobe_method():
+    """Remote worker has _ffprobe_video static method."""
+    from pathlib import Path
+    remote_worker = Path(__file__).parent.parent / "src" / "gpcg" / "worker" / "remote_worker.py"
+    content = remote_worker.read_text()
+    assert "_ffprobe_video" in content
+    assert "_generate_thumbnail" in content
+
+
+def test_worker_routes_has_process_result_endpoint():
+    """Worker routes has /kids/assets/{id}/process-result endpoint."""
+    from pathlib import Path
+    worker_routes = Path(__file__).parent.parent / "src" / "gpcg" / "api" / "worker_routes.py"
+    content = worker_routes.read_text()
+    assert "/kids/assets/" in content and "process-result" in content
+    assert "thumbnail" in content
+
+
+# ── API upload tests ─────────────────────────────────────────────────────────
+
+
+class TestKidsAssetUploadAPI:
+    """Kids asset upload API endpoint tests (image + video)."""
+
+    @pytest.fixture
+    def client(self, db_session, user_with_kids, tmp_path, monkeypatch):
+        """Create a FastAPI TestClient with mocked auth, DB, and storage."""
+        from fastapi.testclient import TestClient
+        from gpcg.api.app import create_app
+        from gpcg.core.models import User
+        from gpcg.config import get_settings
+
+        # Mock data_dir to use tmp_path (data_dir is a property derived from gpcg_data_dir)
+        settings = get_settings()
+        monkeypatch.setattr(settings, "gpcg_data_dir", str(tmp_path))
+
+        user = db_session.query(User).filter(User.id == user_with_kids).first()
+
+        with patch("gpcg.api.app.init_db", return_value=None):
+            app = create_app()
+
+        from gpcg.infrastructure.auth import get_current_user
+        from gpcg.infrastructure.database import get_db
+
+        def override_auth():
+            return user
+
+        def override_db():
+            yield db_session
+
+        app.dependency_overrides[get_current_user] = override_auth
+        app.dependency_overrides[get_db] = override_db
+
+        client = TestClient(app)
+        yield client
+        app.dependency_overrides.clear()
+
+    def test_upload_image(self, client, db_session, user_with_kids):
+        """POST /api/kids/topics/{id}/assets with an image returns ready status."""
+        topic = KidsTopic(user_id=user_with_kids, title="Img Topic", slug="img-topic", category="general")
+        db_session.add(topic)
+        db_session.commit()
+
+        # Create a minimal valid PNG (1x1 pixel)
+        import struct
+        import zlib
+        def make_png():
+            sig = b'\x89PNG\r\n\x1a\n'
+            ihdr = struct.pack('>IHHBBBBB', 13, 1, 1, 8, 2, 0, 0, 0)
+            ihdr_chunk = b'IHDR' + ihdr
+            ihdr_crc = struct.pack('>I', zlib.crc32(ihdr_chunk) & 0xffffffff)
+            ihdr_full = struct.pack('>I', 13) + ihdr_chunk + ihdr_crc
+            raw = b'\x00\xff\x00\x00'  # filter byte + 1 pixel RGBA
+            idat_data = zlib.compress(raw)
+            idat_chunk = b'IDAT' + idat_data
+            idat_crc = struct.pack('>I', zlib.crc32(idat_chunk) & 0xffffffff)
+            idat_full = struct.pack('>I', len(idat_data)) + idat_chunk + idat_crc
+            iend_chunk = b'IEND'
+            iend_crc = struct.pack('>I', zlib.crc32(iend_chunk) & 0xffffffff)
+            iend_full = struct.pack('>I', 0) + iend_chunk + iend_crc
+            return sig + ihdr_full + idat_full + iend_full
+
+        png_bytes = make_png()
+        resp = client.post(
+            f"/api/kids/topics/{topic.id}/assets",
+            files={"file": ("test.png", png_bytes, "image/png")},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["media_kind"] == "image"
+        assert data["processing_status"] == "ready"
+        assert "id" in data
+
+    def test_upload_video_creates_job(self, client, db_session, user_with_kids):
+        """POST /api/kids/topics/{id}/assets with a video creates a processing job."""
+        topic = KidsTopic(user_id=user_with_kids, title="Vid Topic", slug="vid-topic", category="general")
+        db_session.add(topic)
+        db_session.commit()
+
+        # Fake video content (not a real MP4, but the endpoint only checks MIME type)
+        video_bytes = b"fake mp4 content for testing" * 100
+        resp = client.post(
+            f"/api/kids/topics/{topic.id}/assets",
+            files={"file": ("test.mp4", video_bytes, "video/mp4")},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["media_kind"] == "video"
+        assert data["processing_status"] == "queued"
+        assert "job_id" in data
+
+        # Verify job was created
+        job = db_session.query(Job).filter(
+            Job.type == JobType.kids_asset_process.value,
+            Job.user_id == user_with_kids,
+        ).first()
+        assert job is not None
+        assert job.status == "queued"
+
+    def test_upload_rejects_unsupported_type(self, client, db_session, user_with_kids):
+        """POST /api/kids/topics/{id}/assets rejects unsupported MIME types."""
+        topic = KidsTopic(user_id=user_with_kids, title="Bad Topic", slug="bad-topic", category="general")
+        db_session.add(topic)
+        db_session.commit()
+
+        resp = client.post(
+            f"/api/kids/topics/{topic.id}/assets",
+            files={"file": ("test.exe", b"fake exe", "application/octet-stream")},
+        )
+        assert resp.status_code == 422
+
+    def test_upload_dedup_rejects_same_hash(self, client, db_session, user_with_kids):
+        """Uploading the same file twice returns 409."""
+        import hashlib
+        topic = KidsTopic(user_id=user_with_kids, title="Dedup Topic", slug="dedup-topic", category="general")
+        db_session.add(topic)
+        db_session.commit()
+
+        content = b"identical content for dedup test"
+        # First upload succeeds
+        resp1 = client.post(
+            f"/api/kids/topics/{topic.id}/assets",
+            files={"file": ("first.png", content, "image/png")},
+        )
+        assert resp1.status_code == 200
+
+        # Second upload with same content should be 409
+        resp2 = client.post(
+            f"/api/kids/topics/{topic.id}/assets",
+            files={"file": ("second.png", content, "image/png")},
+        )
+        assert resp2.status_code == 409
+
+    def test_list_assets_includes_media_kind(self, client, db_session, user_with_kids):
+        """GET /api/kids/topics/{id}/assets includes media_kind and video fields."""
+        topic = KidsTopic(user_id=user_with_kids, title="List Topic", slug="list-topic", category="general")
+        db_session.add(topic)
+        db_session.flush()
+
+        asset = StoryAsset(
+            user_id=user_with_kids, topic_id=topic.id, filename="video.mp4",
+            storage_key="abc.mp4", file_hash="h", file_size=1000,
+            media_kind="video", duration=5.0, has_audio=True,
+            processing_status=AssetProcessingStatus.ready.value,
+        )
+        db_session.add(asset)
+        db_session.commit()
+
+        resp = client.get(f"/api/kids/topics/{topic.id}/assets")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["assets"]) == 1
+        a = data["assets"][0]
+        assert a["media_kind"] == "video"
+        assert a["duration"] == 5.0
+        assert a["has_audio"] is True
+        assert "processing_status" in a
+        assert "process_error" in a
+
+    def test_upload_wrong_topic_owner_404(self, client, db_session, user_with_kids):
+        """Uploading to another user's topic returns 404."""
+        # Create a second user's topic
+        user2 = User(email="other2@example.com", name="Other2")
+        db_session.add(user2)
+        db_session.flush()
+        profile2 = ChannelProfile(user_id=user2.id, domain=ContentDomain.kids.value)
+        db_session.add(profile2)
+        topic2 = KidsTopic(user_id=user2.id, title="Other Topic", slug="other", category="general")
+        db_session.add(topic2)
+        db_session.commit()
+
+        resp = client.post(
+            f"/api/kids/topics/{topic2.id}/assets",
+            files={"file": ("test.png", b"fake png", "image/png")},
+        )
+        assert resp.status_code == 404

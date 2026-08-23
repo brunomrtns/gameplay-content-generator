@@ -7,6 +7,7 @@ import {
   Upload,
   Trash2,
   Image as ImageIcon,
+  Video as VideoIcon,
   Plus,
   Sparkles,
   Loader2,
@@ -15,6 +16,9 @@ import {
   Settings,
   Brain,
   Save,
+  AlertCircle,
+  CheckCircle,
+  Clock,
 } from "lucide-react";
 
 const CATEGORIES = [
@@ -59,6 +63,7 @@ export function KidsPage() {
   const [generating, setGenerating] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [expandedTopic, setExpandedTopic] = useState<number | null>(null);
 
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("educational");
@@ -101,10 +106,20 @@ export function KidsPage() {
   const handleUpload = async (topicId: number, files: FileList) => {
     setUploading(true);
     try {
+      let successCount = 0;
+      let errorCount = 0;
       for (const file of Array.from(files)) {
-        await api.uploadKidsAsset(topicId, file);
+        try {
+          await api.uploadKidsAsset(topicId, file);
+          successCount++;
+        } catch (err: any) {
+          errorCount++;
+          toast.error(`${file.name}: ${err.message || "Erro no upload"}`);
+        }
       }
-      toast.success(`${files.length} imagem(s) enviada(s)`);
+      if (successCount > 0) {
+        toast.success(`${successCount} mídia(s) enviada(s)${errorCount > 0 ? `, ${errorCount} com erro` : ""}`);
+      }
       await refetch();
     } catch (err: any) {
       toast.error(err.message || "Erro no upload");
@@ -261,13 +276,13 @@ export function KidsPage() {
 
                   <div className="flex items-center gap-2 mb-3">
                     <ImageIcon className="h-4 w-4 text-text-muted" />
-                    <span className="text-xs text-text-secondary">{t.asset_count} imagem(ns)</span>
+                    <span className="text-xs text-text-secondary">{t.asset_count} mídia(s)</span>
                   </div>
 
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/*,video/*"
                     multiple
                     className="hidden"
                     onChange={(e) => e.target.files && handleUpload(t.id, e.target.files)}
@@ -282,7 +297,7 @@ export function KidsPage() {
                       disabled={uploading}
                     >
                       {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                      Imagens
+                      Mídias
                     </Button>
                     <Button
                       variant="primary"
@@ -298,8 +313,21 @@ export function KidsPage() {
 
                   {t.asset_count === 0 && (
                     <p className="mt-2 text-[10px] text-text-muted">
-                      Envie imagens antes de gerar o vídeo.
+                      Envie imagens ou vídeos antes de gerar.
                     </p>
+                  )}
+
+                  {t.asset_count > 0 && (
+                    <button
+                      onClick={() => setExpandedTopic(expandedTopic === t.id ? null : t.id)}
+                      className="mt-2 text-[10px] text-accent hover:text-accent-warm transition-colors"
+                    >
+                      {expandedTopic === t.id ? "Ocultar mídias" : "Ver mídias"}
+                    </button>
+                  )}
+
+                  {expandedTopic === t.id && (
+                    <TopicAssetsList topicId={t.id} onDeleted={refetch} />
                   )}
                 </Card>
               ))}
@@ -311,6 +339,109 @@ export function KidsPage() {
       {tab === "config" && <ChannelConfigSection />}
     </div>
   );
+}
+
+// ── Topic Assets List ────────────────────────────────────────────────────────
+
+function TopicAssetsList({ topicId, onDeleted }: { topicId: number; onDeleted: () => void }) {
+  const { data, loading, refetch } = usePoll(() => api.listKidsAssets(topicId), 5000);
+  const [deleting, setDeleting] = useState<number | null>(null);
+
+  const assets = data?.assets || [];
+
+  const handleDelete = async (id: number) => {
+    if (!confirm("Excluir esta mídia?")) return;
+    setDeleting(id);
+    try {
+      await api.deleteKidsAsset(id);
+      toast.success("Mídia excluída");
+      await refetch();
+      await onDeleted();
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao excluir");
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  if (loading && !data) {
+    return <div className="mt-2 flex justify-center"><Spinner className="h-4 w-4" /></div>;
+  }
+
+  if (assets.length === 0) {
+    return <p className="mt-2 text-[10px] text-text-muted">Nenhuma mídia encontrada.</p>;
+  }
+
+  return (
+    <div className="mt-3 space-y-1.5 max-h-48 overflow-y-auto">
+      {assets.map((a: any) => (
+        <div key={a.id} className="flex items-center gap-2 rounded-md border border-border bg-surface px-2 py-1.5">
+          {/* Thumbnail or icon */}
+          {a.thumbnail_key ? (
+            <img
+              src={api.getKidsAssetThumbnailUrl(a.thumbnail_key)}
+              alt=""
+              className="h-8 w-8 rounded object-cover flex-shrink-0"
+            />
+          ) : (
+            <div className="flex-shrink-0">
+              {a.media_kind === "video" ? (
+                <VideoIcon className="h-4 w-4 text-text-muted" />
+              ) : (
+                <ImageIcon className="h-4 w-4 text-text-muted" />
+              )}
+            </div>
+          )}
+
+          {/* Filename + metadata */}
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-medium truncate">{a.filename}</p>
+            <div className="flex items-center gap-1.5 text-[9px] text-text-muted">
+              {a.media_kind === "video" && a.duration > 0 && (
+                <span>{a.duration.toFixed(1)}s</span>
+              )}
+              {a.width > 0 && a.height > 0 && (
+                <span>{a.width}×{a.height}</span>
+              )}
+              {a.file_size > 0 && (
+                <span>{(a.file_size / 1024 / 1024).toFixed(1)}MB</span>
+              )}
+            </div>
+          </div>
+
+          {/* Status badge */}
+          <AssetStatusBadge status={a.processing_status} error={a.process_error} />
+
+          {/* Delete */}
+          <button
+            onClick={() => handleDelete(a.id)}
+            disabled={deleting === a.id}
+            className="text-text-muted hover:text-red-400 transition-colors flex-shrink-0"
+          >
+            {deleting === a.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AssetStatusBadge({ status, error }: { status: string; error?: string }) {
+  if (status === "ready") {
+    return <CheckCircle className="h-3.5 w-3.5 text-green-400 flex-shrink-0" />;
+  }
+  if (status === "failed") {
+    return (
+      <span title={error || "Erro no processamento"} className="flex-shrink-0">
+        <AlertCircle className="h-3.5 w-3.5 text-red-400" />
+      </span>
+    );
+  }
+  if (status === "processing") {
+    return <Loader2 className="h-3.5 w-3.5 text-yellow-400 animate-spin flex-shrink-0" />;
+  }
+  // queued or uploading
+  return <Clock className="h-3.5 w-3.5 text-text-muted flex-shrink-0" />;
 }
 
 // ── Tab Button ───────────────────────────────────────────────────────────────

@@ -437,8 +437,13 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
                 storage_key=asset_data.get("storage_key", ""),
                 file_hash=asset_data.get("file_hash", ""),
                 file_size=asset_data.get("file_size", 0),
+                media_kind=asset_data.get("media_kind", "image"),
                 width=asset_data.get("width", 0),
                 height=asset_data.get("height", 0),
+                duration=asset_data.get("duration", 0.0),
+                codec=asset_data.get("codec", ""),
+                has_audio=asset_data.get("has_audio", False),
+                thumbnail_key=asset_data.get("thumbnail_key", ""),
                 processing_status=asset_data.get("processing_status", "ready"),
                 metadata_json={
                     **asset_data.get("metadata_json", {}),

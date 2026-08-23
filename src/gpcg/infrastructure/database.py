@@ -219,6 +219,15 @@ def init_db() -> None:
     _ensure_column(engine, "kids_topics", "idea_id", "INTEGER")
     _ensure_column(engine, "kids_topics", "editorial_intent", "VARCHAR(50) DEFAULT 'curiosity'")
     _ensure_column(engine, "kids_topics", "educational_goal", "VARCHAR(50) DEFAULT 'general'")
+    # ── Kids media: StoryAsset video support ──────────────────────────────
+    # Videos need media_kind, duration, codec, has_audio, thumbnail, and
+    # a processing lifecycle (queued → processing → ready).
+    _ensure_column(engine, "story_assets", "media_kind", "VARCHAR(10) DEFAULT 'image'")
+    _ensure_column(engine, "story_assets", "duration", "FLOAT DEFAULT 0.0")
+    _ensure_column(engine, "story_assets", "codec", "VARCHAR(50) DEFAULT ''")
+    _ensure_column(engine, "story_assets", "has_audio", "BOOLEAN DEFAULT 0")
+    _ensure_column(engine, "story_assets", "thumbnail_key", "VARCHAR(500) DEFAULT ''")
+    _ensure_column(engine, "story_assets", "process_error", "TEXT DEFAULT ''")
     # V2: gameplay_clip_usage table is created by create_all() above
     # V2: data migrations (slug generation, aliases JSON → game_aliases, user_id deprecation)
     _migrate_v2_game_registry(engine)

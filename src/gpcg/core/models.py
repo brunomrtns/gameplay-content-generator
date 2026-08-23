@@ -83,6 +83,8 @@ class JobType(str, enum.Enum):
     # Kids Idea System: discovery + scoring (run on VPS, no GPU)
     kids_idea_discovery = "kids_idea_discovery"  # AI ideation + topic library + seasonal
     kids_idea_score = "kids_idea_score"  # batch safety + scoring for discovered ideas
+    # Kids media processing: worker downloads video → FFprobe + thumbnail → sync metadata
+    kids_asset_process = "kids_asset_process"
 
 
 class JobStatus(str, enum.Enum):

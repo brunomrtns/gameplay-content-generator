@@ -1259,10 +1259,12 @@ def download_kids_asset(
     _: None = Depends(worker_auth),
     db: Session = Depends(get_db),
 ):
-    """Stream a Kids story asset (image) from VPS to the worker.
+    """Stream a Kids story asset (image or video) from VPS to the worker.
 
-    Used by the remote worker to download story assets (images) so the
-    Kids pipeline can use them locally for image-to-clip conversion.
+    Used by the remote worker during:
+    - ``kids_asset_process`` jobs: download video → FFprobe → thumbnail
+    - generation jobs: download assets so the Kids pipeline can use them
+      locally (images for Ken Burns, videos for background/overlay).
     """
     from gpcg.domains.kids.models import StoryAsset
     from gpcg.config import get_settings
@@ -1280,7 +1282,13 @@ def download_kids_asset(
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Asset file not found on VPS")
 
-    log.info(f"Worker downloading Kids asset #{asset_id} ({asset.filename})")
+    # Determine media type for Content-Type header
+    if asset.media_kind == "video":
+        media_type = "video/mp4"
+    else:
+        media_type = "image/png"
+
+    log.info(f"Worker downloading Kids asset #{asset_id} ({asset.media_kind}: {asset.filename})")
 
     def _stream(path: Path, chunk_size: int = 1024 * 1024):
         with open(path, "rb") as f:
@@ -1292,12 +1300,110 @@ def download_kids_asset(
 
     return StreamingResponse(
         _stream(file_path),
-        media_type="image/png",
+        media_type=media_type,
         headers={
             "Content-Disposition": f'attachment; filename="{asset.filename}"',
             "Content-Length": str(file_path.stat().st_size),
         },
     )
+
+
+# ── Kids asset process result (worker → VPS) ─────────────────────────────────
+
+
+class KidsAssetProcessResult(BaseModel):
+    """Result of processing a Kids video asset on the worker.
+
+    The worker runs FFprobe to extract metadata and optionally generates
+    a thumbnail. This payload syncs the extracted data back to the VPS.
+    """
+    asset_id: int
+    width: int = 0
+    height: int = 0
+    duration: float = 0.0
+    codec: str = ""
+    has_audio: bool = False
+    thumbnail_key: str = ""  # relative path within kids_assets/ on VPS
+    error: str = ""
+
+
+@router.post("/kids/assets/{asset_id}/process-result")
+def submit_kids_asset_process_result(
+    asset_id: int,
+    req: KidsAssetProcessResult,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Receive the result of a Kids asset processing job from the worker.
+
+    The worker downloads the video, runs FFprobe for metadata, generates
+    a thumbnail (uploaded separately), and calls this endpoint to sync
+    the results. The VPS updates the StoryAsset record and marks it
+    ``ready`` (or ``failed`` if ``error`` is set).
+    """
+    from gpcg.domains.kids.models import StoryAsset, AssetProcessingStatus
+
+    asset = db.query(StoryAsset).filter(StoryAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Story asset not found")
+
+    if req.error:
+        asset.processing_status = AssetProcessingStatus.failed.value
+        asset.process_error = req.error
+        log.warning(f"Kids asset #{asset_id} processing failed: {req.error}")
+    else:
+        asset.width = req.width
+        asset.height = req.height
+        asset.duration = req.duration
+        asset.codec = req.codec
+        asset.has_audio = req.has_audio
+        asset.thumbnail_key = req.thumbnail_key
+        asset.processing_status = AssetProcessingStatus.ready.value
+        asset.process_error = ""
+        log.info(
+            f"Kids asset #{asset_id} processed: {req.width}x{req.height} "
+            f"{req.duration:.1f}s codec={req.codec} audio={req.has_audio}"
+        )
+
+    db.commit()
+    return {"ok": True, "asset_id": asset_id, "processing_status": asset.processing_status}
+
+
+# ── Kids asset thumbnail upload (worker → VPS) ───────────────────────────────
+
+
+@router.post("/kids/assets/{asset_id}/thumbnail")
+async def upload_kids_asset_thumbnail(
+    asset_id: int,
+    file: UploadFile = File(...),
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Receive a generated thumbnail from the worker and store it on the VPS.
+
+    The worker generates a thumbnail from the video using FFmpeg and
+    uploads it here. The thumbnail_key is set on the StoryAsset via
+    the process-result endpoint (not here — this just stores the file).
+    """
+    from gpcg.domains.kids.models import StoryAsset
+    from gpcg.config import get_settings
+
+    asset = db.query(StoryAsset).filter(StoryAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Story asset not found")
+
+    settings = get_settings()
+    assets_dir = settings.data_dir / "kids_assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+
+    thumb_name = f"thumb_{asset_id}_{file.filename or 'thumbnail.jpg'}"
+    thumb_path = assets_dir / thumb_name
+    content = await file.read()
+    if content:
+        thumb_path.write_bytes(content)
+        log.info(f"Stored thumbnail for Kids asset #{asset_id}: {thumb_name}")
+        return {"ok": True, "thumbnail_key": thumb_name}
+    raise HTTPException(400, "Empty thumbnail file")
 
 
 # ── Confirm download (checksum verification + cleanup) ───────────────────────
@@ -2030,7 +2136,10 @@ def get_job_data(
                     "id": a.id, "user_id": a.user_id, "topic_id": a.topic_id,
                     "filename": a.filename, "storage_key": a.storage_key,
                     "file_hash": a.file_hash, "file_size": a.file_size,
+                    "media_kind": a.media_kind,
                     "width": a.width, "height": a.height,
+                    "duration": a.duration, "codec": a.codec,
+                    "has_audio": a.has_audio, "thumbnail_key": a.thumbnail_key,
                     "processing_status": a.processing_status,
                     "metadata_json": a.metadata_json,
                 } for a in assets]

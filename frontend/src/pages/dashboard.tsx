@@ -112,8 +112,8 @@ export function DashboardPage() {
 
   const stats = isKidsDomain
     ? [
-        { label: "Tópicos", value: kids.total_topics, icon: FileText, sub: `${kids.ready_assets} imagens prontas`, color: "text-accent" },
-        { label: "Imagens", value: kids.total_assets, icon: Upload, sub: `${kids.ready_assets} prontas`, color: "text-accent-warm" },
+        { label: "Tópicos", value: kids.total_topics, icon: FileText, sub: `${kids.ready_assets} mídias prontas`, color: "text-accent" },
+        { label: "Mídias", value: kids.total_assets, icon: Upload, sub: `${kids.ready_assets} prontas`, color: "text-accent-warm" },
         { label: "Vídeos produzidos", value: videos.total, icon: VideoIcon, sub: jobs.running > 0 ? "produzindo agora" : "em pausa", color: "text-accent" },
         { label: "Publicados", value: videos.published, icon: Send, sub: "no YouTube", color: "text-accent-warm" },
       ]

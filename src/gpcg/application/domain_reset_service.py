@@ -269,6 +269,8 @@ def reset_channel_domain(
                 cleanup_filenames.append(asset.filename)
             if asset.storage_key:
                 cleanup_storage_keys.append(asset.storage_key)
+            if asset.thumbnail_key:
+                cleanup_storage_keys.append(asset.thumbnail_key)
 
     if old_domain == ContentDomain.games.value:
         summary.update(_delete_games_domain_data(session, user_id))
@@ -437,16 +439,27 @@ def _delete_games_domain_data(session: Session, user_id: int) -> dict[str, Any]:
 def _delete_kids_domain_data(session: Session, user_id: int) -> dict[str, Any]:
     """Delete all Kids-specific data for a user.
 
-    Kids data is simpler than Games: just topics and story assets.
-    No events, no embeddings, no clip usage — images are simple assets.
-    The cleanup_user_storage job handles physical file deletion on workers.
+    Kids data is simpler than Games: just topics and story assets (images
+    and videos). No events, no embeddings, no clip usage. The
+    cleanup_user_storage job handles physical file deletion on workers.
     """
+    from gpcg.core.models import Job, JobStatus, JobType
     from gpcg.domains.kids.models import KidsTopic, StoryAsset
 
     result = {
         "kids_topics_deleted": 0,
         "story_assets_deleted": 0,
     }
+
+    # Cancel pending kids_asset_process jobs (videos being processed)
+    pending_jobs = session.query(Job).filter(
+        Job.user_id == user_id,
+        Job.type == JobType.kids_asset_process.value,
+        Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
+    ).all()
+    for j in pending_jobs:
+        j.status = JobStatus.cancelled.value
+    session.flush()
 
     # Delete story assets first (FK to topics)
     assets = session.query(StoryAsset).filter(

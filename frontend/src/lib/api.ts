@@ -561,6 +561,8 @@ export const api = {
     return res.json();
   },
   deleteKidsAsset: (id: number) => request<any>(`/kids/assets/${id}`, { method: "DELETE" }),
+  getKidsAssetThumbnailUrl: (thumbnailKey: string) =>
+    `${API_BASE}/kids/assets/thumbnail/${thumbnailKey}`,
   generateKidsVideo: (topicId: number) =>
     request<{ job_id: number; topic_id: number }>("/kids/generate", {
       method: "POST",
