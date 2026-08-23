@@ -84,7 +84,7 @@ export function KidsIdeasPage() {
         api.getKidsIdeaQueue(),
       ]);
       setIdeas(ideasRes.ideas || []);
-      setQueue(queueRes.queue || []);
+      setQueue(queueRes.items || []);
     } catch (err: any) {
       toast.error(err.message || "Erro ao carregar dados");
     } finally {

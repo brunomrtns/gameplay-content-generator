@@ -586,7 +586,7 @@ export const api = {
     request<any>(`/kids/ideas/${id}/provenance`),
   discoverKidsIdeas: (data: { categories?: string[]; ideas_per_category?: number; include_seasonal?: boolean; include_topic_library?: boolean }) =>
     request<any>("/kids/ideas/discover", { method: "POST", body: JSON.stringify(data) }),
-  getKidsIdeaQueue: () => request<{ queue: any[] }>("/kids/idea-queue"),
+  getKidsIdeaQueue: () => request<{ queue: any[]; items: any[] }>("/kids/idea-queue"),
   addKidsIdeaToQueue: (id: number) =>
     request<any>(`/kids/idea-queue/add`, { method: "POST", body: JSON.stringify({ idea_id: id }) }),
   removeKidsIdeaFromQueue: (id: number) =>
