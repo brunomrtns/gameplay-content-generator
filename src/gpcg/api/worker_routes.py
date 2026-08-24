@@ -1473,41 +1473,10 @@ def submit_kids_asset_mapping_result(
     }
 
 
-@router.get("/kids/assets/{asset_id}/events")
-def get_kids_asset_events(
-    asset_id: int,
-    _: None = Depends(worker_auth),
-    db: Session = Depends(get_db),
-):
-    """Get the semantic events for a Kids video asset (worker → VPS query).
-
-    Used by the worker during generation to fetch events for the
-    KidsMediaRetriever. Equivalent to GET /gameplays/{id}/events in Games.
-    """
-    from gpcg.domains.kids.models import KidsMediaEvent
-
-    events = db.query(KidsMediaEvent).filter(
-        KidsMediaEvent.asset_id == asset_id
-    ).order_by(KidsMediaEvent.start_time).all()
-
-    return {
-        "events": [{
-            "id": e.id,
-            "asset_id": e.asset_id,
-            "start_time": e.start_time,
-            "end_time": e.end_time,
-            "event_type": e.event_type,
-            "description": e.description,
-            "characters": e.characters,
-            "location": e.location,
-            "actions": e.actions,
-            "tags": e.tags,
-            "transcript": e.transcript,
-            "visual_confidence": e.visual_confidence,
-            "interesting_score": e.interesting_score,
-            "analysis_version": e.analysis_version,
-        } for e in events]
-    }
+# NOTE: GET /kids/assets/{asset_id}/events is defined in kids_routes.py with
+# user auth (get_current_user). The worker does NOT need a separate events
+# query endpoint — it receives events through GET /api/jobs/{id}/data which
+# includes kids_media_events in the job payload.
 
 
 # ── Kids asset thumbnail upload (worker → VPS) ───────────────────────────────
