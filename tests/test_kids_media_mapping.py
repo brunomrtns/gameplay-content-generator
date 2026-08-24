@@ -389,3 +389,107 @@ class TestKidsMediaRetrieverWithEvents:
         )
         assert len(clips) > 0
         assert clips[0].event_id == evt.id
+
+
+# ── Migration regression tests ────────────────────────────────────────────────
+
+
+class TestStoryAssetsPrimaryKeyMigration:
+    """Regression tests for _fix_story_assets_primary_key migration.
+
+    These tests simulate a DB corrupted by the old
+    _migrate_story_assets_topic_id_nullable that used
+    CREATE TABLE AS SELECT (which doesn't preserve PRIMARY KEY).
+    """
+
+    def test_fixes_broken_primary_key(self, tmp_path):
+        """_fix_story_assets_primary_key repairs id when it's not a PK."""
+        from sqlalchemy import text, inspect
+        from gpcg.infrastructure.database import _fix_story_assets_primary_key
+
+        db_path = tmp_path / "test.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+
+        # Create a BROKEN story_assets table (id without PRIMARY KEY,
+        # simulating what CREATE TABLE AS SELECT produced)
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE story_assets (
+                    id INT,
+                    user_id INT,
+                    topic_id INT,
+                    filename TEXT,
+                    storage_key TEXT,
+                    file_hash TEXT,
+                    file_size INT,
+                    width INT,
+                    height INT,
+                    processing_status TEXT,
+                    metadata_json NUM,
+                    created_at NUM,
+                    media_kind TEXT,
+                    duration REAL,
+                    codec TEXT,
+                    has_audio NUM,
+                    thumbnail_key TEXT,
+                    process_error TEXT,
+                    tags NUM,
+                    description TEXT,
+                    is_public NUM
+                )
+            """))
+            # Insert a row with id=NULL (the bug symptom)
+            conn.execute(text("""
+                INSERT INTO story_assets (id, user_id, filename, storage_key,
+                    file_hash, file_size, width, height, processing_status,
+                    metadata_json, created_at, media_kind, duration, codec,
+                    has_audio, thumbnail_key, process_error, tags, description,
+                    is_public)
+                VALUES (NULL, 1, 'test.mp4', 'key', 'hash', 100, 640, 360,
+                    'ready', NULL, 0, 'video', 10.0, 'h264', 1, 'thumb', '',
+                    '[]', '', 0)
+            """))
+
+        # Verify it's broken
+        inspector = inspect(engine)
+        pk = inspector.get_pk_constraint("story_assets").get("constrained_columns", [])
+        assert "id" not in pk, "Precondition: id should NOT be a PK"
+
+        # Run the migration
+        _fix_story_assets_primary_key(engine)
+
+        # Verify it's fixed
+        inspector = inspect(engine)
+        pk = inspector.get_pk_constraint("story_assets").get("constrained_columns", [])
+        assert "id" in pk, "Post-condition: id should be a PK"
+
+        # Verify data survived and got a real ID
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT id, filename FROM story_assets")).fetchone()
+            assert result is not None, "Data should survive migration"
+            assert result[0] is not None, "id should be auto-assigned (not NULL)"
+            assert result[0] >= 1, f"id should be >= 1, got {result[0]}"
+            assert result[1] == "test.mp4"
+
+    def test_noop_when_already_correct(self, tmp_path):
+        """_fix_story_assets_primary_key is a no-op when id is already PK."""
+        from sqlalchemy import inspect
+        from gpcg.infrastructure.database import _fix_story_assets_primary_key
+
+        db_path = tmp_path / "test.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+
+        # Create a CORRECT story_assets table (via create_all)
+        import gpcg.core.models  # noqa: F401
+        import gpcg.domains.kids.models  # noqa: F401
+        Base.metadata.create_all(bind=engine, tables=[
+            __import__("gpcg.domains.kids.models", fromlist=["StoryAsset"]).StoryAsset.__table__
+        ])
+
+        # Run migration — should be a no-op
+        _fix_story_assets_primary_key(engine)
+
+        # Verify id is still a PK
+        inspector = inspect(engine)
+        pk = inspector.get_pk_constraint("story_assets").get("constrained_columns", [])
+        assert "id" in pk

@@ -10,7 +10,7 @@
 #   0.5. Roda testes (pytest)
 #   1. Cria tag de rollback pre-deploy-TIMESTAMP
 #   2. Sincroniza o código para /opt/gpcg na VPS (via rsync)
-#   3. Builda as imagens Docker na VPS (api, worker)
+#   3. Builda as imagens Docker na VPS (api, catalog)
 #   4. Sobe a stack com docker compose
 #   5. Atualiza nginx do trivestia-nginx com rotas do GPCG
 #   6. Reinicia nginx
@@ -245,7 +245,7 @@ if [[ "$NEEDS_BUILD" -eq 1 ]]; then
   # for fast incremental rebuilds. Dangling images accumulate from previous
   # builds and can waste disk space.
   vps "docker image prune -f 2>/dev/null" || true
-  ok "Imagens buildadas (gpcg-api:latest, gpcg-worker:latest)"
+  ok "Imagens buildadas (gpcg-api:latest, gpcg-catalog:latest)"
 
   # Salvar hash do deploy atual
   vps "echo '$COMBINED_HASH' > $VPS_PATH/.deploy-hash"
