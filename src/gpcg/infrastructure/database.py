@@ -243,6 +243,12 @@ def init_db() -> None:
     # SQLite doesn't support ALTER COLUMN; we recreate the table if topic_id
     # is still NOT NULL. New databases get nullable from create_all().
     _migrate_story_assets_topic_id_nullable(engine)
+    # ── Fix story_assets primary key (broken by old CREATE TABLE AS SELECT) ──
+    # An older version of _migrate_story_assets_topic_id_nullable used
+    # CREATE TABLE AS SELECT, which does NOT preserve PRIMARY KEY. This
+    # caused id to become a regular INT column (nullable, no auto-increment).
+    # This migration detects and fixes that.
+    _fix_story_assets_primary_key(engine)
     # V2: gameplay_clip_usage table is created by create_all() above
     # V2: data migrations (slug generation, aliases JSON → game_aliases, user_id deprecation)
     _migrate_v2_game_registry(engine)
@@ -283,17 +289,67 @@ def _migrate_story_assets_topic_id_nullable(engine) -> None:
         all_cols = [c["name"] for c in columns]
         col_list = ", ".join(f'"{c}"' for c in all_cols)
 
+        # CRITICAL: CREATE TABLE AS SELECT does NOT preserve PRIMARY KEY.
+        # We must rename the old table, create the new one with the correct
+        # schema (including id INTEGER PRIMARY KEY AUTOINCREMENT), then
+        # copy data back.
+        conn.execute(text("ALTER TABLE story_assets RENAME TO _story_assets_backup"))
+        # Recreate with proper schema from the SQLAlchemy model
+        Base.metadata.create_all(bind=conn, tables=[__import__(
+            "gpcg.domains.kids.models", fromlist=["StoryAsset"]
+        ).StoryAsset.__table__])
+        # Copy data back (id will auto-increment if NULL)
         conn.execute(text(
-            "CREATE TABLE _story_assets_new AS "
-            f"SELECT {col_list} FROM story_assets"
+            f"INSERT INTO story_assets ({col_list}) "
+            f"SELECT {col_list} FROM _story_assets_backup"
         ))
-        conn.execute(text("DROP TABLE story_assets"))
-        conn.execute(text("ALTER TABLE _story_assets_new RENAME TO story_assets"))
-    # Recreate indexes (dropped with the table)
-    Base.metadata.create_all(bind=engine, tables=[__import__(
-        "gpcg.domains.kids.models", fromlist=["StoryAsset"]
-    ).StoryAsset.__table__])
+        conn.execute(text("DROP TABLE _story_assets_backup"))
     log.info("story_assets migration complete: topic_id is now nullable")
+
+
+def _fix_story_assets_primary_key(engine) -> None:
+    """Fix story_assets.id primary key (broken by old CREATE TABLE AS SELECT).
+
+    An older version of _migrate_story_assets_topic_id_nullable used
+    ``CREATE TABLE _new AS SELECT ...`` which does NOT preserve PRIMARY KEY.
+    This caused ``id`` to become a regular INT column (nullable, no
+    auto-increment), leading to rows with ``id=NULL`` and 500 errors.
+
+    This migration detects if ``id`` is not a primary key and recreates
+    the table with the correct schema, assigning auto-increment IDs to
+    any rows that have ``id=NULL``.
+    """
+    from sqlalchemy import text, inspect
+
+    inspector = inspect(engine)
+    if "story_assets" not in inspector.get_table_names():
+        return  # table doesn't exist yet — create_all handles it
+
+    # Check if id is a primary key
+    pk_cols = inspector.get_pk_constraint("story_assets").get("constrained_columns", [])
+    if "id" in pk_cols:
+        return  # already a primary key — nothing to do
+
+    log.warning("story_assets.id is NOT a primary key — fixing (broken by old migration)")
+    columns = inspector.get_columns("story_assets")
+    all_cols = [c["name"] for c in columns]
+    col_list = ", ".join(f'"{c}"' for c in all_cols)
+
+    with engine.begin() as conn:
+        # Rename old table
+        conn.execute(text("ALTER TABLE story_assets RENAME TO _story_assets_broken"))
+        # Recreate with proper schema from the SQLAlchemy model
+        Base.metadata.create_all(bind=conn, tables=[__import__(
+            "gpcg.domains.kids.models", fromlist=["StoryAsset"]
+        ).StoryAsset.__table__])
+        # Copy data back, assigning auto-increment IDs to NULL rows
+        # SQLite will auto-assign IDs for NULL id values on INSERT
+        conn.execute(text(
+            f"INSERT INTO story_assets ({col_list}) "
+            f"SELECT {col_list} FROM _story_assets_broken"
+        ))
+        conn.execute(text("DROP TABLE _story_assets_broken"))
+    log.info("story_assets primary key fixed: id is now INTEGER PRIMARY KEY AUTOINCREMENT")
 
 
 def _seed_admin_user() -> None:
