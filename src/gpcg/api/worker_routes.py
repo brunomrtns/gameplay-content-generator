@@ -1334,12 +1334,15 @@ def submit_kids_asset_process_result(
     _: None = Depends(worker_auth),
     db: Session = Depends(get_db),
 ):
-    """Receive the result of a Kids asset processing job from the worker.
+    """Receive the FFprobe/thumbnail result of a Kids asset processing job.
 
     The worker downloads the video, runs FFprobe for metadata, generates
     a thumbnail (uploaded separately), and calls this endpoint to sync
     the results. The VPS updates the StoryAsset record and marks it
-    ``ready`` (or ``failed`` if ``error`` is set).
+    ``mapping`` (ready for semantic mapping) — or ``failed`` if error.
+
+    The worker then runs the VLM+ASR mapping and calls
+    POST /kids/assets/{asset_id}/mapping-result with the events.
     """
     from gpcg.domains.kids.models import StoryAsset, AssetProcessingStatus
 
@@ -1358,15 +1361,153 @@ def submit_kids_asset_process_result(
         asset.codec = req.codec
         asset.has_audio = req.has_audio
         asset.thumbnail_key = req.thumbnail_key
-        asset.processing_status = AssetProcessingStatus.ready.value
+        # Mark as "mapping" — the worker will run VLM+ASR next
+        asset.processing_status = AssetProcessingStatus.mapping.value
         asset.process_error = ""
         log.info(
-            f"Kids asset #{asset_id} processed: {req.width}x{req.height} "
-            f"{req.duration:.1f}s codec={req.codec} audio={req.has_audio}"
+            f"Kids asset #{asset_id} FFprobe done: {req.width}x{req.height} "
+            f"{req.duration:.1f}s codec={req.codec} audio={req.has_audio} → mapping"
         )
 
     db.commit()
     return {"ok": True, "asset_id": asset_id, "processing_status": asset.processing_status}
+
+
+# ── Kids asset mapping result (worker → VPS) ─────────────────────────────────
+
+
+class KidsMediaEventPayload(BaseModel):
+    asset_id: int
+    start_time: float
+    end_time: float
+    event_type: str = "unknown"
+    description: str = ""
+    characters: list = []
+    location: str = ""
+    actions: list = []
+    tags: list = []
+    transcript: str = ""
+    visual_confidence: float = 0.0
+    interesting_score: float = 0.0
+    analysis_version: str = "v1"
+    metadata_json: dict = {}
+
+
+class KidsMappingResult(BaseModel):
+    asset_id: int
+    events: list[KidsMediaEventPayload] = []
+    analysis_version: str = "v1"
+
+
+@router.post("/kids/assets/{asset_id}/mapping-result")
+def submit_kids_asset_mapping_result(
+    asset_id: int,
+    req: KidsMappingResult,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Receive the semantic mapping events for a Kids video asset.
+
+    The worker runs the KidsMediaAnalyzer (VLM + ASR, same pipeline as
+    GameplayAnalyzer) and sends the structured events here. The VPS
+    persists them as KidsMediaEvent records and marks the asset ``ready``.
+
+    This is the Kids equivalent of POST /gameplays/{id}/mapping-result
+    in the Games domain.
+    """
+    from gpcg.domains.kids.models import (
+        StoryAsset,
+        KidsMediaEvent,
+        AssetProcessingStatus,
+    )
+
+    asset = db.query(StoryAsset).filter(StoryAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Story asset not found")
+
+    # Clear existing events (in case of re-mapping)
+    db.query(KidsMediaEvent).filter(KidsMediaEvent.asset_id == asset_id).delete()
+    db.flush()
+
+    # Insert new events
+    for evt in req.events:
+        db.add(KidsMediaEvent(
+            asset_id=asset_id,
+            start_time=evt.start_time,
+            end_time=evt.end_time,
+            event_type=evt.event_type,
+            description=evt.description,
+            characters=evt.characters,
+            location=evt.location or None,
+            actions=evt.actions,
+            tags=evt.tags,
+            transcript=evt.transcript,
+            visual_confidence=evt.visual_confidence,
+            interesting_score=evt.interesting_score,
+            analysis_version=evt.analysis_version or req.analysis_version,
+            metadata_json=evt.metadata_json,
+        ))
+
+    # Mark asset as ready + update analysis metadata
+    asset.processing_status = AssetProcessingStatus.ready.value
+    asset.process_error = ""
+    asset.metadata_json = {
+        **(asset.metadata_json or {}),
+        "analysis": {
+            "status": "ready",
+            "version": req.analysis_version,
+            "event_count": len(req.events),
+            "analyzed_at": _utcnow().isoformat() if _utcnow else None,
+        },
+    }
+
+    db.commit()
+    log.info(
+        f"Kids asset #{asset_id} mapping complete: {len(req.events)} events → ready"
+    )
+    return {
+        "ok": True,
+        "asset_id": asset_id,
+        "event_count": len(req.events),
+        "processing_status": asset.processing_status,
+    }
+
+
+@router.get("/kids/assets/{asset_id}/events")
+def get_kids_asset_events(
+    asset_id: int,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Get the semantic events for a Kids video asset (worker → VPS query).
+
+    Used by the worker during generation to fetch events for the
+    KidsMediaRetriever. Equivalent to GET /gameplays/{id}/events in Games.
+    """
+    from gpcg.domains.kids.models import KidsMediaEvent
+
+    events = db.query(KidsMediaEvent).filter(
+        KidsMediaEvent.asset_id == asset_id
+    ).order_by(KidsMediaEvent.start_time).all()
+
+    return {
+        "events": [{
+            "id": e.id,
+            "asset_id": e.asset_id,
+            "start_time": e.start_time,
+            "end_time": e.end_time,
+            "event_type": e.event_type,
+            "description": e.description,
+            "characters": e.characters,
+            "location": e.location,
+            "actions": e.actions,
+            "tags": e.tags,
+            "transcript": e.transcript,
+            "visual_confidence": e.visual_confidence,
+            "interesting_score": e.interesting_score,
+            "analysis_version": e.analysis_version,
+        } for e in events]
+    }
 
 
 # ── Kids asset thumbnail upload (worker → VPS) ───────────────────────────────
@@ -2115,7 +2256,10 @@ def get_job_data(
 
     # Kids domain data — only for Kids jobs (domain == "kids")
     if job.domain == "kids":
-        from gpcg.domains.kids.models import KidsTopic, StoryAsset
+        from gpcg.domains.kids.models import (
+            KidsTopic, StoryAsset, AssetProcessingStatus,
+            KidsMediaEvent, AssetClipUsage,
+        )
         topic_id = (_ensure_dict(job.artifacts) or {}).get("topic_id")
         if topic_id:
             topic = db.query(KidsTopic).filter(KidsTopic.id == topic_id).first()
@@ -2127,22 +2271,65 @@ def get_job_data(
                     "description": topic.description,
                     "metadata_json": topic.metadata_json,
                 }
-                # Story assets for this topic
-                assets = db.query(StoryAsset).filter(
-                    StoryAsset.topic_id == topic.id,
-                    StoryAsset.processing_status == "ready",
-                ).all()
-                data["story_assets"] = [{
-                    "id": a.id, "user_id": a.user_id, "topic_id": a.topic_id,
-                    "filename": a.filename, "storage_key": a.storage_key,
-                    "file_hash": a.file_hash, "file_size": a.file_size,
-                    "media_kind": a.media_kind,
-                    "width": a.width, "height": a.height,
-                    "duration": a.duration, "codec": a.codec,
-                    "has_audio": a.has_audio, "thumbnail_key": a.thumbnail_key,
-                    "processing_status": a.processing_status,
-                    "metadata_json": a.metadata_json,
-                } for a in assets]
+        # Story assets from the channel library (not just topic-linked).
+        # KidsMediaRetriever selects from the full library using events +
+        # tags + description for semantic matching. Include all ready
+        # assets owned by the user, plus public assets from other users.
+        assets = db.query(StoryAsset).filter(
+            StoryAsset.user_id == job.user_id,
+            StoryAsset.processing_status == AssetProcessingStatus.ready.value,
+        ).all()
+        # Also include public assets from other users (for fallback)
+        public_assets = db.query(StoryAsset).filter(
+            StoryAsset.is_public == True,
+            StoryAsset.user_id != job.user_id,
+            StoryAsset.processing_status == AssetProcessingStatus.ready.value,
+        ).all() if job.user_id else []
+        all_assets = assets + public_assets
+        asset_ids = [a.id for a in all_assets]
+        data["story_assets"] = [{
+            "id": a.id, "user_id": a.user_id, "topic_id": a.topic_id,
+            "filename": a.filename, "storage_key": a.storage_key,
+            "file_hash": a.file_hash, "file_size": a.file_size,
+            "media_kind": a.media_kind,
+            "width": a.width, "height": a.height,
+            "duration": a.duration, "codec": a.codec,
+            "has_audio": a.has_audio, "thumbnail_key": a.thumbnail_key,
+            "processing_status": a.processing_status,
+            "tags": a.tags or [],
+            "description": a.description or "",
+            "is_public": a.is_public,
+            "metadata_json": a.metadata_json,
+        } for a in all_assets]
+
+        # Kids media events (semantic index — same as GameplayEvent for Games)
+        if asset_ids:
+            events = db.query(KidsMediaEvent).filter(
+                KidsMediaEvent.asset_id.in_(asset_ids)
+            ).order_by(KidsMediaEvent.asset_id, KidsMediaEvent.start_time).all()
+            data["kids_media_events"] = [{
+                "id": e.id, "asset_id": e.asset_id,
+                "start_time": e.start_time, "end_time": e.end_time,
+                "event_type": e.event_type, "description": e.description,
+                "characters": e.characters, "location": e.location,
+                "actions": e.actions, "tags": e.tags,
+                "transcript": e.transcript,
+                "visual_confidence": e.visual_confidence,
+                "interesting_score": e.interesting_score,
+                "analysis_version": e.analysis_version,
+            } for e in events]
+
+            # Asset clip usage records (so worker can avoid reusing segments)
+            clip_usages = db.query(AssetClipUsage).filter(
+                AssetClipUsage.asset_id.in_(asset_ids)
+            ).all()
+            data["kids_clip_usages"] = [{
+                "id": cu.id, "video_id": cu.video_id,
+                "asset_id": cu.asset_id,
+                "consumer_user_id": cu.consumer_user_id,
+                "start_sec": cu.start_sec, "end_sec": cu.end_sec,
+                "duration": cu.duration,
+            } for cu in clip_usages]
 
     # Automation config (for video customization settings)
     automation = db.query(Automation).filter(Automation.user_id == job.user_id).first()

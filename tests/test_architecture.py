@@ -158,7 +158,7 @@ def test_kids_does_not_import_games():
 
 
 def test_all_tables_registered_when_all_imported():
-    """When core, games, and kids models are imported, all 26 tables must be
+    """When core, games, and kids models are imported, all 29 tables must be
     registered in Base.metadata. This ensures database.init_db() creates
     all tables correctly.
     """
@@ -179,13 +179,14 @@ def test_all_tables_registered_when_all_imported():
         "gameplay_assets", "gameplay_clip_usage", "gameplay_events",
         "gameplay_event_embeddings",
         # Kids
-        "kids_topics", "story_assets", "kids_ideas",
+        "kids_topics", "story_assets", "kids_ideas", "asset_clip_usage",
+        "kids_media_events",
     }
 
     actual_tables = set(Base.metadata.tables.keys())
     missing = expected_tables - actual_tables
     assert not missing, f"Missing tables: {missing}"
-    assert len(actual_tables) == 27, f"Expected 27 tables, got {len(actual_tables)}"
+    assert len(actual_tables) == 29, f"Expected 29 tables, got {len(actual_tables)}"
 
 
 def test_core_models_owns_core_entities():

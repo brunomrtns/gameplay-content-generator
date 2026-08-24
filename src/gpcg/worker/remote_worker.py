@@ -2332,8 +2332,8 @@ class RemoteWorker:
         except Exception as e:
             log.warning(f"Thumbnail generation failed for asset #{asset_id}: {e} — non-fatal")
 
-        # Sync metadata to VPS
-        self.update_job_status(job_id, status="running", stage="sync", progress=0.9)
+        # Sync metadata to VPS (FFprobe results first — marks as "mapping")
+        self.update_job_status(job_id, status="running", stage="sync", progress=0.5)
         try:
             resp = self.client.post(
                 f"/api/kids/assets/{asset_id}/process-result",
@@ -2355,6 +2355,57 @@ class RemoteWorker:
             self._submit_kids_asset_error(job_id, asset_id, error)
             return
 
+        # ── Semantic mapping (VLM + ASR → KidsMediaEvent) ───────────────
+        # Same pipeline as GameplayAnalyzer in Games: the worker runs the
+        # analyzer locally (GPU) to produce events that index the video
+        # for semantic selection by KidsMediaRetriever.
+        self.update_job_status(job_id, status="running", stage="mapping", progress=0.6)
+        self.send_status("busy", f"Mapeando mídia Kids: {filename}", job_id=job_id)
+
+        events_data: list[dict] = []
+        try:
+            from gpcg.application.kids_media_analyzer import (
+                KidsMediaAnalyzer,
+                kids_media_events_from_timeline,
+            )
+            analyzer = KidsMediaAnalyzer()
+            timeline = analyzer.analyze(
+                local_path,
+                asset_id=asset_id,
+                progress_callback=lambda stage, pct: self.update_job_status(
+                    job_id, status="running", stage="mapping",
+                    progress=0.6 + pct * 0.3,
+                ),
+            )
+            events_data = kids_media_events_from_timeline(timeline, asset_id)
+            log.info(
+                f"Kids media mapping: asset #{asset_id} → {len(events_data)} events "
+                f"(version={timeline.analysis_version}, model={timeline.vision_model})"
+            )
+        except Exception as e:
+            log.warning(
+                f"Kids media mapping failed for asset #{asset_id}: {e} — "
+                f"continuing with metadata only (no semantic events). "
+                f"The asset will be ready but without semantic indexing."
+            )
+
+        # Sync mapping events to VPS
+        self.update_job_status(job_id, status="running", stage="sync", progress=0.9)
+        if events_data:
+            try:
+                resp = self.client.post(
+                    f"/api/kids/assets/{asset_id}/mapping-result",
+                    json={
+                        "asset_id": asset_id,
+                        "events": events_data,
+                        "analysis_version": events_data[0].get("analysis_version", "v1") if events_data else "v1",
+                    },
+                )
+                resp.raise_for_status()
+                log.info(f"Synced {len(events_data)} Kids media events for asset #{asset_id}")
+            except Exception as e:
+                log.warning(f"Failed to sync mapping events for asset #{asset_id}: {e} — non-fatal")
+
         self.update_job_status(job_id, status="running", stage="done", progress=1.0)
         self.submit_job_result(job_id, status="completed", artifacts={
             "asset_id": asset_id,
@@ -2364,8 +2415,9 @@ class RemoteWorker:
             "duration": duration,
             "has_audio": has_audio,
             "thumbnail_key": thumbnail_key,
+            "event_count": len(events_data),
         })
-        log.info(f"Kids asset process job #{job_id}: asset #{asset_id} ready")
+        log.info(f"Kids asset process job #{job_id}: asset #{asset_id} ready ({len(events_data)} events)")
 
     def _submit_kids_asset_error(self, job_id: int, asset_id: int, error: str) -> None:
         """Submit a processing error to the VPS and mark the job as failed."""

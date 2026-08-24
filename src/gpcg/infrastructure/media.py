@@ -179,6 +179,73 @@ def extract_clip(
     return output
 
 
+def extract_image_clip(
+    source: str | Path,
+    output: str | Path,
+    duration: float,
+    *,
+    width: int = 1080,
+    height: int = 1920,
+    fps: int = 30,
+    ken_burns: bool = True,
+) -> Path:
+    """Create a video clip from a static image, scaled to width×height.
+
+    Uses FFmpeg's zoompan filter for a subtle Ken Burns effect (slow
+    zoom + pan) when ``ken_burns=True``. Otherwise, produces a static
+    image video of the specified duration.
+
+    Args:
+        source: path to the image file (PNG, JPEG, WebP, etc)
+        output: path to the output video file (.mp4)
+        duration: how long the image should appear (seconds)
+        width: target video width
+        height: target video height
+        fps: output frame rate
+        ken_burns: if True, apply a slow zoom-in effect
+    """
+    source = Path(source)
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    if duration <= 0:
+        raise MediaError(f"invalid image duration: {duration}")
+
+    total_frames = int(duration * fps)
+
+    if ken_burns:
+        # Ken Burns: slow zoom from 1.0 to 1.1 over the duration
+        # zoompan needs frame-based expressions
+        # 'z' = zoom factor (starts at 1.0, increases to 1.1)
+        # 'on' = output frame number (0 to total_frames)
+        zoom_expr = f"min(zoom+0.0015,1.1)" if total_frames > 0 else "1.0"
+        vf = (
+            f"scale={width*2}:{height*2}:force_original_aspect_ratio=increase,"
+            f"crop={width*2}:{height*2},"
+            f"zoompan=z='{zoom_expr}':d={total_frames}:s={width}x{height}:fps={fps},"
+            f"setsar=1"
+        )
+    else:
+        vf = (
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},setsar=1,fps={fps}"
+        )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1",
+        "-i", str(source),
+        "-t", f"{duration:.3f}",
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "medium", "-crf", "21",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        str(output),
+    ]
+    _run(cmd, timeout=600)
+    return output
+
+
 def extract_frames(
     source: str | Path,
     output_dir: str | Path,

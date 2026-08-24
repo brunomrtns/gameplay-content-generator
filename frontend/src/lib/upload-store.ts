@@ -7,8 +7,8 @@ export interface UploadItem {
   progress: number;
   status: "preparing" | "uploading" | "processing" | "done" | "error";
   error?: string;
-  /** "gameplay" for video files, "knowledge" for knowledge documents */
-  kind: "gameplay" | "knowledge";
+  /** "gameplay" for video files, "knowledge" for knowledge documents, "kids" for Kids media */
+  kind: "gameplay" | "knowledge" | "kids";
 }
 
 interface UploadState {

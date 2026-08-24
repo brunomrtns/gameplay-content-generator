@@ -545,29 +545,68 @@ export const api = {
   createKidsTopic: (data: { title: string; category?: string; age_range?: string; description?: string }) =>
     request<any>("/kids/topics", { method: "POST", body: JSON.stringify(data) }),
   deleteKidsTopic: (id: number) => request<any>(`/kids/topics/${id}`, { method: "DELETE" }),
-  listKidsAssets: (topicId: number) => request<{ assets: any[] }>(`/kids/topics/${topicId}/assets`),
-  uploadKidsAsset: async (topicId: number, file: File) => {
+  // Library endpoints (channel-level, not topic-owned)
+  listKidsLibraryAssets: (params?: { media_kind?: string; status?: string; topic_id?: number }) => {
+    const clean: Record<string, string> = {};
+    if (params?.media_kind) clean.media_kind = params.media_kind;
+    if (params?.status) clean.status = params.status;
+    if (params?.topic_id !== undefined) clean.topic_id = String(params.topic_id);
+    const qs = new URLSearchParams(clean).toString();
+    return request<{ assets: any[] }>(`/kids/assets${qs ? `?${qs}` : ""}`);
+  },
+  uploadKidsLibraryAsset: async (
+    file: File,
+    opts?: { tags?: string; description?: string; topic_id?: number },
+    onProgress?: (loaded: number, total: number, pct: number) => void,
+  ) => {
     const formData = new FormData();
     formData.append("file", file);
-    const res = await fetch(`${API_BASE}/kids/topics/${topicId}/assets`, {
-      method: "POST",
-      credentials: "include",
-      body: formData,
+    if (opts?.tags) formData.append("tags", opts.tags);
+    if (opts?.description) formData.append("description", opts.description);
+    if (opts?.topic_id !== undefined) formData.append("topic_id", String(opts.topic_id));
+
+    // Use XHR for progress support (same pattern as uploadGameplay)
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE}/kids/assets/upload`);
+      xhr.withCredentials = true;
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) {
+          onProgress(e.loaded, e.total, Math.round((e.loaded / e.total) * 100));
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch {
+            reject(new Error("Invalid response"));
+          }
+        } else {
+          try {
+            const err = JSON.parse(xhr.responseText);
+            reject(new Error(err.detail || `Upload failed (${xhr.status})`));
+          } catch {
+            reject(new Error(`Upload failed (${xhr.status})`));
+          }
+        }
+      };
+
+      xhr.onerror = () => reject(new Error("Network error during upload"));
+      xhr.send(formData);
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || "Upload failed");
-    }
-    return res.json();
   },
+  patchKidsAsset: (id: number, data: { tags?: string[]; description?: string; topic_id?: number; is_public?: boolean }) =>
+    request<any>(`/kids/assets/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  // Legacy: list assets for a specific topic (backward compat)
+  listKidsAssets: (topicId: number) => request<{ assets: any[] }>(`/kids/topics/${topicId}/assets`),
   deleteKidsAsset: (id: number) => request<any>(`/kids/assets/${id}`, { method: "DELETE" }),
   getKidsAssetThumbnailUrl: (thumbnailKey: string) =>
     `${API_BASE}/kids/assets/thumbnail/${thumbnailKey}`,
-  generateKidsVideo: (topicId: number) =>
-    request<{ job_id: number; topic_id: number }>("/kids/generate", {
-      method: "POST",
-      body: JSON.stringify({ topic_id: topicId }),
-    }),
+  // NOTE: generateKidsVideo removed — generation is now driven by the idea
+  // queue + KidsAutomationStrategy (consume-queue), not a manual endpoint.
 
   // ── Kids Ideas ──────────────────────────────────────────────────────────
   listKidsIdeas: (params?: { status?: string; source?: string; limit?: number }) => {

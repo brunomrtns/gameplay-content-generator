@@ -147,14 +147,29 @@ class RenderPlanBuilder:
                 # Single clip — extract directly
                 clip = scene_clips_list[0]
                 try:
-                    extract_clip(
-                        clip.source_path,
-                        scene_file,
-                        start=clip.start_sec,
-                        end=clip.end_sec,
-                        width=w,
-                        height=h,
-                    )
+                    # Kids images: use extract_image_clip (Ken Burns effect)
+                    # SelectedMedia has media_kind, SelectedClip does not
+                    media_kind = getattr(clip, "media_kind", None)
+                    if media_kind is None and hasattr(clip, "asset"):
+                        media_kind = getattr(clip.asset, "media_kind", None)
+                    if media_kind == "image":
+                        from gpcg.infrastructure.media import extract_image_clip
+                        extract_image_clip(
+                            clip.source_path,
+                            scene_file,
+                            duration=clip.duration,
+                            width=w,
+                            height=h,
+                        )
+                    else:
+                        extract_clip(
+                            clip.source_path,
+                            scene_file,
+                            start=clip.start_sec,
+                            end=clip.end_sec,
+                            width=w,
+                            height=h,
+                        )
                     extraction_ok = True
                 except Exception as e:
                     log.error(f"failed to extract scene {scene_num} from {clip.source_path}: {e}")
@@ -298,14 +313,28 @@ class RenderPlanBuilder:
         part_files: list[Path] = []
         for i, clip in enumerate(clips):
             part_file = tmp_dir / f"part_{i:03d}.mp4"
-            extract_clip(
-                clip.source_path,
-                part_file,
-                start=clip.start_sec,
-                end=clip.end_sec,
-                width=width,
-                height=height,
-            )
+            # Kids images: use extract_image_clip (Ken Burns effect)
+            media_kind = getattr(clip, "media_kind", None)
+            if media_kind is None and hasattr(clip, "asset"):
+                media_kind = getattr(clip.asset, "media_kind", None)
+            if media_kind == "image":
+                from gpcg.infrastructure.media import extract_image_clip
+                extract_image_clip(
+                    clip.source_path,
+                    part_file,
+                    duration=clip.duration,
+                    width=width,
+                    height=height,
+                )
+            else:
+                extract_clip(
+                    clip.source_path,
+                    part_file,
+                    start=clip.start_sec,
+                    end=clip.end_sec,
+                    width=width,
+                    height=height,
+                )
             part_files.append(part_file)
 
         # Write concat list file

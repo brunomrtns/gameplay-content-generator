@@ -200,7 +200,9 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
     GameplayAsset,
     GameplayClipUsage,
 )
-    from gpcg.domains.kids.models import KidsTopic, StoryAsset
+    from gpcg.domains.kids.models import (
+        KidsTopic, StoryAsset, KidsMediaEvent, AssetClipUsage,
+    )
 
     SessionLocal = _create_temp_db(db_path)
     session = SessionLocal()
@@ -432,7 +434,7 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
             session.add(StoryAsset(
                 id=asset_data["id"],
                 user_id=user_id,
-                topic_id=asset_data["topic_id"],
+                topic_id=asset_data.get("topic_id"),  # nullable — library asset
                 filename=asset_data["filename"],
                 storage_key=asset_data.get("storage_key", ""),
                 file_hash=asset_data.get("file_hash", ""),
@@ -445,10 +447,48 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
                 has_audio=asset_data.get("has_audio", False),
                 thumbnail_key=asset_data.get("thumbnail_key", ""),
                 processing_status=asset_data.get("processing_status", "ready"),
+                tags=asset_data.get("tags", []),
+                description=asset_data.get("description", ""),
+                is_public=asset_data.get("is_public", False),
                 metadata_json={
                     **asset_data.get("metadata_json", {}),
                     "local_path": local_path,
                 },
+            ))
+        session.flush()
+
+        # Kids media events (semantic index — same as GameplayEvent for Games)
+        kids_events = job_data.get("kids_media_events", [])
+        for evt_data in kids_events:
+            session.add(KidsMediaEvent(
+                id=evt_data["id"],
+                asset_id=evt_data["asset_id"],
+                start_time=evt_data["start_time"],
+                end_time=evt_data["end_time"],
+                event_type=evt_data.get("event_type", "unknown"),
+                description=evt_data.get("description", ""),
+                characters=evt_data.get("characters", []),
+                location=evt_data.get("location"),
+                actions=evt_data.get("actions", []),
+                tags=evt_data.get("tags", []),
+                transcript=evt_data.get("transcript", ""),
+                visual_confidence=evt_data.get("visual_confidence", 0.0),
+                interesting_score=evt_data.get("interesting_score", 0.0),
+                analysis_version=evt_data.get("analysis_version", "v1"),
+            ))
+        session.flush()
+
+        # Kids asset clip usage (so KidsMediaRetriever can avoid reused segments)
+        kids_clip_usages = job_data.get("kids_clip_usages", [])
+        for cu_data in kids_clip_usages:
+            session.add(AssetClipUsage(
+                id=cu_data["id"],
+                video_id=cu_data["video_id"],
+                asset_id=cu_data["asset_id"],
+                consumer_user_id=cu_data.get("consumer_user_id"),
+                start_sec=cu_data.get("start_sec", 0.0),
+                end_sec=cu_data.get("end_sec", 0.0),
+                duration=cu_data.get("duration", 0.0),
             ))
         session.flush()
 

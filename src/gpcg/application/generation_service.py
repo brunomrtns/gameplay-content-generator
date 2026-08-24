@@ -369,6 +369,7 @@ class GenerationService:
         with self._session_scope() as session:
             job = session.get(Job, job_id)
             is_curiosity = job.type == JobType.curiosity_short.value
+            job_domain = job.domain or "games"
             bg_game_id = job.artifacts.get("background_game_id") if is_curiosity else None
             general_fact_id = job.artifacts.get("general_fact_id") if is_curiosity else None
             # Editorial decision may specify a fact_id for generate_short
@@ -654,113 +655,162 @@ class GenerationService:
             }
             session.flush()
 
-        # ── Stage: gameplay_selection ───────────────────────────────────────
+        # ── Stage: gameplay_selection / media_selection ───────────────────────
         self._set_stage(job_id, JobStage.gameplay_selection)
         narration_dur = self._get_artifact(job_id, "narration_duration")
         # Read scene_duration from job artifacts (or config default)
         scene_duration = self._get_artifact(job_id, "scene_duration") or self.settings.gpcg_scene_duration
         with self._session_scope() as session:
             job = session.get(Job, job_id)
-            # For curiosity shorts: select from background_game_id; else: job.game_id
-            select_game_id = bg_game_id if is_curiosity else job.game_id
-            # Use GameplayRetriever when a creative plan is available
-            # (semantic index lookup); falls back to random selection
-            video_type = "GENERAL_TOPIC" if is_curiosity else "GAME_RELATED"
-            # V2: pass user_id and accept_public for user-scoped selection
-            # with public gameplay fallback
-            # REFACTORY_V2: fallback_policy = "stop" | "allow_public"
-            # (backward compat: accept_public_gameplays boolean still works)
-            user_id = job.user_id
-            accept_public = False
-            # V3: Prefer config_snapshot from job.artifacts (deterministic for
-            # retry) over the live automation config (which may have changed).
-            config_snapshot = job.artifacts.get("config_snapshot") or {}
-            # V3: max_clip_uses=None means "not configured" → default to 0
-            # (unlimited reuse). This prevents clip exhaustion when the user
-            # hasn't explicitly set a reuse policy.
-            max_clip_uses = config_snapshot.get("max_clip_uses")
-            if max_clip_uses is None:
-                max_clip_uses = 0  # unlimited
-            fallback_policy = config_snapshot.get("fallback_policy")
-            if user_id is not None:
-                # Fall back to live config only if snapshot is missing
-                # (backward compat with jobs created before V3)
-                if not config_snapshot:
-                    auto = session.execute(
-                        select(Automation).where(Automation.user_id == user_id)
-                    ).scalars().first()
-                    if auto and isinstance(auto.config, dict):
-                        fallback_policy = auto.config.get("fallback_policy")
-                        mcu = auto.config.get("max_clip_uses")
-                        max_clip_uses = mcu if mcu is not None else 0
-                        if not fallback_policy:
-                            # Legacy boolean field
-                            accept_public = auto.config.get("accept_public_gameplays", False)
+
+            if job_domain == "kids":
+                # ── Kids: use KidsMediaRetriever (channel library) ───────────
+                from gpcg.application.kids_media_retriever import KidsMediaRetriever
+                kids_retriever = KidsMediaRetriever()
+                topic_id = job.artifacts.get("topic_id")
+                topic_title = job.artifacts.get("topic_title", "")
+                user_id = job.user_id
+
+                # Get accept_public from config
+                config_snapshot = job.artifacts.get("config_snapshot") or {}
+                accept_public = config_snapshot.get("fallback_policy") == "allow_public"
+
+                clips = kids_retriever.retrieve(
+                    session, user_id, target_duration=narration_dur or 0.0,
+                    creative_plan=creative_plan,
+                    topic_id=topic_id,
+                    topic_title=topic_title,
+                    scene_duration=scene_duration,
+                    accept_public=accept_public,
+                )
+                if not clips:
+                    raise GenerationError(
+                        "no ready media assets available — upload media to the channel library first",
+                        JobStage.gameplay_selection.value,
+                    )
+                # Stash clip info for the render plan builder
+                job.artifacts = {
+                    **job.artifacts,
+                    "selected_clips": [
+                        {
+                            "asset_id": c.asset.id,
+                            "source_id": c.asset.id,  # Kids: asset IS the source
+                            "source_path": c.source_path,
+                            "start": c.start_sec,
+                            "end": c.end_sec,
+                            "duration": c.duration,
+                            "scene_index": c.scene_index,
+                            "event_id": None,
+                            "selection_reason": c.selection_reason,
+                            "usage_count_at_selection": c.usage_count_at_selection,
+                            "media_kind": c.asset.media_kind,
+                        }
+                        for c in clips
+                    ],
+                }
+                session.flush()
+            else:
+                # ── Games: existing GameplayRetriever (unchanged) ───────────
+                # For curiosity shorts: select from background_game_id; else: job.game_id
+                select_game_id = bg_game_id if is_curiosity else job.game_id
+                # Use GameplayRetriever when a creative plan is available
+                # (semantic index lookup); falls back to random selection
+                video_type = "GENERAL_TOPIC" if is_curiosity else "GAME_RELATED"
+                # V2: pass user_id and accept_public for user-scoped selection
+                # with public gameplay fallback
+                # REFACTORY_V2: fallback_policy = "stop" | "allow_public"
+                # (backward compat: accept_public_gameplays boolean still works)
+                user_id = job.user_id
+                accept_public = False
+                # V3: Prefer config_snapshot from job.artifacts (deterministic for
+                # retry) over the live automation config (which may have changed).
+                config_snapshot = job.artifacts.get("config_snapshot") or {}
+                # V3: max_clip_uses=None means "not configured" → default to 0
+                # (unlimited reuse). This prevents clip exhaustion when the user
+                # hasn't explicitly set a reuse policy.
+                max_clip_uses = config_snapshot.get("max_clip_uses")
+                if max_clip_uses is None:
+                    max_clip_uses = 0  # unlimited
+                fallback_policy = config_snapshot.get("fallback_policy")
+                if user_id is not None:
+                    # Fall back to live config only if snapshot is missing
+                    # (backward compat with jobs created before V3)
+                    if not config_snapshot:
+                        auto = session.execute(
+                            select(Automation).where(Automation.user_id == user_id)
+                        ).scalars().first()
+                        if auto and isinstance(auto.config, dict):
+                            fallback_policy = auto.config.get("fallback_policy")
+                            mcu = auto.config.get("max_clip_uses")
+                            max_clip_uses = mcu if mcu is not None else 0
+                            if not fallback_policy:
+                                # Legacy boolean field
+                                accept_public = auto.config.get("accept_public_gameplays", False)
                     else:
                         max_clip_uses = 0
-                # Resolve fallback_policy to accept_public boolean
-                if fallback_policy == "allow_public":
-                    accept_public = True
-                elif fallback_policy == "stop":
-                    accept_public = False
-                # If fallback_policy is None and we didn't set accept_public
-                # via legacy field, it stays False (default)
+                    # Resolve fallback_policy to accept_public boolean
+                    if fallback_policy == "allow_public":
+                        accept_public = True
+                    elif fallback_policy == "stop":
+                        accept_public = False
+                    # If fallback_policy is None and we didn't set accept_public
+                    # via legacy field, it stays False (default)
 
-            # V3: Read gameplay preference + reuse override from job artifacts
-            gameplay_preference = job.artifacts.get("gameplay_preference")
-            reuse_override = job.artifacts.get("reuse_override")
+                # V3: Read gameplay preference + reuse override from job artifacts
+                gameplay_preference = job.artifacts.get("gameplay_preference")
+                reuse_override = job.artifacts.get("reuse_override")
 
-            # V3: Determine effective max_uses for this job
-            # Precedence: override explícito da ideia > configuração do usuário > default
-            if reuse_override == "allow_reuse":
-                effective_max_uses = max(max_clip_uses, 2)  # at least allow 2
-            elif reuse_override == "skip":
-                effective_max_uses = max_clip_uses  # strict, no override
-            else:
-                effective_max_uses = max_clip_uses
+                # V3: Determine effective max_uses for this job
+                # Precedence: override explícito da ideia > configuração do usuário > default
+                if reuse_override == "allow_reuse":
+                    effective_max_uses = max(max_clip_uses, 2)  # at least allow 2
+                elif reuse_override == "skip":
+                    effective_max_uses = max_clip_uses  # strict, no override
+                else:
+                    effective_max_uses = max_clip_uses
 
-            clips = self.gameplay_retriever.retrieve(
-                session, select_game_id, target_duration=narration_dur,
-                creative_plan=creative_plan,
-                scene_duration=scene_duration,
-                video_type=video_type,
-                user_id=user_id,
-                accept_public=accept_public,
-                narrative_beats=job.artifacts.get("creative_plan", {}).get("narrative_beats", []),
-                max_uses=effective_max_uses,
-                gameplay_preference_game_id=gameplay_preference,
-            )
-            if not clips:
-                bg_name = session.get(Game, select_game_id).canonical_name if select_game_id else "N/A"
-                raise GenerationError(
-                    f"no gameplay assets available for '{bg_name}' — define clips first",
-                    JobStage.gameplay_selection.value,
+                clips = self.gameplay_retriever.retrieve(
+                    session, select_game_id, target_duration=narration_dur,
+                    creative_plan=creative_plan,
+                    scene_duration=scene_duration,
+                    video_type=video_type,
+                    user_id=user_id,
+                    accept_public=accept_public,
+                    narrative_beats=job.artifacts.get("creative_plan", {}).get("narrative_beats", []),
+                    max_uses=effective_max_uses,
+                    gameplay_preference_game_id=gameplay_preference,
                 )
-            # Stash clip info (asset ids + ranges + scene_index) for the plan builder
-            # V2: also include source_id for clip usage tracking
-            # V3: include event_id + selection_reason + usage_count for auditability
-            job.artifacts = {
-                **job.artifacts,
-                "selected_clips": [
-                    {
-                        "asset_id": c.asset.id,
-                        "source_id": c.asset.source_id,
-                        "source_path": c.source_path,
-                        "start": c.start_sec,
-                        "end": c.end_sec,
-                        "duration": c.duration,
-                        "scene_index": c.scene_index,
-                        "event_id": c.event_id,
-                        "selection_reason": c.selection_reason,
-                        "usage_count_at_selection": c.usage_count_at_selection,
-                    }
-                    for c in clips
-                ],
-                "max_uses_configured": max_clip_uses,
-                "max_uses_effective": effective_max_uses,
-                "reuse_override": reuse_override,
-            }
-            session.flush()
+                if not clips:
+                    bg_name = session.get(Game, select_game_id).canonical_name if select_game_id else "N/A"
+                    raise GenerationError(
+                        f"no gameplay assets available for '{bg_name}' — define clips first",
+                        JobStage.gameplay_selection.value,
+                    )
+                # Stash clip info (asset ids + ranges + scene_index) for the plan builder
+                # V2: also include source_id for clip usage tracking
+                # V3: include event_id + selection_reason + usage_count for auditability
+                job.artifacts = {
+                    **job.artifacts,
+                    "selected_clips": [
+                        {
+                            "asset_id": c.asset.id,
+                            "source_id": c.asset.source_id,
+                            "source_path": c.source_path,
+                            "start": c.start_sec,
+                            "end": c.end_sec,
+                            "duration": c.duration,
+                            "scene_index": c.scene_index,
+                            "event_id": c.event_id,
+                            "selection_reason": c.selection_reason,
+                            "usage_count_at_selection": c.usage_count_at_selection,
+                        }
+                        for c in clips
+                    ],
+                    "max_uses_configured": max_clip_uses,
+                    "max_uses_effective": effective_max_uses,
+                    "reuse_override": reuse_override,
+                }
+                session.flush()
 
         # ── Stage: music_selection ──────────────────────────────────────────
         self._set_stage(job_id, JobStage.music_selection)
@@ -787,22 +837,44 @@ class GenerationService:
             job = session.get(Job, job_id)
             script = session.get(Script, script_id)
             plan = session.get(ContentPlan, job.content_plan_id)
-            # Reconstruct SelectedClip-like objects (with scene_index)
-            from gpcg.application.gameplay_selector import SelectedClip
-            from gpcg.domains.games.models import GameplayAsset
             from gpcg.domain.video_profiles import SubtitleConfig
 
-            clips = []
-            for ci in clips_info:
-                asset = session.get(GameplayAsset, ci["asset_id"])
-                clips.append(SelectedClip(
-                    asset=asset,
-                    source_path=ci["source_path"],
-                    start_sec=ci["start"],
-                    end_sec=ci["end"],
-                    duration=ci["duration"],
-                    scene_index=ci.get("scene_index", 0),
-                ))
+            if job_domain == "kids":
+                # ── Kids: reconstruct SelectedMedia from StoryAsset ──────
+                from gpcg.application.kids_media_retriever import SelectedMedia
+                from gpcg.domains.kids.models import StoryAsset
+                from gpcg.infrastructure.media import extract_image_clip
+
+                clips = []
+                for ci in clips_info:
+                    asset = session.get(StoryAsset, ci["asset_id"])
+                    if asset is None:
+                        log.warning(f"StoryAsset #{ci['asset_id']} not found, skipping")
+                        continue
+                    clips.append(SelectedMedia(
+                        asset=asset,
+                        source_path=ci["source_path"],
+                        start_sec=ci["start"],
+                        end_sec=ci["end"],
+                        duration=ci["duration"],
+                        scene_index=ci.get("scene_index", 0),
+                    ))
+            else:
+                # ── Games: reconstruct SelectedClip from GameplayAsset ───
+                from gpcg.application.gameplay_selector import SelectedClip
+                from gpcg.domains.games.models import GameplayAsset
+
+                clips = []
+                for ci in clips_info:
+                    asset = session.get(GameplayAsset, ci["asset_id"])
+                    clips.append(SelectedClip(
+                        asset=asset,
+                        source_path=ci["source_path"],
+                        start_sec=ci["start"],
+                        end_sec=ci["end"],
+                        duration=ci["duration"],
+                        scene_index=ci.get("scene_index", 0),
+                    ))
 
             # Build subtitle config from job artifacts + config defaults
             subtitle_config = SubtitleConfig(

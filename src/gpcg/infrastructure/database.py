@@ -10,6 +10,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from gpcg.config import get_settings
+from gpcg.logging import get_logger
+
+log = get_logger(__name__)
 
 # Module-level engine (lazy)
 _engine = None
@@ -228,11 +231,69 @@ def init_db() -> None:
     _ensure_column(engine, "story_assets", "has_audio", "BOOLEAN DEFAULT 0")
     _ensure_column(engine, "story_assets", "thumbnail_key", "VARCHAR(500) DEFAULT ''")
     _ensure_column(engine, "story_assets", "process_error", "TEXT DEFAULT ''")
+    # ── Kids media library: tags + description + is_public ───────────────
+    # StoryAsset is now a channel library (topic_id is nullable via model
+    # change). Tags + description enable semantic selection by
+    # KidsMediaRetriever. is_public enables community sharing.
+    _ensure_column(engine, "story_assets", "tags", "JSON DEFAULT '[]'")
+    _ensure_column(engine, "story_assets", "description", "TEXT DEFAULT ''")
+    _ensure_column(engine, "story_assets", "is_public", "BOOLEAN DEFAULT 0")
+    # asset_clip_usage table is created by create_all() above (new table)
+    # ── Kids media library: make topic_id nullable (SQLite migration) ────
+    # SQLite doesn't support ALTER COLUMN; we recreate the table if topic_id
+    # is still NOT NULL. New databases get nullable from create_all().
+    _migrate_story_assets_topic_id_nullable(engine)
     # V2: gameplay_clip_usage table is created by create_all() above
     # V2: data migrations (slug generation, aliases JSON → game_aliases, user_id deprecation)
     _migrate_v2_game_registry(engine)
     # Seed admin user if not exists (linked to BI Identity by email)
     _seed_admin_user()
+
+
+def _migrate_story_assets_topic_id_nullable(engine) -> None:
+    """Make story_assets.topic_id nullable (SQLite doesn't support ALTER COLUMN).
+
+    SQLite enforces NOT NULL at the column level and doesn't support
+    `ALTER TABLE ... ALTER COLUMN`. To change the constraint, we recreate
+    the table: create a temp table with the correct schema, copy data,
+    drop old, rename temp.
+
+    This is idempotent: if topic_id is already nullable (new databases
+    created by create_all()), it's a no-op.
+    """
+    from sqlalchemy import text, inspect
+
+    inspector = inspect(engine)
+    if "story_assets" not in inspector.get_table_names():
+        return  # table doesn't exist yet — create_all handles it
+
+    columns = inspector.get_columns("story_assets")
+    topic_col = next((c for c in columns if c["name"] == "topic_id"), None)
+    if topic_col is None:
+        return  # column doesn't exist — will be created by create_all
+
+    # Check if topic_id is already nullable
+    if topic_col.get("nullable", True):
+        return  # already nullable — nothing to do
+
+    # SQLite: recreate table to drop NOT NULL constraint
+    log.info("Migrating story_assets: making topic_id nullable (SQLite table rebuild)")
+    with engine.begin() as conn:
+        # Get all existing column names
+        all_cols = [c["name"] for c in columns]
+        col_list = ", ".join(f'"{c}"' for c in all_cols)
+
+        conn.execute(text(
+            "CREATE TABLE _story_assets_new AS "
+            f"SELECT {col_list} FROM story_assets"
+        ))
+        conn.execute(text("DROP TABLE story_assets"))
+        conn.execute(text("ALTER TABLE _story_assets_new RENAME TO story_assets"))
+    # Recreate indexes (dropped with the table)
+    Base.metadata.create_all(bind=engine, tables=[__import__(
+        "gpcg.domains.kids.models", fromlist=["StoryAsset"]
+    ).StoryAsset.__table__])
+    log.info("story_assets migration complete: topic_id is now nullable")
 
 
 def _seed_admin_user() -> None:

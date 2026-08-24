@@ -41,7 +41,7 @@ Domínios existentes:
 | Domínio | Estado | Descoberta | Recursos visuais |
 |---------|--------|------------|------------------|
 | `games` | Completo | RSS + editorial | GameplaySource (gameplays mapeadas) |
-| `kids` | Completo | AI ideation + topic library + seasonal | StoryAsset (imagens) |
+| `kids` | Completo | AI ideation + topic library + seasonal | StoryAsset (biblioteca de mídias: imagens + vídeos) |
 | `movies` | Frontend only | — | — |
 | `conspiracy` | Não implementado | — | — |
 | `technology` | Não implementado | — | — |
@@ -159,6 +159,172 @@ const qs = new URLSearchParams(clean).toString();
 **O que aconteceu:** O frontend mostrava `final_score` (0.0-1.0) em vez de `editorial_score` (0-100). Aparecia "Score: 1" em vez de "Score: 87".
 
 **Como evitar:** O frontend deve sempre mostrar `editorial_score` (0-100), nunca `final_score` (0.0-1.0). `final_score` é interno para ordenação.
+
+### Erro 9: Mídia vinculada ao tópico em vez de biblioteca do canal
+
+**O que aconteceu:** `StoryAsset.topic_id` era `NOT NULL`. Cada mídia era
+propriedade de um tópico. O usuário tinha que fazer upload de mídias dentro
+de cada tópico. Não existia uma biblioteca reutilizável de mídias do canal.
+
+**Por que é errado:** Nos Games, `GameplaySource` é uma **biblioteca do
+canal** — o pipeline busca gameplays por jogo, não por ideia. O `GameplayRetriever`
+faz seleção semântica: pega o `gameplay_query` do plano editorial e busca
+clips que condizem com o script. No Kids, a mídia deveria seguir o mesmo
+padrão: biblioteca do canal + seleção semântica pelo conteúdo do vídeo.
+
+**Como evitar:** Mídia é do **canal**, não do tópico/ideia. O modelo de
+assets deve ter `topic_id` **nullable** (opcional). O pipeline seleciona
+mídias da biblioteca que condizem com o conteúdo (tags, descrição,
+título do tópico, keywords do script). Ver `docs/KIDS_MEDIA_REFACTOR_PLAN.md`
+para o padrão completo.
+
+### Erro 10: Botão "Gerar" no card do tópico/ideia
+
+**O que aconteceu:** O frontend Kids tinha um botão "Gerar" no card de cada
+tópico. O usuário clicava e criava um job de geração manualmente.
+
+**Por que é errado:** Nos Games, o usuário **nunca** clica "Gerar" numa
+gameplay. A automação consome a fila de ideias, cria jobs, e o pipeline
+seleciona gameplays automaticamente. O botão "Gerar" duplica o que a
+`DomainAutomationStrategy.create_job()` já faz. O fluxo correto é:
+fila de ideias → automação → job → pipeline → vídeo.
+
+**Como evitar:** NUNCA colocar botão "Gerar" em cards de tópico/ideia/gameplay.
+A geração é disparada pela **automação** (consume-queue), não manualmente.
+O usuário gerencia a **fila** (adicionar, remover, reordenar ideias), não
+a geração. Se quiser geração manual, deve ser um botão na fila ("produzir
+próxima"), não no card do recurso.
+
+### Erro 11: Upload de mídia sem drag-and-drop, sem progresso, sem pipeline de status
+
+**O que aconteceu:** O upload de mídia Kids usava um `<input type="file">`
+escondido num card de tópico. Sem drag-and-drop, sem barra de progresso,
+sem upload de múltiplos arquivos, sem pipeline de status visual.
+
+**Por que é errado:** Nos Games, `content.tsx` tem uma zona de drag-and-drop
+com `useUploadStore` para tracking de uploads, progresso por arquivo, toast
+de sucesso/erro, e `PROCESSING_STATUS_CONFIG` mapeando cada status → cor +
+label + barra de progresso animada. O upload de mídia de qualquer domínio
+deve replicar este padrão.
+
+**Como evitar:** Replicar o padrão de `content.tsx` (Games):
+- `useUploadStore` para tracking de uploads em andamento
+- Zona de drag-and-drop com múltiplos arquivos
+- Progresso por arquivo (0-100%)
+- Toast de sucesso/erro
+- `PROCESSING_STATUS_CONFIG` com cor + label para cada status
+- Barra de progresso animada durante processamento
+- Lista de mídias com cards mostrando status, dimensões, duração, thumbnail
+
+### Erro 12: Sem seleção semântica de mídia durante geração
+
+**O que aconteceu:** O pipeline de geração Kids não selecionava mídias por
+relevância. A mídia era apenas um arquivo estático que aparecia no vídeo
+sem critério. Não existia equivalente ao `GameplayRetriever`.
+
+**Por que é errado:** Nos Games, o `GameplayRetriever` faz busca semântica:
+pega o `gameplay_query` do `VideoCreativePlan`, busca eventos mapeados que
+match o script, e seleciona clips que condizem com o que está sendo narrado.
+Sem seleção semântica, o vídeo pode mostrar uma imagem de dinossauro enquanto
+o script fala sobre sistema solar.
+
+**Como evitar:** Todo domínio que usa mídia visual deve ter um retriever
+(`DomainMediaRetriever`) que:
+1. Recebe o plano editorial (ou título do tópico + script)
+2. Extrai keywords/query do conteúdo
+3. Busca mídias da biblioteca cujas tags/descrição/eventos match a query
+4. Respeita clip usage (não repete segmentos de vídeo)
+5. Faz fallback random quando não há matches semânticos
+6. Retorna `SelectedMedia[]` com `selection_reason` para auditabilidade
+
+### Erro 13: GenerationService sem branch por domínio
+
+**O que aconteceu:** O `GenerationService._run_pipeline` não tinha branch
+por domínio. O estágio `gameplay_selection` sempre usava `GameplayRetriever`,
+mesmo para jobs Kids. O `RenderPlanBuilder` só sabia extrair clips de gameplay
+(vídeo), não aplicar Ken Burns em imagens.
+
+**Por que é errado:** Cada domínio tem seu próprio tipo de mídia visual
+(gameplays, imagens, vídeos curtos, etc). O pipeline de geração precisa
+branchar por domínio no estágio de seleção de mídia e no estágio de render
+plan.
+
+**Como evitar:** O `_run_pipeline` deve verificar `job.domain` e usar o
+retriever e render plan builder corretos:
+```python
+if job_domain == "kids":
+    clips = self.kids_media_retriever.retrieve(...)
+    rp = self.kids_render_plan_builder.build(...)
+else:
+    clips = self.gameplay_retriever.retrieve(...)
+    rp = self.plan_builder.build(...)
+```
+
+### Erro 14: Endpoint de geração manual redundante
+
+**O que aconteceu:** `POST /api/kids/generate` criava um job de geração
+manualmente, duplicando o que `KidsAutomationStrategy.create_job()` já faz.
+
+**Por que é errado:** A automação já cria jobs a partir da fila de ideias.
+Um endpoint de geração manual cria um caminho paralelo que não passa pela
+fila, não respeita cooldown, e não tem traceabilidade editorial.
+
+**Como evitar:** NUNCA criar endpoint de geração manual. A geração é
+disparada pela automação (consume-queue). Se o usuário quer gerar um
+vídeo específico, ele coloca a ideia na fila e a automação consome.
+
+### Erro 15: Omissão do pipeline de mapeamento VLM+ASR (ERRO GRAVE)
+
+**O que aconteceu:** A primeira implementação do pipeline de mídia Kids
+processava vídeos apenas com FFprobe (metadados técnicos) + thumbnail
+(FFmpeg) + tags manuais. **NÃO** rodava VLM (análise visual) nem ASR
+(transcrição). **NÃO** criava eventos semânticos com timestamps. O
+`KidsMediaRetriever` selecionava mídias apenas por tags manuais e
+descrição, sem indexação semântica do conteúdo real do vídeo.
+
+A justificativa na época foi: "vídeos Kids são curtos, não precisam de
+mapeamento". **Isso estava errado.**
+
+**Por que é errado:** Nos Games, o `GameplayAnalyzer` roda VLM + ASR em
+cada vídeo para produzir `GameplayEvent[]` — eventos semânticos com
+timestamps, descrição, tags, transcript, visual_confidence, e
+interesting_score. O `GameplayRetriever` usa esses eventos para seleção
+semântica de clips. Sem mapeamento, o Kids ficava sem:
+- Indexação semântica do conteúdo visual
+- Seleção de clips baseada no que aparece no vídeo
+- Transcrição de áudio para matching
+- Timestamps para seleção de segmentos específicos
+- Provenance de quais eventos informaram cada clip
+
+**O usuário disse explicitamente:**
+> "EU PEDI PRA USAR A MESMA LOGICA DA PORRA DOS GAMES, ENTÃO ERA PRA TER
+> O MAPEAMENTO, O NEGOCIO DE USO DE CENAS DUPLICADAS QUE EXISTE LA PRA
+> CASO O USUARIO DESEJE OS VIDEOS NAO GERAREM VIDEOS REPETIDOS COM AS
+> MESMAS CENAS"
+
+**Como evitar:** TODO domínio que aceita vídeo como mídia DEVE usar o
+mesmo pipeline de mapeamento que Games:
+1. Upload → `kids_asset_process` job (ou equivalente do domínio)
+2. Worker baixa o vídeo
+3. Worker roda FFprobe (metadados técnicos)
+4. Worker roda thumbnail (FFmpeg)
+5. **Worker roda VLM + ASR (mapeamento semântico)** ← NÃO PULAR
+6. Worker cria eventos semânticos com timestamps (`KidsMediaEvent` ou
+   equivalente)
+7. Worker sincroniza eventos para a VPS
+8. Retriever usa eventos para seleção semântica de clips
+9. Clip usage previne reuso de segmentos
+
+**Regra absoluta:** Um domínio NUNCA deve omitir mapeamento, indexação,
+usage tracking, public/private semantics, ou provenance merely porque
+sua mídia é "esperada ser mais curta ou simples". A capability matrix
+do domínio deve ser comparada contra Games ANTES de implementar. Se
+Games tem mapeamento, o novo domínio tem mapeamento.
+
+**Implementação correta:** Ver `src/gpcg/application/kids_media_analyzer.py`
+(`KidsMediaAnalyzer` reutiliza `GameplayAnalyzer`) e
+`src/gpcg/domains/kids/models.py` (`KidsMediaEvent` — equivalente a
+`GameplayEvent`).
 
 ---
 

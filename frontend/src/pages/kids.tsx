@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { usePoll } from "@/hooks/usePoll";
 import { Badge, Button, Card, Spinner, EmptyState } from "@/components/ui";
 import { toast } from "sonner";
+import { useUploadStore, type UploadItem } from "@/lib/upload-store";
 import {
   Upload,
   Trash2,
@@ -19,6 +20,8 @@ import {
   AlertCircle,
   CheckCircle,
   Clock,
+  Film,
+  Tag,
 } from "lucide-react";
 
 const CATEGORIES = [
@@ -53,16 +56,13 @@ const TOPIC_LIBRARY_CATEGORIES = [
   { value: "curiosity", label: "Curiosidades" },
 ];
 
-type Tab = "topics" | "config";
+type Tab = "topics" | "media" | "config";
 
 export function KidsPage() {
   const [tab, setTab] = useState<Tab>("topics");
   const { data: topicsData, loading, refetch } = usePoll(() => api.listKidsTopics(), 15000);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [generating, setGenerating] = useState<number | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [expandedTopic, setExpandedTopic] = useState<number | null>(null);
 
   const [title, setTitle] = useState("");
@@ -93,51 +93,13 @@ export function KidsPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Excluir este tópico e todas as suas imagens?")) return;
+    if (!confirm("Excluir este tópico? As mídias vinculadas serão desvinculadas (não excluídas).")) return;
     try {
       await api.deleteKidsTopic(id);
       toast.success("Tópico excluído");
       await refetch();
     } catch (err: any) {
       toast.error(err.message || "Erro ao excluir");
-    }
-  };
-
-  const handleUpload = async (topicId: number, files: FileList) => {
-    setUploading(true);
-    try {
-      let successCount = 0;
-      let errorCount = 0;
-      for (const file of Array.from(files)) {
-        try {
-          await api.uploadKidsAsset(topicId, file);
-          successCount++;
-        } catch (err: any) {
-          errorCount++;
-          toast.error(`${file.name}: ${err.message || "Erro no upload"}`);
-        }
-      }
-      if (successCount > 0) {
-        toast.success(`${successCount} mídia(s) enviada(s)${errorCount > 0 ? `, ${errorCount} com erro` : ""}`);
-      }
-      await refetch();
-    } catch (err: any) {
-      toast.error(err.message || "Erro no upload");
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  };
-
-  const handleGenerate = async (topicId: number) => {
-    setGenerating(topicId);
-    try {
-      const result = await api.generateKidsVideo(topicId);
-      toast.success(`Job #${result.job_id} criado! O vídeo será gerado.`);
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao gerar vídeo");
-    } finally {
-      setGenerating(null);
     }
   };
 
@@ -172,6 +134,7 @@ export function KidsPage() {
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border">
         <TabButton active={tab === "topics"} onClick={() => setTab("topics")} icon={<FileText className="h-4 w-4" />} label="Tópicos" />
+        <TabButton active={tab === "media"} onClick={() => setTab("media")} icon={<Film className="h-4 w-4" />} label="Mídias" />
         <TabButton active={tab === "config"} onClick={() => setTab("config")} icon={<Settings className="h-4 w-4" />} label="Configuração do Canal" />
       </div>
 
@@ -248,7 +211,7 @@ export function KidsPage() {
             <EmptyState
               icon={<FileText className="h-8 w-8" />}
               title="Nenhum tópico ainda"
-              description="Crie seu primeiro tópico Kids ou vá à aba Ideias para descobrir conteúdo automaticamente."
+              description="Crie seu primeiro tópico Kids ou vá à aba Ideias para descobrir conteúdo automaticamente. As mídias são enviadas na aba Mídias."
             />
           ) : (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -276,59 +239,25 @@ export function KidsPage() {
 
                   <div className="flex items-center gap-2 mb-3">
                     <ImageIcon className="h-4 w-4 text-text-muted" />
-                    <span className="text-xs text-text-secondary">{t.asset_count} mídia(s)</span>
+                    <span className="text-xs text-text-secondary">{t.asset_count} mídia(s) vinculada(s)</span>
                   </div>
-
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*,video/*"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => e.target.files && handleUpload(t.id, e.target.files)}
-                  />
-
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploading}
-                    >
-                      {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                      Mídias
-                    </Button>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => handleGenerate(t.id)}
-                      disabled={generating === t.id || t.asset_count === 0}
-                    >
-                      {generating === t.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                      Gerar
-                    </Button>
-                  </div>
-
-                  {t.asset_count === 0 && (
-                    <p className="mt-2 text-[10px] text-text-muted">
-                      Envie imagens ou vídeos antes de gerar.
-                    </p>
-                  )}
 
                   {t.asset_count > 0 && (
                     <button
                       onClick={() => setExpandedTopic(expandedTopic === t.id ? null : t.id)}
-                      className="mt-2 text-[10px] text-accent hover:text-accent-warm transition-colors"
+                      className="text-[10px] text-accent hover:text-accent-warm transition-colors"
                     >
-                      {expandedTopic === t.id ? "Ocultar mídias" : "Ver mídias"}
+                      {expandedTopic === t.id ? "Ocultar mídias" : "Ver mídias vinculadas"}
                     </button>
                   )}
 
                   {expandedTopic === t.id && (
                     <TopicAssetsList topicId={t.id} onDeleted={refetch} />
                   )}
+
+                  <p className="mt-3 text-[10px] text-text-muted">
+                    As mídias são gerenciadas na aba <strong>Mídias</strong>. A geração é automática via fila de ideias.
+                  </p>
                 </Card>
               ))}
             </div>
@@ -336,8 +265,349 @@ export function KidsPage() {
         </>
       )}
 
+      {tab === "media" && <MediaLibrarySection />}
       {tab === "config" && <ChannelConfigSection />}
     </div>
+  );
+}
+
+// ── Media Library Section ─────────────────────────────────────────────────────
+
+function MediaLibrarySection() {
+  const { uploads, addUpload, updateUpload, removeUpload } = useUploadStore();
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [tagsInput, setTagsInput] = useState("");
+  const [descInput, setDescInput] = useState("");
+  const [filterKind, setFilterKind] = useState<string>("");
+  const [filterStatus, setFilterStatus] = useState<string>("");
+
+  const params: any = {};
+  if (filterKind) params.media_kind = filterKind;
+  if (filterStatus) params.status = filterStatus;
+  const { data, loading, refetch } = usePoll(() => api.listKidsLibraryAssets(params), 5000);
+
+  const assets = data?.assets || [];
+  const kidsUploads = uploads.filter((u) => u.kind === "kids");
+  const hasActiveUploads = kidsUploads.some(
+    (u) => u.status === "preparing" || u.status === "uploading" || u.status === "processing"
+  );
+
+  const uploadFile = async (file: File) => {
+    const id = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const item: UploadItem = {
+      id,
+      fileName: file.name,
+      fileSize: file.size,
+      progress: 0,
+      status: "preparing",
+      kind: "kids",
+    };
+    addUpload(item);
+
+    try {
+      await api.uploadKidsLibraryAsset(
+        file,
+        { tags: tagsInput, description: descInput },
+        (loaded, total, pct) => {
+          updateUpload(id, { progress: pct, status: "uploading" });
+          if (pct >= 100) {
+            updateUpload(id, { status: "processing" });
+          }
+        },
+      );
+      updateUpload(id, { status: "done", progress: 100 });
+      toast.success(`"${file.name}" enviado com sucesso`);
+      setTimeout(() => removeUpload(id), 5000);
+      await refetch();
+    } catch (err: any) {
+      updateUpload(id, { status: "error", error: err.message || "Erro no upload" });
+      toast.error(err.message || `Erro no upload de "${file.name}"`);
+    }
+  };
+
+  const handleFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    Array.from(files).forEach(uploadFile);
+  };
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    handleFiles(e.dataTransfer.files);
+  }, [tagsInput, descInput]);
+
+  return (
+    <div className="space-y-4">
+      {/* Upload zone */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+        onClick={() => !hasActiveUploads && fileInput.current?.click()}
+        className={`rounded-xl border-2 border-dashed p-8 text-center transition-all duration-300 ${
+          hasActiveUploads
+            ? "border-border cursor-default"
+            : "cursor-pointer " + (dragging
+              ? "border-accent bg-accent/5 scale-[1.01]"
+              : "border-border hover:border-accent/50 hover:bg-surface/50")
+        }`}
+      >
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/*,video/*"
+          multiple
+          className="hidden"
+          onChange={(e) => { handleFiles(e.target.files); if (e.target) e.target.value = ""; }}
+        />
+        <Upload className={`mx-auto h-10 w-10 mb-3 ${dragging ? "text-accent" : "text-text-muted"}`} />
+        <p className="text-sm font-medium">
+          {hasActiveUploads ? "Enviando mídias..." : "Arraste imagens e vídeos aqui"}
+        </p>
+        <p className="mt-1 text-xs text-text-muted">
+          ou clique para selecionar — PNG, JPEG, WebP, GIF, MP4, WebM, MOV
+        </p>
+      </div>
+
+      {/* Upload metadata inputs */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className="text-xs font-medium text-text-secondary">Tags (separadas por vírgula)</label>
+          <input
+            type="text"
+            value={tagsInput}
+            onChange={(e) => setTagsInput(e.target.value)}
+            placeholder="Ex: dinossauro, natureza, verde"
+            className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-text-secondary">Descrição (opcional)</label>
+          <input
+            type="text"
+            value={descInput}
+            onChange={(e) => setDescInput(e.target.value)}
+            placeholder="Ex: Tiranossauro em floresta"
+            className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
+          />
+        </div>
+      </div>
+
+      {/* Active uploads */}
+      {kidsUploads.length > 0 && (
+        <div className="space-y-2">
+          {kidsUploads.map((u) => (
+            <div key={u.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium truncate">{u.fileName}</p>
+                <div className="mt-1 h-1.5 rounded-full bg-border overflow-hidden">
+                  <div
+                    className={`h-full transition-all ${u.status === "error" ? "bg-red-500" : u.status === "done" ? "bg-green-500" : "bg-accent"}`}
+                    style={{ width: `${u.progress}%` }}
+                  />
+                </div>
+              </div>
+              <span className="text-[10px] text-text-muted flex-shrink-0">
+                {u.status === "done" ? "Concluído" : u.status === "error" ? "Erro" : `${u.progress}%`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setFilterKind("")}
+          className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${!filterKind ? "bg-accent/10 text-accent border border-accent/30" : "text-text-muted hover:text-text border border-transparent"}`}
+        >
+          Todos
+        </button>
+        <button
+          onClick={() => setFilterKind("image")}
+          className={`flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium transition-colors ${filterKind === "image" ? "bg-accent/10 text-accent border border-accent/30" : "text-text-muted hover:text-text border border-transparent"}`}
+        >
+          <ImageIcon className="h-3 w-3" /> Imagens
+        </button>
+        <button
+          onClick={() => setFilterKind("video")}
+          className={`flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium transition-colors ${filterKind === "video" ? "bg-accent/10 text-accent border border-accent/30" : "text-text-muted hover:text-text border border-transparent"}`}
+        >
+          <VideoIcon className="h-3 w-3" /> Vídeos
+        </button>
+        <div className="flex-1" />
+        <button
+          onClick={() => setFilterStatus(filterStatus === "ready" ? "" : "ready")}
+          className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${filterStatus === "ready" ? "bg-accent/10 text-accent border border-accent/30" : "text-text-muted hover:text-text border border-transparent"}`}
+        >
+          Só prontos
+        </button>
+      </div>
+
+      {/* Assets grid */}
+      {loading && !data ? (
+        <div className="flex justify-center py-12">
+          <Spinner className="h-6 w-6" />
+        </div>
+      ) : assets.length === 0 ? (
+        <EmptyState
+          icon={<Film className="h-8 w-8" />}
+          title="Nenhuma mídia na biblioteca"
+          description="Envie imagens e vídeos para a biblioteca do canal. As mídias serão selecionadas automaticamente na geração de vídeos."
+        />
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          {assets.map((a: any) => (
+            <MediaLibraryCard key={a.id} asset={a} onDeleted={refetch} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Media Library Card ───────────────────────────────────────────────────────
+
+function MediaLibraryCard({ asset, onDeleted }: { asset: any; onDeleted: () => void }) {
+  const [deleting, setDeleting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [tags, setTags] = useState((asset.tags || []).join(", "));
+  const [desc, setDesc] = useState(asset.description || "");
+  const [saving, setSaving] = useState(false);
+
+  const handleDelete = async () => {
+    if (!confirm(`Excluir "${asset.filename}"?`)) return;
+    setDeleting(true);
+    try {
+      await api.deleteKidsAsset(asset.id);
+      toast.success("Mídia excluída");
+      await onDeleted();
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao excluir");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.patchKidsAsset(asset.id, {
+        tags: tags.split(",").map((t: string) => t.trim()).filter(Boolean),
+        description: desc,
+      });
+      toast.success("Mídia atualizada");
+      setEditing(false);
+      await onDeleted();
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao atualizar");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="!p-3">
+      {/* Preview */}
+      <div className="mb-2 aspect-video rounded-lg bg-surface overflow-hidden flex items-center justify-center">
+        {asset.thumbnail_key ? (
+          <img
+            src={api.getKidsAssetThumbnailUrl(asset.thumbnail_key)}
+            alt={asset.filename}
+            className="h-full w-full object-cover"
+          />
+        ) : asset.media_kind === "image" ? (
+          <ImageIcon className="h-8 w-8 text-text-muted" />
+        ) : (
+          <VideoIcon className="h-8 w-8 text-text-muted" />
+        )}
+      </div>
+
+      {/* Filename + status */}
+      <div className="flex items-center gap-2 mb-1">
+        <p className="text-[11px] font-medium truncate flex-1">{asset.filename}</p>
+        <AssetStatusBadge status={asset.processing_status} error={asset.process_error} />
+      </div>
+
+      {/* Metadata */}
+      <div className="flex items-center gap-1.5 text-[9px] text-text-muted mb-2">
+        {asset.media_kind === "video" && asset.duration > 0 && (
+          <span>{asset.duration.toFixed(1)}s</span>
+        )}
+        {asset.width > 0 && asset.height > 0 && (
+          <span>{asset.width}×{asset.height}</span>
+        )}
+        {asset.file_size > 0 && (
+          <span>{(asset.file_size / 1024 / 1024).toFixed(1)}MB</span>
+        )}
+        {asset.is_public && <Badge variant="info">público</Badge>}
+      </div>
+
+      {/* Tags */}
+      {asset.tags && asset.tags.length > 0 && !editing && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {asset.tags.slice(0, 4).map((t: string, i: number) => (
+            <span key={i} className="rounded bg-accent/10 px-1.5 py-0.5 text-[9px] text-accent">
+              {t}
+            </span>
+          ))}
+          {asset.tags.length > 4 && (
+            <span className="text-[9px] text-text-muted">+{asset.tags.length - 4}</span>
+          )}
+        </div>
+      )}
+
+      {/* Edit mode */}
+      {editing && (
+        <div className="space-y-2 mb-2">
+          <input
+            type="text"
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            placeholder="tags (vírgula)"
+            className="w-full rounded border border-border bg-surface px-2 py-1 text-[11px] focus:border-accent focus:outline-none"
+          />
+          <input
+            type="text"
+            value={desc}
+            onChange={(e) => setDesc(e.target.value)}
+            placeholder="descrição"
+            className="w-full rounded border border-border bg-surface px-2 py-1 text-[11px] focus:border-accent focus:outline-none"
+          />
+          <div className="flex gap-1">
+            <Button variant="outline" size="sm" className="flex-1 !py-1" onClick={() => setEditing(false)}>
+              Cancelar
+            </Button>
+            <Button variant="primary" size="sm" className="flex-1 !py-1" onClick={handleSave} disabled={saving}>
+              {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Salvar"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      {!editing && (
+        <div className="flex gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 !py-1"
+            onClick={() => setEditing(true)}
+            disabled={deleting}
+          >
+            <Tag className="h-3 w-3" /> Tag
+          </Button>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="rounded-md p-1.5 text-text-muted hover:text-red-400 transition-colors"
+          >
+            {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+          </button>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -438,7 +708,18 @@ function AssetStatusBadge({ status, error }: { status: string; error?: string })
     );
   }
   if (status === "processing") {
-    return <Loader2 className="h-3.5 w-3.5 text-yellow-400 animate-spin flex-shrink-0" />;
+    return (
+      <span title="Extraindo metadados (FFprobe + thumbnail)" className="flex-shrink-0">
+        <Loader2 className="h-3.5 w-3.5 text-yellow-400 animate-spin" />
+      </span>
+    );
+  }
+  if (status === "mapping") {
+    return (
+      <span title="Mapeando conteúdo (VLM + ASR → eventos semânticos)" className="flex-shrink-0">
+        <Loader2 className="h-3.5 w-3.5 text-blue-400 animate-spin" />
+      </span>
+    );
   }
   // queued or uploading
   return <Clock className="h-3.5 w-3.5 text-text-muted flex-shrink-0" />;

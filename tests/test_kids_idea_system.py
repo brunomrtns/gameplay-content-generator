@@ -1970,24 +1970,31 @@ class TestProductionAPI:
         assert data["videos"] == []
 
     def test_generate_includes_idea_id_in_artifacts(self, client, db_session, user_with_kids):
-        """POST /api/kids/generate includes idea_id in job artifacts for traceability."""
-        from gpcg.domains.kids.models import StoryAsset, AssetProcessingStatus
-        from gpcg.core.models import Job
+        """KidsAutomationStrategy.create_job includes idea_id in job artifacts for traceability.
 
-        # Create and convert
+        The /kids/generate endpoint was removed — generation is now triggered
+        by the automation strategy (consume-queue), not manually. This test
+        verifies that the strategy correctly propagates idea_id → topic → job.
+
+        The idea must NOT be pre-converted — the automation strategy converts
+        it as part of create_job. Pre-converted ideas are terminal and skipped.
+        """
+        from gpcg.domains.kids.models import StoryAsset, AssetProcessingStatus
+        from gpcg.core.models import Job, Automation, User
+        from gpcg.domains.automation_strategies import KidsAutomationStrategy
+        from contextlib import contextmanager
+
+        # Create idea (NOT converted — automation will convert it)
         resp = client.post("/api/kids/ideas", json={
             "title": "O que são estrelas cadentes?",
             "category": "space",
         })
         idea_id = resp.json()["id"]
 
-        resp = client.post(f"/api/kids/ideas/{idea_id}/convert", json={})
-        topic_id = resp.json()["topic_id"]
-
-        # Add asset
+        # Add asset to the channel library (not linked to a topic — library asset)
         asset = StoryAsset(
             user_id=user_with_kids,
-            topic_id=topic_id,
+            topic_id=None,  # library asset, not topic-owned
             filename="stars.png",
             storage_key="test/stars.png",
             processing_status=AssetProcessingStatus.ready.value,
@@ -1995,13 +2002,46 @@ class TestProductionAPI:
         db_session.add(asset)
         db_session.flush()
 
-        # Generate via the existing /kids/generate endpoint
-        resp = client.post("/api/kids/generate", json={"topic_id": topic_id})
-        assert resp.status_code == 200
-        job_id = resp.json()["job_id"]
+        # Set up automation with the idea in the queue
+        auto = db_session.query(Automation).filter(
+            Automation.user_id == user_with_kids
+        ).first()
+        if not auto:
+            auto = Automation(user_id=user_with_kids, status="running", config={})
+            db_session.add(auto)
+            db_session.flush()
+        auto.status = "running"
+        auto.config = {
+            "kids_idea_queue": [idea_id],
+            "kids_queue_mode": "automatic",
+        }
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(auto, "config")
+        db_session.commit()
+
+        # Patch session_scope to use the test session so create_job can see
+        # the data we set up in the in-memory test DB.
+        @contextmanager
+        def _test_session_scope():
+            try:
+                yield db_session
+                db_session.commit()
+            except Exception:
+                db_session.rollback()
+                raise
+
+        # Set google_user_id on the user (required by create_job)
+        user = db_session.query(User).filter(User.id == user_with_kids).first()
+        user.google_user_id = "test-google-id"
+        db_session.commit()
+
+        with patch("gpcg.infrastructure.database.session_scope", _test_session_scope):
+            job_id = KidsAutomationStrategy.create_job(user_with_kids)
+        assert job_id is not None, "create_job returned None — check queue/assets"
 
         # Verify idea_id is in job artifacts
+        db_session.expire_all()
         job = db_session.query(Job).filter(Job.id == job_id).first()
         assert job is not None
         assert job.artifacts.get("idea_id") == idea_id
-        assert job.artifacts.get("topic_id") == topic_id
+        assert job.artifacts.get("topic_id") is not None  # auto-converted
