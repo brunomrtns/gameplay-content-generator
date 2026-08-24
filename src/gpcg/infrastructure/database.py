@@ -284,6 +284,7 @@ def _migrate_story_assets_topic_id_nullable(engine) -> None:
 
     # SQLite: recreate table to drop NOT NULL constraint
     log.info("Migrating story_assets: making topic_id nullable (SQLite table rebuild)")
+    from gpcg.core.models import Base
     with engine.begin() as conn:
         # Get all existing column names
         all_cols = [c["name"] for c in columns]
@@ -331,6 +332,7 @@ def _fix_story_assets_primary_key(engine) -> None:
         return  # already a primary key — nothing to do
 
     log.warning("story_assets.id is NOT a primary key — fixing (broken by old migration)")
+    from gpcg.core.models import Base
     columns = inspector.get_columns("story_assets")
     all_cols = [c["name"] for c in columns]
     col_list = ", ".join(f'"{c}"' for c in all_cols)
