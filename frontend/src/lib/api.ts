@@ -605,6 +605,13 @@ export const api = {
   deleteKidsAsset: (id: number) => request<any>(`/kids/assets/${id}`, { method: "DELETE" }),
   getKidsAssetThumbnailUrl: (thumbnailKey: string) =>
     `${API_BASE}/kids/assets/thumbnail/${thumbnailKey}`,
+  getKidsAssetEvents: (assetId: number) =>
+    request<{ events: any[] }>(`/kids/assets/${assetId}/events`),
+  toggleKidsAssetVisibility: (assetId: number, isPublic: boolean) =>
+    request<any>(`/kids/assets/${assetId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_public: isPublic }),
+    }),
   // NOTE: generateKidsVideo removed — generation is now driven by the idea
   // queue + KidsAutomationStrategy (consume-queue), not a manual endpoint.
 

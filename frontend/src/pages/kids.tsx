@@ -22,6 +22,11 @@ import {
   Clock,
   Film,
   Tag,
+  Activity,
+  Cpu,
+  Eye,
+  Monitor,
+  Server,
 } from "lucide-react";
 
 const CATEGORIES = [
@@ -445,7 +450,7 @@ function MediaLibrarySection() {
         </button>
       </div>
 
-      {/* Assets grid */}
+      {/* Assets list — same pattern as content.tsx (horizontal cards) */}
       {loading && !data ? (
         <div className="flex justify-center py-12">
           <Spinner className="h-6 w-6" />
@@ -457,7 +462,7 @@ function MediaLibrarySection() {
           description="Envie imagens e vídeos para a biblioteca do canal. As mídias serão selecionadas automaticamente na geração de vídeos."
         />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+        <div className="grid gap-3">
           {assets.map((a: any) => (
             <MediaLibraryCard key={a.id} asset={a} onDeleted={refetch} />
           ))}
@@ -467,7 +472,118 @@ function MediaLibrarySection() {
   );
 }
 
-// ── Media Library Card ───────────────────────────────────────────────────────
+// ── Processing status config (same pattern as content.tsx) ───────────────────
+
+const KIDS_PROCESSING_STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string }> = {
+  uploading: { variant: "info", label: "Enviando" },
+  queued: { variant: "info", label: "Na fila" },
+  processing: { variant: "info", label: "Processando" },
+  mapping: { variant: "info", label: "Mapeando" },
+  ready: { variant: "success", label: "Pronto" },
+  failed: { variant: "error", label: "Falhou" },
+};
+
+// ── Kids Mapping Timeline (same as content.tsx MappingTimeline) ──────────────
+
+const KIDS_EVENT_TYPE_COLORS: Record<string, string> = {
+  VISUAL_ACTION: "text-red-400 bg-red-500/10 border-red-500/30",
+  NARRATION: "text-cyan-400 bg-cyan-500/10 border-cyan-500/30",
+  ANIMATION: "text-purple-400 bg-purple-500/10 border-purple-500/30",
+  STATIC_IMAGE: "text-text-muted bg-surface-elevated border-border",
+  TEXT_OVERLAY: "text-yellow-400 bg-yellow-500/10 border-yellow-500/30",
+  TRANSITION: "text-blue-400 bg-blue-500/10 border-blue-500/30",
+  CHARACTER_INTRO: "text-green-400 bg-green-500/10 border-green-500/30",
+  EDUCATIONAL_DEMO: "text-accent bg-accent/10 border-accent/30",
+  UNKNOWN: "text-text-muted bg-surface-elevated border-border",
+};
+
+function KidsMappingTimeline({ assetId, filename }: { assetId: number; filename: string }) {
+  const [events, setEvents] = useState<any[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadEvents = async () => {
+    if (events !== null) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.getKidsAssetEvents(assetId);
+      setEvents(res.events || []);
+    } catch (e: any) {
+      setError(e.message || "Erro ao carregar eventos");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 border-t border-border pt-3">
+      <div
+        className="flex cursor-pointer items-center gap-2 text-xs font-medium text-text-secondary hover:text-text"
+        onClick={loadEvents}
+      >
+        <Activity className="h-3.5 w-3.5" />
+        {events === null && !loading && "Ver análise do mapeamento"}
+        {loading && "Carregando..."}
+        {error && <span className="text-red-400">{error}</span>}
+        {events !== null && `${events.length} eventos detectados`}
+      </div>
+
+      {events !== null && events.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {/* Timeline bar */}
+          <div className="flex h-2 w-full overflow-hidden rounded-full bg-surface-elevated">
+            {events.map((e, i) => {
+              const color = KIDS_EVENT_TYPE_COLORS[e.event_type]?.split(" ")[1] || "bg-surface-elevated";
+              return (
+                <div
+                  key={i}
+                  className={color}
+                  style={{ flex: Math.max(1, (e.end_time - e.start_time) / 10) }}
+                  title={`${e.event_type} [${e.start_time.toFixed(0)}-${e.end_time.toFixed(0)}s]`}
+                />
+              );
+            })}
+          </div>
+
+          {/* Event list */}
+          <div className="max-h-64 overflow-y-auto space-y-1.5 rounded-lg border border-border bg-surface p-2">
+            {events.map((e, i) => {
+              const colorClass = KIDS_EVENT_TYPE_COLORS[e.event_type] || KIDS_EVENT_TYPE_COLORS.UNKNOWN;
+              return (
+                <div key={i} className="flex gap-2 rounded-md px-2 py-1.5 hover:bg-surface-hover">
+                  <span className="flex-shrink-0 font-mono text-[10px] text-text-muted pt-0.5">
+                    {e.start_time.toFixed(0)}s
+                  </span>
+                  <span className={`flex-shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${colorClass}`}>
+                    {e.event_type}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-text-secondary leading-snug">{e.description}</p>
+                    {e.transcript && (
+                      <p className="mt-0.5 text-[10px] text-text-muted italic">"{e.transcript.substring(0, 80)}..."</p>
+                    )}
+                  </div>
+                  {e.interesting_score >= 0.7 && (
+                    <span className="flex-shrink-0 text-[9px] text-accent font-semibold">
+                      ★ {e.interesting_score.toFixed(1)}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {events !== null && events.length === 0 && (
+        <p className="mt-2 text-xs text-text-muted">Nenhum evento encontrado.</p>
+      )}
+    </div>
+  );
+}
+
+// ── Media Library Card (horizontal, same pattern as content.tsx) ────────────
 
 function MediaLibraryCard({ asset, onDeleted }: { asset: any; onDeleted: () => void }) {
   const [deleting, setDeleting] = useState(false);
@@ -475,6 +591,12 @@ function MediaLibraryCard({ asset, onDeleted }: { asset: any; onDeleted: () => v
   const [tags, setTags] = useState((asset.tags || []).join(", "));
   const [desc, setDesc] = useState(asset.description || "");
   const [saving, setSaving] = useState(false);
+
+  const procCfg = KIDS_PROCESSING_STATUS_CONFIG[asset.processing_status] || KIDS_PROCESSING_STATUS_CONFIG.uploading;
+  const isProcessing = asset.processing_status === "processing";
+  const isMapping = asset.processing_status === "mapping" || asset.processing_status === "queued";
+  const isReady = asset.processing_status === "ready";
+  const isFailed = asset.processing_status === "failed";
 
   const handleDelete = async () => {
     if (!confirm(`Excluir "${asset.filename}"?`)) return;
@@ -507,73 +629,129 @@ function MediaLibraryCard({ asset, onDeleted }: { asset: any; onDeleted: () => v
     }
   };
 
+  const handleToggleVisibility = async () => {
+    try {
+      await api.toggleKidsAssetVisibility(asset.id, !asset.is_public);
+      toast.success(`"${asset.filename}" agora é ${!asset.is_public ? "pública" : "privada"}.`);
+      await onDeleted();
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao alterar visibilidade");
+    }
+  };
+
   return (
-    <Card className="!p-3">
-      {/* Preview */}
-      <div className="mb-2 aspect-video rounded-lg bg-surface overflow-hidden flex items-center justify-center">
-        {asset.thumbnail_key ? (
-          <img
-            src={api.getKidsAssetThumbnailUrl(asset.thumbnail_key)}
-            alt={asset.filename}
-            className="h-full w-full object-cover"
-          />
-        ) : asset.media_kind === "image" ? (
-          <ImageIcon className="h-8 w-8 text-text-muted" />
-        ) : (
-          <VideoIcon className="h-8 w-8 text-text-muted" />
-        )}
-      </div>
-
-      {/* Filename + status */}
-      <div className="flex items-center gap-2 mb-1">
-        <p className="text-[11px] font-medium truncate flex-1">{asset.filename}</p>
-        <AssetStatusBadge status={asset.processing_status} error={asset.process_error} />
-      </div>
-
-      {/* Metadata */}
-      <div className="flex items-center gap-1.5 text-[9px] text-text-muted mb-2">
-        {asset.media_kind === "video" && asset.duration > 0 && (
-          <span>{asset.duration.toFixed(1)}s</span>
-        )}
-        {asset.width > 0 && asset.height > 0 && (
-          <span>{asset.width}×{asset.height}</span>
-        )}
-        {asset.file_size > 0 && (
-          <span>{(asset.file_size / 1024 / 1024).toFixed(1)}MB</span>
-        )}
-        {asset.is_public && <Badge variant="info">público</Badge>}
-      </div>
-
-      {/* Tags */}
-      {asset.tags && asset.tags.length > 0 && !editing && (
-        <div className="flex flex-wrap gap-1 mb-2">
-          {asset.tags.slice(0, 4).map((t: string, i: number) => (
-            <span key={i} className="rounded bg-accent/10 px-1.5 py-0.5 text-[9px] text-accent">
-              {t}
-            </span>
-          ))}
-          {asset.tags.length > 4 && (
-            <span className="text-[9px] text-text-muted">+{asset.tags.length - 4}</span>
+    <Card className="!p-4">
+      <div className="flex items-center gap-4">
+        {/* Thumbnail / icon */}
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-surface-elevated border border-border overflow-hidden">
+          {asset.thumbnail_key ? (
+            <img
+              src={api.getKidsAssetThumbnailUrl(asset.thumbnail_key)}
+              alt={asset.filename}
+              className="h-full w-full object-cover"
+            />
+          ) : isMapping ? (
+            <Cpu className="h-5 w-5 text-accent animate-pulse" />
+          ) : isReady ? (
+            asset.media_kind === "image" ? <ImageIcon className="h-5 w-5 text-accent" /> : <CheckCircle className="h-5 w-5 text-accent" />
+          ) : isProcessing ? (
+            <Loader2 className="h-5 w-5 text-accent-warm animate-spin" />
+          ) : isFailed ? (
+            <AlertCircle className="h-5 w-5 text-red-400" />
+          ) : asset.media_kind === "image" ? (
+            <ImageIcon className="h-5 w-5 text-text-muted" />
+          ) : (
+            <VideoIcon className="h-5 w-5 text-text-muted" />
           )}
+        </div>
+
+        {/* Info */}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium font-mono">{asset.filename}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-muted">
+            {asset.media_kind === "video" && asset.duration > 0 && (
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" /> {asset.duration.toFixed(1)}s
+              </span>
+            )}
+            {asset.width > 0 && asset.height > 0 && (
+              <span>{asset.width}×{asset.height}</span>
+            )}
+            {asset.file_size > 0 && (
+              <span>{(asset.file_size / 1024 / 1024).toFixed(1)}MB</span>
+            )}
+            {asset.tags && asset.tags.length > 0 && (
+              <span className="flex items-center gap-1">
+                <Tag className="h-3 w-3" /> {asset.tags.slice(0, 3).join(", ")}
+                {asset.tags.length > 3 && ` +${asset.tags.length - 3}`}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Status + actions */}
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <Badge variant={procCfg.variant}>
+            {(isProcessing || isMapping) && <Loader2 className="h-3 w-3 animate-spin" />}
+            {procCfg.label}
+          </Badge>
+          {isReady && !editing && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setEditing(true)}
+                className="text-text-muted hover:text-accent transition-colors p-1 rounded"
+                title="Editar tags e descrição"
+              >
+                <Tag className="h-4 w-4" />
+              </button>
+              <button
+                onClick={handleToggleVisibility}
+                className={`transition-colors p-1 rounded ${asset.is_public ? "text-accent" : "text-text-muted hover:text-accent"}`}
+                title={asset.is_public ? "Pública — clique para tornar privada" : "Privada — clique para tornar pública"}
+              >
+                <Eye className="h-4 w-4" />
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="text-text-muted hover:text-red-400 transition-colors p-1 rounded"
+                title="Deletar mídia"
+              >
+                {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Progress bar during processing/mapping */}
+      {(isProcessing || isMapping) && (
+        <div className="mt-3 h-1 overflow-hidden rounded-full bg-surface-elevated">
+          <div className={`h-full ${isMapping ? "w-2/3" : "w-1/3"} animate-pulse-glow rounded-full ${isMapping ? "bg-accent" : "bg-accent-warm"}`} />
         </div>
       )}
 
-      {/* Edit mode */}
-      {editing && (
-        <div className="space-y-2 mb-2">
+      {/* Error message */}
+      {isFailed && asset.process_error && (
+        <p className="mt-2 text-xs text-red-400">{asset.process_error}</p>
+      )}
+
+      {/* Edit mode (tags + description) */}
+      {editing && isReady && (
+        <div className="mt-3 space-y-2 border-t border-border pt-3">
           <input
             type="text"
             value={tags}
             onChange={(e) => setTags(e.target.value)}
             placeholder="tags (vírgula)"
-            className="w-full rounded border border-border bg-surface px-2 py-1 text-[11px] focus:border-accent focus:outline-none"
+            className="w-full rounded border border-border bg-surface px-2 py-1 text-xs focus:border-accent focus:outline-none"
           />
           <input
             type="text"
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
             placeholder="descrição"
-            className="w-full rounded border border-border bg-surface px-2 py-1 text-[11px] focus:border-accent focus:outline-none"
+            className="w-full rounded border border-border bg-surface px-2 py-1 text-xs focus:border-accent focus:outline-none"
           />
           <div className="flex gap-1">
             <Button variant="outline" size="sm" className="flex-1 !py-1" onClick={() => setEditing(false)}>
@@ -586,26 +764,9 @@ function MediaLibraryCard({ asset, onDeleted }: { asset: any; onDeleted: () => v
         </div>
       )}
 
-      {/* Actions */}
-      {!editing && (
-        <div className="flex gap-1">
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex-1 !py-1"
-            onClick={() => setEditing(true)}
-            disabled={deleting}
-          >
-            <Tag className="h-3 w-3" /> Tag
-          </Button>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="rounded-md p-1.5 text-text-muted hover:text-red-400 transition-colors"
-          >
-            {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-          </button>
-        </div>
+      {/* Mapping timeline (expandable) — same as content.tsx */}
+      {isReady && asset.media_kind === "video" && (
+        <KidsMappingTimeline assetId={asset.id} filename={asset.filename} />
       )}
     </Card>
   );

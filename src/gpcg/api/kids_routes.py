@@ -635,3 +635,45 @@ def serve_thumbnail(
         media_type="image/jpeg",
         filename=thumbnail_key,
     )
+
+
+# ── Asset events (frontend — mapping timeline) ───────────────────────────────
+
+
+@router.get("/kids/assets/{asset_id}/events")
+def get_kids_asset_events_public(
+    asset_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get the semantic events for a Kids video asset (frontend display).
+
+    Equivalent to GET /sources/{id}/events in Games. Returns the
+    KidsMediaEvent records produced by the VLM+ASR mapping pipeline.
+    Used by the frontend MappingTimeline component.
+    """
+    _require_kids_domain(user, db)
+    from gpcg.domains.kids.models import KidsMediaEvent
+
+    events = db.query(KidsMediaEvent).filter(
+        KidsMediaEvent.asset_id == asset_id
+    ).order_by(KidsMediaEvent.start_time).all()
+
+    return {
+        "events": [{
+            "id": e.id,
+            "asset_id": e.asset_id,
+            "start_time": e.start_time,
+            "end_time": e.end_time,
+            "event_type": e.event_type,
+            "description": e.description,
+            "characters": e.characters,
+            "location": e.location,
+            "actions": e.actions,
+            "tags": e.tags,
+            "transcript": e.transcript,
+            "visual_confidence": e.visual_confidence,
+            "interesting_score": e.interesting_score,
+            "analysis_version": e.analysis_version,
+        } for e in events]
+    }
