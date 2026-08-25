@@ -9,10 +9,8 @@ import {
   Trash2,
   Image as ImageIcon,
   Video as VideoIcon,
-  Plus,
   Sparkles,
   Loader2,
-  FileText,
   X,
   Settings,
   Brain,
@@ -28,24 +26,8 @@ import {
   Monitor,
   Server,
   Users,
-  Pencil,
-  Gamepad2,
+  Info,
 } from "lucide-react";
-
-const CATEGORIES = [
-  { value: "general", label: "Geral" },
-  { value: "educational", label: "Educativo" },
-  { value: "animals", label: "Animais" },
-  { value: "science", label: "Ciência" },
-  { value: "story", label: "História" },
-  { value: "alphabet", label: "Alfabeto" },
-];
-
-const AGE_RANGES = [
-  { value: "3-6", label: "3-6 anos" },
-  { value: "7-10", label: "7-10 anos" },
-  { value: "all", label: "Todas as idades" },
-];
 
 const TOPIC_LIBRARY_CATEGORIES = [
   { value: "animals", label: "Animais" },
@@ -64,214 +46,29 @@ const TOPIC_LIBRARY_CATEGORIES = [
   { value: "curiosity", label: "Curiosidades" },
 ];
 
-type Tab = "media" | "topics" | "config";
+type Tab = "media" | "config";
 
 export function KidsPage() {
   const [tab, setTab] = useState<Tab>("media");
-  const { data: topicsData, loading, refetch } = usePoll(() => api.listKidsTopics(), 15000);
-  const [showCreate, setShowCreate] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [expandedTopic, setExpandedTopic] = useState<number | null>(null);
-
-  const [title, setTitle] = useState("");
-  const [category, setCategory] = useState("educational");
-  const [ageRange, setAgeRange] = useState("3-6");
-  const [description, setDescription] = useState("");
-
-  const topics = topicsData?.topics || [];
-
-  const handleCreate = async () => {
-    if (!title.trim()) {
-      toast.error("Título é obrigatório");
-      return;
-    }
-    setCreating(true);
-    try {
-      await api.createKidsTopic({ title, category, age_range: ageRange, description });
-      toast.success("Tópico criado!");
-      setShowCreate(false);
-      setTitle("");
-      setDescription("");
-      await refetch();
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao criar tópico");
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const handleDelete = async (id: number) => {
-    if (!confirm("Excluir este tópico? As mídias vinculadas serão desvinculadas (não excluídas).")) return;
-    try {
-      await api.deleteKidsTopic(id);
-      toast.success("Tópico excluído");
-      await refetch();
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao excluir");
-    }
-  };
-
-  if (loading && !topicsData) {
-    return (
-      <div className="flex items-center justify-center py-32">
-        <Spinner className="h-8 w-8" />
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Conteúdo Kids</h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            Gerencie suas mídias, tópicos e o perfil do canal
-          </p>
-          <span className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-accent/10 border border-accent/20 px-2 py-0.5 text-[10px] font-medium text-accent">
-            Kids
-          </span>
-        </div>
-        {tab === "topics" && (
-          <Button variant="primary" size="lg" onClick={() => setShowCreate(true)}>
-            <Plus className="h-4 w-4" /> Novo tópico
-          </Button>
-        )}
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Conteúdo Kids</h1>
+        <p className="mt-1 text-sm text-text-secondary">
+          Gerencie suas mídias e o perfil do canal
+        </p>
+        <span className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-accent/10 border border-accent/20 px-2 py-0.5 text-[10px] font-medium text-accent">
+          Kids
+        </span>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border">
         <TabButton active={tab === "media"} onClick={() => setTab("media")} icon={<Film className="h-4 w-4" />} label="Mídias" />
-        <TabButton active={tab === "topics"} onClick={() => setTab("topics")} icon={<FileText className="h-4 w-4" />} label="Tópicos" />
         <TabButton active={tab === "config"} onClick={() => setTab("config")} icon={<Settings className="h-4 w-4" />} label="Configuração do Canal" />
       </div>
-
-      {tab === "topics" && (
-        <>
-          {/* Create dialog */}
-          {showCreate && (
-            <Card className="!p-6 border-accent/30">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold">Criar novo tópico</h3>
-                <button onClick={() => setShowCreate(false)} className="text-text-muted hover:text-text">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs font-medium text-text-secondary">Título</label>
-                  <input
-                    type="text"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Ex: Dinossauros, Sistema Solar, ABC..."
-                    className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-medium text-text-secondary">Categoria</label>
-                    <select
-                      value={category}
-                      onChange={(e) => setCategory(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
-                    >
-                      {CATEGORIES.map((c) => (
-                        <option key={c.value} value={c.value}>{c.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-text-secondary">Faixa etária</label>
-                    <select
-                      value={ageRange}
-                      onChange={(e) => setAgeRange(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
-                    >
-                      {AGE_RANGES.map((a) => (
-                        <option key={a.value} value={a.value}>{a.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-text-secondary">Descrição (opcional)</label>
-                  <textarea
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Descreva o tópico para ajudar o LLM..."
-                    rows={3}
-                    className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
-                  />
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button>
-                  <Button variant="primary" onClick={handleCreate} disabled={creating || !title.trim()}>
-                    {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Criar"}
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {/* Topics grid */}
-          {topics.length === 0 ? (
-            <EmptyState
-              icon={<FileText className="h-8 w-8" />}
-              title="Nenhum tópico ainda"
-              description="Crie seu primeiro tópico Kids ou vá à aba Ideias para descobrir conteúdo automaticamente. As mídias são enviadas na aba Mídias."
-            />
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {topics.map((t: any) => (
-                <Card key={t.id} className="!p-5">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <h3 className="text-sm font-semibold">{t.title}</h3>
-                      <div className="mt-1 flex items-center gap-2">
-                        <Badge variant="info">{t.category}</Badge>
-                        <Badge variant="default">{t.age_range}</Badge>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleDelete(t.id)}
-                      className="text-text-muted hover:text-red-400 transition-colors"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-
-                  {t.description && (
-                    <p className="text-xs text-text-muted mb-3 line-clamp-2">{t.description}</p>
-                  )}
-
-                  <div className="flex items-center gap-2 mb-3">
-                    <ImageIcon className="h-4 w-4 text-text-muted" />
-                    <span className="text-xs text-text-secondary">{t.asset_count} mídia(s) vinculada(s)</span>
-                  </div>
-
-                  {t.asset_count > 0 && (
-                    <button
-                      onClick={() => setExpandedTopic(expandedTopic === t.id ? null : t.id)}
-                      className="text-[10px] text-accent hover:text-accent-warm transition-colors"
-                    >
-                      {expandedTopic === t.id ? "Ocultar mídias" : "Ver mídias vinculadas"}
-                    </button>
-                  )}
-
-                  {expandedTopic === t.id && (
-                    <TopicAssetsList topicId={t.id} onDeleted={refetch} />
-                  )}
-
-                  <p className="mt-3 text-[10px] text-text-muted">
-                    As mídias são gerenciadas na aba <strong>Mídias</strong>. A geração é automática via fila de ideias.
-                  </p>
-                </Card>
-              ))}
-            </div>
-          )}
-        </>
-      )}
 
       {tab === "media" && <MediaLibrarySection />}
       {tab === "config" && <ChannelConfigSection />}
@@ -289,17 +86,11 @@ function MediaLibrarySection() {
   const [descInput, setDescInput] = useState("");
   const [filterKind, setFilterKind] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
-  // Topic assignment modal
-  const [topicModalAssetId, setTopicModalAssetId] = useState<number | null>(null);
 
   const params: any = { include_public: true };
   if (filterKind) params.media_kind = filterKind;
   if (filterStatus) params.status = filterStatus;
   const { data, loading, refetch } = usePoll(() => api.listKidsLibraryAssets(params), 5000);
-
-  // Load topics for the assignment modal
-  const { data: topicsData } = usePoll(() => api.listKidsTopics(), 30000);
-  const topics = topicsData?.topics || [];
 
   // Separate own vs public (same pattern as content.tsx)
   const allAssets = data?.assets || [];
@@ -370,20 +161,24 @@ function MediaLibrarySection() {
     }
   };
 
-  const handleAssignTopic = async (topicId: number | null) => {
-    if (topicModalAssetId === null) return;
-    try {
-      await api.patchKidsAsset(topicModalAssetId, { topic_id: topicId ?? 0 });
-      toast.success("Tópico atualizado");
-      setTopicModalAssetId(null);
-      await refetch();
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao atribuir tópico");
-    }
-  };
-
   return (
     <div className="space-y-4">
+      {/* How it works banner */}
+      <Card className="!p-4 border-accent/20 bg-accent/5">
+        <div className="flex items-start gap-3">
+          <Info className="h-5 w-5 text-accent shrink-0 mt-0.5" />
+          <div className="text-xs text-text-secondary">
+            <p className="font-medium text-text">Como funciona</p>
+            <p className="mt-1">
+              <strong>1.</strong> Envie vídeos e imagens · <strong>2.</strong> Adicione <strong>tags</strong> (ex: dinossauro, floresta) — é assim que o sistema encontra as melhores mídias pra cada ideia · <strong>3.</strong> Vídeos são mapeados automaticamente (VLM analisa cada cena)
+            </p>
+            <p className="mt-1 text-text-muted">
+              Mídias sem tags = <strong>gerais</strong> (usadas como fallback pra qualquer vídeo, igual gameplays genéricas nos Games)
+            </p>
+          </div>
+        </div>
+      </Card>
+
       {/* Upload zone */}
       <div
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -418,12 +213,14 @@ function MediaLibrarySection() {
       {/* Upload metadata inputs */}
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <label className="text-xs font-medium text-text-secondary">Tags (separadas por vírgula)</label>
+          <label className="text-xs font-medium text-text-secondary">
+            Tags (separadas por vírgula) — categoriza a mídia
+          </label>
           <input
             type="text"
             value={tagsInput}
             onChange={(e) => setTagsInput(e.target.value)}
-            placeholder="Ex: dinossauro, natureza, verde"
+            placeholder="Ex: dinossauro, floresta, verde — vazio = geral"
             className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
           />
         </div>
@@ -513,7 +310,7 @@ function MediaLibrarySection() {
           <EmptyState
             icon={<Film className="h-8 w-8" />}
             title="Nenhuma mídia na biblioteca"
-            description="Envie imagens e vídeos para a biblioteca do canal. As mídias serão selecionadas automaticamente na geração de vídeos."
+            description="Envie imagens e vídeos para a biblioteca do canal. Adicione tags para categorizar — o sistema usa as tags pra encontrar as melhores mídias pra cada ideia."
           />
         ) : (
           <div className="grid gap-3">
@@ -521,9 +318,7 @@ function MediaLibrarySection() {
               <MediaLibraryCard
                 key={a.id}
                 asset={a}
-                topics={topics}
                 onDeleted={refetch}
-                onAssignTopic={(assetId) => setTopicModalAssetId(assetId)}
                 onCreateMappingJob={handleCreateMappingJob}
               />
             ))}
@@ -544,9 +339,7 @@ function MediaLibrarySection() {
               <MediaLibraryCard
                 key={a.id}
                 asset={a}
-                topics={topics}
                 onDeleted={refetch}
-                onAssignTopic={() => {}}
                 onCreateMappingJob={() => {}}
                 readOnly
               />
@@ -554,63 +347,6 @@ function MediaLibrarySection() {
           </div>
         </div>
       )}
-
-      {/* Topic assignment modal */}
-      {topicModalAssetId !== null && (
-        <TopicAssignmentModal
-          topics={topics}
-          onSelect={handleAssignTopic}
-          onClose={() => setTopicModalAssetId(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-// ── Topic Assignment Modal (equivalent to GameSearchModal in Games) ──────────
-
-function TopicAssignmentModal({
-  topics,
-  onSelect,
-  onClose,
-}: {
-  topics: any[];
-  onSelect: (topicId: number | null) => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="max-w-md w-full mx-4 rounded-xl border border-border bg-surface-card p-6" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Atribuir tópico</h3>
-          <button onClick={onClose} className="text-text-muted hover:text-text">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <p className="mb-4 text-xs text-text-muted">
-          Vincule esta mídia a um tópico editorial (ex: Dinossauros, Sistema Solar). A mídia sem tópico fica na biblioteca geral.
-        </p>
-        <div className="max-h-64 space-y-1.5 overflow-y-auto">
-          <button
-            onClick={() => onSelect(null)}
-            className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-text-muted hover:border-accent/40 hover:text-accent transition-colors"
-          >
-            <Tag className="h-3.5 w-3.5" />
-            Sem tópico (biblioteca geral)
-          </button>
-          {topics.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => onSelect(t.id)}
-              className="flex w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs hover:border-accent/40 hover:bg-surface-hover transition-colors"
-            >
-              <FileText className="h-3.5 w-3.5 text-accent" />
-              <span className="font-medium">{t.title}</span>
-              <Badge variant="default" className="ml-auto">{t.category}</Badge>
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
@@ -730,16 +466,12 @@ function KidsMappingTimeline({ assetId, filename }: { assetId: number; filename:
 
 function MediaLibraryCard({
   asset,
-  topics,
   onDeleted,
-  onAssignTopic,
   onCreateMappingJob,
   readOnly,
 }: {
   asset: any;
-  topics: any[];
   onDeleted: () => void;
-  onAssignTopic: (assetId: number) => void;
   onCreateMappingJob: (assetId: number, filename: string) => void;
   readOnly?: boolean;
 }) {
@@ -845,38 +577,15 @@ function MediaLibraryCard({
                 <Activity className="h-3 w-3" /> {asset.event_count} eventos
               </span>
             )}
-            {/* Topic badge — clickable to change (same pattern as game badge in content.tsx) */}
-            {!readOnly && (
-              asset.topic_title ? (
-                <button
-                  onClick={() => onAssignTopic(asset.id)}
-                  className="flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent transition-colors hover:bg-accent/20"
-                  title="Alterar tópico"
-                >
-                  <FileText className="h-3 w-3" />
-                  {asset.topic_title}
-                  <Pencil className="h-2.5 w-2.5 opacity-60" />
-                </button>
-              ) : (
-                <button
-                  onClick={() => onAssignTopic(asset.id)}
-                  className="flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-text-muted transition-colors hover:border-accent/40 hover:text-accent"
-                  title="Definir tópico"
-                >
-                  <FileText className="h-3 w-3" />
-                  Definir tópico
-                </button>
-              )
-            )}
-            {readOnly && asset.topic_title && (
-              <span className="flex items-center gap-1 text-text-secondary">
-                <FileText className="h-3 w-3" /> {asset.topic_title}
-              </span>
-            )}
-            {asset.tags && asset.tags.length > 0 && (
+            {/* Tags — the primary categorization (like game badge in Games) */}
+            {asset.tags && asset.tags.length > 0 ? (
               <span className="flex items-center gap-1">
                 <Tag className="h-3 w-3" /> {asset.tags.slice(0, 3).join(", ")}
                 {asset.tags.length > 3 && ` +${asset.tags.length - 3}`}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[10px] text-text-muted">
+                Geral — sem tags (fallback)
               </span>
             )}
           </div>
@@ -983,120 +692,6 @@ function MediaLibraryCard({
       )}
     </Card>
   );
-}
-
-// ── Topic Assets List ────────────────────────────────────────────────────────
-
-function TopicAssetsList({ topicId, onDeleted }: { topicId: number; onDeleted: () => void }) {
-  const { data, loading, refetch } = usePoll(() => api.listKidsAssets(topicId), 5000);
-  const [deleting, setDeleting] = useState<number | null>(null);
-
-  const assets = data?.assets || [];
-
-  const handleDelete = async (id: number) => {
-    if (!confirm("Excluir esta mídia?")) return;
-    setDeleting(id);
-    try {
-      await api.deleteKidsAsset(id);
-      toast.success("Mídia excluída");
-      await refetch();
-      await onDeleted();
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao excluir");
-    } finally {
-      setDeleting(null);
-    }
-  };
-
-  if (loading && !data) {
-    return <div className="mt-2 flex justify-center"><Spinner className="h-4 w-4" /></div>;
-  }
-
-  if (assets.length === 0) {
-    return <p className="mt-2 text-[10px] text-text-muted">Nenhuma mídia encontrada.</p>;
-  }
-
-  return (
-    <div className="mt-3 space-y-1.5 max-h-48 overflow-y-auto">
-      {assets.map((a: any) => (
-        <div key={a.id} className="flex items-center gap-2 rounded-md border border-border bg-surface px-2 py-1.5">
-          {/* Thumbnail or icon */}
-          {a.thumbnail_key ? (
-            <img
-              src={api.getKidsAssetThumbnailUrl(a.thumbnail_key)}
-              alt=""
-              className="h-8 w-8 rounded object-cover flex-shrink-0"
-            />
-          ) : (
-            <div className="flex-shrink-0">
-              {a.media_kind === "video" ? (
-                <VideoIcon className="h-4 w-4 text-text-muted" />
-              ) : (
-                <ImageIcon className="h-4 w-4 text-text-muted" />
-              )}
-            </div>
-          )}
-
-          {/* Filename + metadata */}
-          <div className="flex-1 min-w-0">
-            <p className="text-[11px] font-medium truncate">{a.filename}</p>
-            <div className="flex items-center gap-1.5 text-[9px] text-text-muted">
-              {a.media_kind === "video" && a.duration > 0 && (
-                <span>{a.duration.toFixed(1)}s</span>
-              )}
-              {a.width > 0 && a.height > 0 && (
-                <span>{a.width}×{a.height}</span>
-              )}
-              {a.file_size > 0 && (
-                <span>{(a.file_size / 1024 / 1024).toFixed(1)}MB</span>
-              )}
-            </div>
-          </div>
-
-          {/* Status badge */}
-          <AssetStatusBadge status={a.processing_status} error={a.process_error} />
-
-          {/* Delete */}
-          <button
-            onClick={() => handleDelete(a.id)}
-            disabled={deleting === a.id}
-            className="text-text-muted hover:text-red-400 transition-colors flex-shrink-0"
-          >
-            {deleting === a.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function AssetStatusBadge({ status, error }: { status: string; error?: string }) {
-  if (status === "ready") {
-    return <CheckCircle className="h-3.5 w-3.5 text-green-400 flex-shrink-0" />;
-  }
-  if (status === "failed") {
-    return (
-      <span title={error || "Erro no processamento"} className="flex-shrink-0">
-        <AlertCircle className="h-3.5 w-3.5 text-red-400" />
-      </span>
-    );
-  }
-  if (status === "processing") {
-    return (
-      <span title="Extraindo metadados (FFprobe + thumbnail)" className="flex-shrink-0">
-        <Loader2 className="h-3.5 w-3.5 text-yellow-400 animate-spin" />
-      </span>
-    );
-  }
-  if (status === "mapping") {
-    return (
-      <span title="Mapeando conteúdo (VLM + ASR → eventos semânticos)" className="flex-shrink-0">
-        <Loader2 className="h-3.5 w-3.5 text-blue-400 animate-spin" />
-      </span>
-    );
-  }
-  // queued or uploading
-  return <Clock className="h-3.5 w-3.5 text-text-muted flex-shrink-0" />;
 }
 
 // ── Tab Button ───────────────────────────────────────────────────────────────
