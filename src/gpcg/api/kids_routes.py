@@ -402,15 +402,18 @@ def list_library_assets(
     media_kind: Optional[str] = None,
     status: Optional[str] = None,
     topic_id: Optional[int] = None,
+    include_public: bool = False,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """List all media assets in the channel's Kids library.
 
     Supports optional filters: media_kind (image/video), status (ready/queued/
-    processing/failed), topic_id.
+    processing/failed), topic_id. When include_public=true, also returns
+    public assets from other users (community library), marked with is_own=false.
     """
     _require_kids_domain(user, db)
+    from gpcg.domains.kids.models import KidsMediaEvent, KidsTopic
     query = db.query(StoryAsset).filter(
         StoryAsset.user_id == user.id,
     )
@@ -421,6 +424,40 @@ def list_library_assets(
     if topic_id is not None:
         query = query.filter(StoryAsset.topic_id == topic_id)
     assets = query.order_by(StoryAsset.created_at.desc()).all()
+
+    # Public community assets from other users (if requested)
+    public_assets = []
+    if include_public:
+        pub_query = db.query(StoryAsset).filter(
+            StoryAsset.is_public == True,
+            StoryAsset.user_id != user.id,
+            StoryAsset.processing_status == AssetProcessingStatus.ready.value,
+        )
+        if media_kind:
+            pub_query = pub_query.filter(StoryAsset.media_kind == media_kind)
+        public_assets = pub_query.order_by(StoryAsset.created_at.desc()).all()
+
+    all_assets = assets + public_assets
+
+    # Batch-load topic titles and event counts to avoid N+1
+    topic_ids = {a.topic_id for a in all_assets if a.topic_id}
+    topic_map: dict[int, str] = {}
+    if topic_ids:
+        topics = db.query(KidsTopic).filter(KidsTopic.id.in_(topic_ids)).all()
+        topic_map = {t.id: t.title for t in topics}
+
+    video_asset_ids = [a.id for a in all_assets if a.media_kind == "video"]
+    event_count_map: dict[int, int] = {}
+    if video_asset_ids:
+        from sqlalchemy import func
+        rows = db.query(
+            KidsMediaEvent.asset_id,
+            func.count(KidsMediaEvent.id).label("cnt"),
+        ).filter(
+            KidsMediaEvent.asset_id.in_(video_asset_ids),
+        ).group_by(KidsMediaEvent.asset_id).all()
+        event_count_map = {r.asset_id: r.cnt for r in rows}
+
     return {
         "assets": [{
             "id": a.id,
@@ -439,9 +476,13 @@ def list_library_assets(
             "tags": a.tags or [],
             "description": a.description or "",
             "is_public": a.is_public,
+            "is_own": a.user_id == user.id,
+            "owner_user_id": a.user_id,
             "topic_id": a.topic_id,
+            "topic_title": topic_map.get(a.topic_id) if a.topic_id else None,
+            "event_count": event_count_map.get(a.id, 0) if a.media_kind == "video" else 0,
             "created_at": a.created_at.isoformat() if a.created_at else None,
-        } for a in assets]
+        } for a in all_assets]
     }
 
 
@@ -676,4 +717,63 @@ def get_kids_asset_events_public(
             "interesting_score": e.interesting_score,
             "analysis_version": e.analysis_version,
         } for e in events]
+    }
+
+
+# ── Create mapping job (frontend — re-trigger VLM+ASR mapping) ────────────────
+
+
+@router.post("/kids/assets/{asset_id}/create-mapping-job")
+def create_kids_mapping_job(
+    asset_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a mapping job for a Kids video asset.
+
+    Equivalent to POST /gameplays/{id}/create-mapping-job in Games.
+    Called by the frontend when the user clicks "Solicitar mapeamento"
+    on a video that is ready but has no events (or wants to re-map).
+
+    Creates a kids_asset_process job — the worker will download (or use
+    cached), run FFprobe (fast, already done), and run VLM+ASR mapping.
+    The mapping-result endpoint clears old events before inserting new.
+    """
+    _require_kids_domain(user, db)
+    import uuid as _uuid
+    from gpcg.core.models import (
+        Job, JobStatus, JobType, JobPriority, ContentDomain,
+    )
+
+    asset = db.query(StoryAsset).filter(
+        StoryAsset.id == asset_id,
+        StoryAsset.user_id == user.id,
+    ).first()
+    if not asset:
+        raise HTTPException(404, "Asset not found")
+    if asset.media_kind != "video":
+        raise HTTPException(400, "Mapping is only for video assets")
+    if asset.processing_status in ("queued", "processing", "mapping"):
+        raise HTTPException(409, f"Asset already processing (status={asset.processing_status})")
+
+    # Mark as queued — the worker will download via /kids/assets/{id}/download
+    asset.processing_status = AssetProcessingStatus.queued.value
+
+    job = Job(
+        job_uuid=str(_uuid.uuid4()),
+        type=JobType.kids_asset_process.value,
+        status=JobStatus.queued.value,
+        stage="queued",
+        domain=ContentDomain.kids.value,
+        user_id=user.id,
+        priority=JobPriority.normal.value,
+        artifacts={"asset_id": asset.id, "remap": True},
+    )
+    db.add(job)
+    db.flush()
+    db.commit()
+    log.info(f"Created mapping job #{job.id} for kids asset #{asset_id}")
+    return {
+        "job_id": job.id,
+        "processing_status": asset.processing_status,
     }

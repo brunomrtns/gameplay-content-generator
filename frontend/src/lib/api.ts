@@ -546,14 +546,17 @@ export const api = {
     request<any>("/kids/topics", { method: "POST", body: JSON.stringify(data) }),
   deleteKidsTopic: (id: number) => request<any>(`/kids/topics/${id}`, { method: "DELETE" }),
   // Library endpoints (channel-level, not topic-owned)
-  listKidsLibraryAssets: (params?: { media_kind?: string; status?: string; topic_id?: number }) => {
+  listKidsLibraryAssets: (params?: { media_kind?: string; status?: string; topic_id?: number; include_public?: boolean }) => {
     const clean: Record<string, string> = {};
     if (params?.media_kind) clean.media_kind = params.media_kind;
     if (params?.status) clean.status = params.status;
     if (params?.topic_id !== undefined) clean.topic_id = String(params.topic_id);
+    if (params?.include_public) clean.include_public = "true";
     const qs = new URLSearchParams(clean).toString();
     return request<{ assets: any[] }>(`/kids/assets${qs ? `?${qs}` : ""}`);
   },
+  createKidsMappingJob: (assetId: number) =>
+    request<{ job_id: number; processing_status: string }>(`/kids/assets/${assetId}/create-mapping-job`, { method: "POST" }),
   uploadKidsLibraryAsset: async (
     file: File,
     opts?: { tags?: string; description?: string; topic_id?: number },

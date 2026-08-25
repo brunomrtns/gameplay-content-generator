@@ -27,6 +27,9 @@ import {
   Eye,
   Monitor,
   Server,
+  Users,
+  Pencil,
+  Gamepad2,
 } from "lucide-react";
 
 const CATEGORIES = [
@@ -61,10 +64,10 @@ const TOPIC_LIBRARY_CATEGORIES = [
   { value: "curiosity", label: "Curiosidades" },
 ];
 
-type Tab = "topics" | "media" | "config";
+type Tab = "media" | "topics" | "config";
 
 export function KidsPage() {
-  const [tab, setTab] = useState<Tab>("topics");
+  const [tab, setTab] = useState<Tab>("media");
   const { data: topicsData, loading, refetch } = usePoll(() => api.listKidsTopics(), 15000);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -121,9 +124,9 @@ export function KidsPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Tópicos Kids</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Conteúdo Kids</h1>
           <p className="mt-1 text-sm text-text-secondary">
-            Crie conteúdo educativo e divertido para crianças
+            Gerencie suas mídias, tópicos e o perfil do canal
           </p>
           <span className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-accent/10 border border-accent/20 px-2 py-0.5 text-[10px] font-medium text-accent">
             Kids
@@ -138,8 +141,8 @@ export function KidsPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border">
-        <TabButton active={tab === "topics"} onClick={() => setTab("topics")} icon={<FileText className="h-4 w-4" />} label="Tópicos" />
         <TabButton active={tab === "media"} onClick={() => setTab("media")} icon={<Film className="h-4 w-4" />} label="Mídias" />
+        <TabButton active={tab === "topics"} onClick={() => setTab("topics")} icon={<FileText className="h-4 w-4" />} label="Tópicos" />
         <TabButton active={tab === "config"} onClick={() => setTab("config")} icon={<Settings className="h-4 w-4" />} label="Configuração do Canal" />
       </div>
 
@@ -286,17 +289,32 @@ function MediaLibrarySection() {
   const [descInput, setDescInput] = useState("");
   const [filterKind, setFilterKind] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
+  // Topic assignment modal
+  const [topicModalAssetId, setTopicModalAssetId] = useState<number | null>(null);
 
-  const params: any = {};
+  const params: any = { include_public: true };
   if (filterKind) params.media_kind = filterKind;
   if (filterStatus) params.status = filterStatus;
   const { data, loading, refetch } = usePoll(() => api.listKidsLibraryAssets(params), 5000);
 
-  const assets = data?.assets || [];
+  // Load topics for the assignment modal
+  const { data: topicsData } = usePoll(() => api.listKidsTopics(), 30000);
+  const topics = topicsData?.topics || [];
+
+  // Separate own vs public (same pattern as content.tsx)
+  const allAssets = data?.assets || [];
+  const assets = allAssets.filter((a: any) => a.is_own !== false);
+  const publicAssets = allAssets.filter((a: any) => a.is_own === false);
+
   const kidsUploads = uploads.filter((u) => u.kind === "kids");
   const hasActiveUploads = kidsUploads.some(
     (u) => u.status === "preparing" || u.status === "uploading" || u.status === "processing"
   );
+
+  // Processing count (queued/processing/mapping)
+  const processingCount = assets.filter((a: any) =>
+    ["queued", "processing", "mapping"].includes(a.processing_status)
+  ).length;
 
   const uploadFile = async (file: File) => {
     const id = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -341,6 +359,28 @@ function MediaLibrarySection() {
     setDragging(false);
     handleFiles(e.dataTransfer.files);
   }, [tagsInput, descInput]);
+
+  const handleCreateMappingJob = async (assetId: number, filename: string) => {
+    try {
+      await api.createKidsMappingJob(assetId);
+      toast.success(`Mapeamento solicitado para "${filename}". O worker processará em breve.`);
+      await refetch();
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao solicitar mapeamento");
+    }
+  };
+
+  const handleAssignTopic = async (topicId: number | null) => {
+    if (topicModalAssetId === null) return;
+    try {
+      await api.patchKidsAsset(topicModalAssetId, { topic_id: topicId ?? 0 });
+      toast.success("Tópico atualizado");
+      setTopicModalAssetId(null);
+      await refetch();
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao atribuir tópico");
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -421,6 +461,16 @@ function MediaLibrarySection() {
         </div>
       )}
 
+      {/* Processing banner (same as content.tsx) */}
+      {processingCount > 0 && (
+        <div className="flex items-center gap-3 rounded-xl border border-accent-warm/30 bg-accent-warm/5 px-4 py-3">
+          <Loader2 className="h-4 w-4 text-accent-warm animate-spin" />
+          <span className="text-sm text-accent-warm">
+            {processingCount} mídia(s) em processamento — a análise leva alguns minutos
+          </span>
+        </div>
+      )}
+
       {/* Filters */}
       <div className="flex items-center gap-2">
         <button
@@ -450,24 +500,117 @@ function MediaLibrarySection() {
         </button>
       </div>
 
-      {/* Assets list — same pattern as content.tsx (horizontal cards) */}
-      {loading && !data ? (
-        <div className="flex justify-center py-12">
-          <Spinner className="h-6 w-6" />
-        </div>
-      ) : assets.length === 0 ? (
-        <EmptyState
-          icon={<Film className="h-8 w-8" />}
-          title="Nenhuma mídia na biblioteca"
-          description="Envie imagens e vídeos para a biblioteca do canal. As mídias serão selecionadas automaticamente na geração de vídeos."
-        />
-      ) : (
-        <div className="grid gap-3">
-          {assets.map((a: any) => (
-            <MediaLibraryCard key={a.id} asset={a} onDeleted={refetch} />
-          ))}
+      {/* Own assets list — same pattern as content.tsx (horizontal cards) */}
+      <div>
+        <h2 className="mb-4 text-lg font-semibold">
+          Mídias {assets && `(${assets.length})`}
+        </h2>
+        {loading && !data ? (
+          <div className="flex justify-center py-12">
+            <Spinner className="h-6 w-6" />
+          </div>
+        ) : assets.length === 0 ? (
+          <EmptyState
+            icon={<Film className="h-8 w-8" />}
+            title="Nenhuma mídia na biblioteca"
+            description="Envie imagens e vídeos para a biblioteca do canal. As mídias serão selecionadas automaticamente na geração de vídeos."
+          />
+        ) : (
+          <div className="grid gap-3">
+            {assets.map((a: any) => (
+              <MediaLibraryCard
+                key={a.id}
+                asset={a}
+                topics={topics}
+                onDeleted={refetch}
+                onAssignTopic={(assetId) => setTopicModalAssetId(assetId)}
+                onCreateMappingJob={handleCreateMappingJob}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Public community assets (same pattern as content.tsx) */}
+      {publicAssets.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-text-muted" />
+            <h2 className="text-sm font-semibold">Mídias públicas da comunidade</h2>
+            <Badge variant="default">{publicAssets.length}</Badge>
+          </div>
+          <div className="grid gap-3">
+            {publicAssets.map((a: any) => (
+              <MediaLibraryCard
+                key={a.id}
+                asset={a}
+                topics={topics}
+                onDeleted={refetch}
+                onAssignTopic={() => {}}
+                onCreateMappingJob={() => {}}
+                readOnly
+              />
+            ))}
+          </div>
         </div>
       )}
+
+      {/* Topic assignment modal */}
+      {topicModalAssetId !== null && (
+        <TopicAssignmentModal
+          topics={topics}
+          onSelect={handleAssignTopic}
+          onClose={() => setTopicModalAssetId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Topic Assignment Modal (equivalent to GameSearchModal in Games) ──────────
+
+function TopicAssignmentModal({
+  topics,
+  onSelect,
+  onClose,
+}: {
+  topics: any[];
+  onSelect: (topicId: number | null) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="max-w-md w-full mx-4 rounded-xl border border-border bg-surface-card p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Atribuir tópico</h3>
+          <button onClick={onClose} className="text-text-muted hover:text-text">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mb-4 text-xs text-text-muted">
+          Vincule esta mídia a um tópico editorial (ex: Dinossauros, Sistema Solar). A mídia sem tópico fica na biblioteca geral.
+        </p>
+        <div className="max-h-64 space-y-1.5 overflow-y-auto">
+          <button
+            onClick={() => onSelect(null)}
+            className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-text-muted hover:border-accent/40 hover:text-accent transition-colors"
+          >
+            <Tag className="h-3.5 w-3.5" />
+            Sem tópico (biblioteca geral)
+          </button>
+          {topics.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => onSelect(t.id)}
+              className="flex w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs hover:border-accent/40 hover:bg-surface-hover transition-colors"
+            >
+              <FileText className="h-3.5 w-3.5 text-accent" />
+              <span className="font-medium">{t.title}</span>
+              <Badge variant="default" className="ml-auto">{t.category}</Badge>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -585,7 +728,21 @@ function KidsMappingTimeline({ assetId, filename }: { assetId: number; filename:
 
 // ── Media Library Card (horizontal, same pattern as content.tsx) ────────────
 
-function MediaLibraryCard({ asset, onDeleted }: { asset: any; onDeleted: () => void }) {
+function MediaLibraryCard({
+  asset,
+  topics,
+  onDeleted,
+  onAssignTopic,
+  onCreateMappingJob,
+  readOnly,
+}: {
+  asset: any;
+  topics: any[];
+  onDeleted: () => void;
+  onAssignTopic: (assetId: number) => void;
+  onCreateMappingJob: (assetId: number, filename: string) => void;
+  readOnly?: boolean;
+}) {
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [tags, setTags] = useState((asset.tags || []).join(", "));
@@ -597,6 +754,8 @@ function MediaLibraryCard({ asset, onDeleted }: { asset: any; onDeleted: () => v
   const isMapping = asset.processing_status === "mapping" || asset.processing_status === "queued";
   const isReady = asset.processing_status === "ready";
   const isFailed = asset.processing_status === "failed";
+  // Can request mapping when video is ready but has no events
+  const canMap = isReady && asset.media_kind === "video" && (asset.event_count === 0 || asset.event_count === undefined);
 
   const handleDelete = async () => {
     if (!confirm(`Excluir "${asset.filename}"?`)) return;
@@ -640,7 +799,7 @@ function MediaLibraryCard({ asset, onDeleted }: { asset: any; onDeleted: () => v
   };
 
   return (
-    <Card className="!p-4">
+    <Card className={`!p-4 ${readOnly ? "opacity-80" : ""}`}>
       <div className="flex items-center gap-4">
         {/* Thumbnail / icon */}
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-surface-elevated border border-border overflow-hidden">
@@ -680,6 +839,40 @@ function MediaLibraryCard({ asset, onDeleted }: { asset: any; onDeleted: () => v
             {asset.file_size > 0 && (
               <span>{(asset.file_size / 1024 / 1024).toFixed(1)}MB</span>
             )}
+            {/* Event count badge for mapped videos */}
+            {isReady && asset.media_kind === "video" && asset.event_count > 0 && (
+              <span className="flex items-center gap-1 text-accent">
+                <Activity className="h-3 w-3" /> {asset.event_count} eventos
+              </span>
+            )}
+            {/* Topic badge — clickable to change (same pattern as game badge in content.tsx) */}
+            {!readOnly && (
+              asset.topic_title ? (
+                <button
+                  onClick={() => onAssignTopic(asset.id)}
+                  className="flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent transition-colors hover:bg-accent/20"
+                  title="Alterar tópico"
+                >
+                  <FileText className="h-3 w-3" />
+                  {asset.topic_title}
+                  <Pencil className="h-2.5 w-2.5 opacity-60" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => onAssignTopic(asset.id)}
+                  className="flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-text-muted transition-colors hover:border-accent/40 hover:text-accent"
+                  title="Definir tópico"
+                >
+                  <FileText className="h-3 w-3" />
+                  Definir tópico
+                </button>
+              )
+            )}
+            {readOnly && asset.topic_title && (
+              <span className="flex items-center gap-1 text-text-secondary">
+                <FileText className="h-3 w-3" /> {asset.topic_title}
+              </span>
+            )}
             {asset.tags && asset.tags.length > 0 && (
               <span className="flex items-center gap-1">
                 <Tag className="h-3 w-3" /> {asset.tags.slice(0, 3).join(", ")}
@@ -695,7 +888,11 @@ function MediaLibraryCard({ asset, onDeleted }: { asset: any; onDeleted: () => v
             {(isProcessing || isMapping) && <Loader2 className="h-3 w-3 animate-spin" />}
             {procCfg.label}
           </Badge>
-          {isReady && !editing && (
+          {readOnly ? (
+            <Badge variant="default">
+              <Eye className="h-3 w-3" /> Pública
+            </Badge>
+          ) : isReady && !editing ? (
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setEditing(true)}
@@ -720,7 +917,7 @@ function MediaLibraryCard({ asset, onDeleted }: { asset: any; onDeleted: () => v
                 {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               </button>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -734,6 +931,22 @@ function MediaLibraryCard({ asset, onDeleted }: { asset: any; onDeleted: () => v
       {/* Error message */}
       {isFailed && asset.process_error && (
         <p className="mt-2 text-xs text-red-400">{asset.process_error}</p>
+      )}
+
+      {/* Solicitar mapeamento button (same as content.tsx canMap) */}
+      {canMap && !readOnly && (
+        <div className="mt-3 flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onCreateMappingJob(asset.id, asset.filename)}
+          >
+            <Cpu className="h-3.5 w-3.5" /> Solicitar mapeamento
+          </Button>
+          <span className="text-xs text-text-muted">
+            Envia para o worker analisar (VLM + ASR)
+          </span>
+        </div>
       )}
 
       {/* Edit mode (tags + description) */}
