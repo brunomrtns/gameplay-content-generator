@@ -446,7 +446,7 @@ class TestStoryAssetsPrimaryKeyMigration:
                     has_audio, thumbnail_key, process_error, tags, description,
                     is_public)
                 VALUES (NULL, 1, 'test.mp4', 'key', 'hash', 100, 640, 360,
-                    'ready', NULL, 0, 'video', 10.0, 'h264', 1, 'thumb', '',
+                    'ready', '{}', 0, 'video', 10.0, 'h264', 1, 'thumb', '',
                     '[]', '', 0)
             """))
 
