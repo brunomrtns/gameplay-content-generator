@@ -84,7 +84,7 @@ class StatsOut(BaseModel):
 def _item_to_out(item, db=None) -> KnowledgeItemOut:
     game_name = None
     if item.game_id and db is not None:
-        from gpcg.core.models import Game
+        from gpcg.domains.games.models import Game
         game = db.get(Game, item.game_id)
         if game:
             game_name = game.canonical_name
