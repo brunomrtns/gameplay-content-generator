@@ -43,6 +43,7 @@ router = APIRouter()
 class KnowledgeItemOut(BaseModel):
     id: int
     game_id: Optional[int] = None
+    game_name: Optional[str] = None
     title: str
     content: str
     item_type: str
@@ -80,10 +81,17 @@ class StatsOut(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _item_to_out(item) -> KnowledgeItemOut:
+def _item_to_out(item, db=None) -> KnowledgeItemOut:
+    game_name = None
+    if item.game_id and db is not None:
+        from gpcg.core.models import Game
+        game = db.get(Game, item.game_id)
+        if game:
+            game_name = game.canonical_name
     return KnowledgeItemOut(
         id=item.id,
         game_id=item.game_id,
+        game_name=game_name,
         title=item.title,
         content=item.content,
         item_type=item.item_type,
@@ -132,7 +140,7 @@ def list_knowledge_items(
         exclude_used_by_consumer=user.id,
     )
     return {
-        "items": [_item_to_out(i) for i in items],
+        "items": [_item_to_out(i, db) for i in items],
         "total": len(items),
     }
 
@@ -156,7 +164,7 @@ def get_knowledge_item_detail(
     item = get_by_id(db, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="KnowledgeItem not found")
-    return _item_to_out(item)
+    return _item_to_out(item, db)
 
 
 @router.post("/knowledge-items/{item_id}/reject")
@@ -297,7 +305,7 @@ def create_manual_knowledge_item(
     except Exception:
         pass  # non-fatal
 
-    return _item_to_out(item)
+    return _item_to_out(item, db)
 
 
 # ── Idea Queue (user-curated playlist of KnowledgeItems) ─────────────────────
@@ -384,7 +392,7 @@ def get_idea_queue(
             continue
         ki = db.get(KnowledgeItem, ki_id)
         if ki:
-            item_out = _item_to_out(ki).model_dump()
+            item_out = _item_to_out(ki, db).model_dump()
             item_out["gameplay_preference"] = entry.get("gameplay_preference")
             item_out["reuse_override"] = entry.get("reuse_override")
             items.append(item_out)

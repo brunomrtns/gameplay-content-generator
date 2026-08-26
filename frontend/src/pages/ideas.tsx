@@ -5,6 +5,7 @@ import { Spinner } from "@/components/ui";
 interface KnowledgeItem {
   id: number;
   game_id: number | null;
+  game_name: string | null;
   title: string;
   content: string;
   item_type: string;
@@ -833,8 +834,8 @@ export function IdeasPage() {
                       {TYPE_LABELS[item.item_type] || item.item_type}
                     </span>
                     {item.game_id && (
-                      <span className="text-xs text-text-muted">
-                        jogo-specific
+                      <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted">
+                        {item.game_name || `Jogo #${item.game_id}`}
                       </span>
                     )}
                     {/* V3: Show gameplay preference — clickable to change */}
