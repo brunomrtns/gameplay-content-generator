@@ -1408,13 +1408,10 @@ class RemoteWorker:
         })
         log.info(f"Mapping job #{job_id} completed: {len(events)} events")
 
-        # Clean up downloaded gameplay (HD space is finite — analysis JSON is enough)
-        # The gameplay can be re-downloaded from VPS if re-mapping is needed.
-        try:
-            local_path.unlink()
-            log.info(f"Cleaned up gameplay: {local_path.name} ({local_path.stat().st_size // (1024*1024)}MB freed)")
-        except OSError:
-            pass
+        # Keep the gameplay file locally — generation jobs need the actual video
+        # to extract clips and render. Previously this was deleted to save HD
+        # space, but that broke generation because the VPS also deletes its temp
+        # copy after confirm-download, leaving no copy anywhere.
 
     # ── Knowledge document download ──────────────────────────────────────────
 
