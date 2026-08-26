@@ -1118,12 +1118,12 @@ export function IdeasPage() {
               ))}
             </select>
 
-            {/* V4: Specific source selector (optional, only if ≥3min free) */}
+            {/* V4: Specific source selector (optional) */}
             {selectedGameplay && (
               <div className="mb-3">
                 {loadingSources ? (
                   <p className="text-xs text-text-muted">Carregando gameplays disponíveis…</p>
-                ) : availableSources.length > 0 ? (
+                ) : (
                   <>
                     <label className="block text-sm font-medium text-text mb-1.5">
                       Gameplay específica (opcional)
@@ -1133,21 +1133,23 @@ export function IdeasPage() {
                       onChange={(e) => setSelectedSource(e.target.value ? Number(e.target.value) : null)}
                       className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
                     >
-                      <option value="">Usar todas as gameplays do jogo</option>
+                      <option value="">Usar todas as gameplays do jogo (recomendado)</option>
                       {availableSources.map((s) => (
                         <option key={s.source_id} value={s.source_id}>
                           {(s.filename || `Source #${s.source_id}`).slice(0, 50)} · {Math.floor(s.free_seconds / 60)}min livre · {s.eligible_events}/{s.total_events} eventos
                         </option>
                       ))}
                     </select>
-                    <p className="text-xs text-text-muted mt-1">
-                      Apenas gameplays com ≥3 min de material livre aparecem aqui.
-                    </p>
+                    {availableSources.length > 0 ? (
+                      <p className="text-xs text-text-muted mt-1">
+                        Restringe os cortes a uma única gameplay. O padrão usa todas as gameplays do jogo, com mais variedade de cenas.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-text-muted mt-1">
+                        Nenhuma gameplay individual tem 3 min de material livre no momento — o sistema usará todas as gameplays do jogo automaticamente, o que é o comportamento padrão.
+                      </p>
+                    )}
                   </>
-                ) : (
-                  <p className="text-xs text-text-muted">
-                    Nenhuma gameplay individual com ≥3 min livre disponível para este jogo.
-                  </p>
                 )}
               </div>
             )}
@@ -1268,7 +1270,7 @@ export function IdeasPage() {
               <div className="mb-3">
                 {editLoadingSources ? (
                   <p className="text-xs text-text-muted">Carregando gameplays disponíveis…</p>
-                ) : editAvailableSources.length > 0 ? (
+                ) : (
                   <>
                     <label className="block text-sm font-medium text-text mb-1.5">
                       Gameplay específica (opcional)
@@ -1278,18 +1280,23 @@ export function IdeasPage() {
                       onChange={(e) => setEditSelectedSource(e.target.value ? Number(e.target.value) : null)}
                       className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
                     >
-                      <option value="">Usar todas as gameplays do jogo</option>
+                      <option value="">Usar todas as gameplays do jogo (recomendado)</option>
                       {editAvailableSources.map((s) => (
                         <option key={s.source_id} value={s.source_id}>
                           {(s.filename || `Source #${s.source_id}`).slice(0, 50)} · {Math.floor(s.free_seconds / 60)}min livre · {s.eligible_events}/{s.total_events} eventos
                         </option>
                       ))}
                     </select>
+                    {editAvailableSources.length > 0 ? (
+                      <p className="text-xs text-text-muted mt-1">
+                        Restringe os cortes a uma única gameplay. O padrão usa todas as gameplays do jogo, com mais variedade de cenas.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-text-muted mt-1">
+                        Nenhuma gameplay individual tem 3 min de material livre no momento — o sistema usará todas as gameplays do jogo automaticamente, o que é o comportamento padrão.
+                      </p>
+                    )}
                   </>
-                ) : (
-                  <p className="text-xs text-text-muted">
-                    Nenhuma gameplay individual com ≥3 min livre disponível.
-                  </p>
                 )}
               </div>
             )}
