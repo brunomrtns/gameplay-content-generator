@@ -8,7 +8,7 @@ export interface PresentationConfig {
   enabled: boolean;
   // Thumbnail
   thumbnail_enabled: boolean;
-  thumbnail_mode: "auto" | "imported" | "fixed";
+  thumbnail_mode: "auto" | "fixed";
   thumbnail_image_path?: string;
   thumbnail_text_enabled: boolean;
   thumbnail_text_source: "title" | "custom";
@@ -20,7 +20,7 @@ export interface PresentationConfig {
   // Opening
   opening_enabled: boolean;
   opening_duration: number;
-  opening_image_mode: "same_as_thumbnail" | "auto" | "imported" | "fixed";
+  opening_image_mode: "same_as_thumbnail" | "auto" | "fixed";
   opening_image_path?: string;
   opening_text_enabled: boolean;
   opening_text_source: "title" | "hook" | "custom";
@@ -186,12 +186,11 @@ export function PresentationControls({
                     onChange={(v) => updateP("thumbnail_mode", v)}
                   >
                     <option value="auto">Automático (frame do gameplay)</option>
-                    <option value="imported">Imagem importada (por vídeo)</option>
                     <option value="fixed">Imagem fixa (para todos os vídeos)</option>
                   </Select>
                 </div>
 
-                {(cfg.thumbnail_mode === "imported" || cfg.thumbnail_mode === "fixed") && (
+                {cfg.thumbnail_mode === "fixed" && (
                   <div>
                     <Label>Imagem</Label>
                     <div className="flex gap-2">
@@ -351,12 +350,11 @@ export function PresentationControls({
                   >
                     <option value="same_as_thumbnail">Mesma imagem da capa</option>
                     <option value="auto">Automático (frame do gameplay)</option>
-                    <option value="imported">Imagem importada</option>
-                    <option value="fixed">Imagem fixa</option>
+                    <option value="fixed">Imagem fixa (para todos os vídeos)</option>
                   </Select>
                 </div>
 
-                {(cfg.opening_image_mode === "imported" || cfg.opening_image_mode === "fixed") && (
+                {cfg.opening_image_mode === "fixed" && (
                   <div>
                     <Label>Imagem da abertura</Label>
                     <div className="flex gap-2">
