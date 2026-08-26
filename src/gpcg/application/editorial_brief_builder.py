@@ -15,6 +15,8 @@ See docs/EDITORIAL_INTELLIGENCE_V2_PROPOSAL.md §6, §7.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from sqlalchemy.orm import Session
 
 from gpcg.domain.editorial_types import (
@@ -69,6 +71,7 @@ class EditorialBriefBuilder:
             intent.priority_games,
             active_templates,
             profile.editorial_keywords or [],
+            focus=intent.collection_focus,
         )
         scoring_weights = self._derive_scoring_weights(profile.content_type_affinity or {})
 
@@ -83,11 +86,13 @@ class EditorialBriefBuilder:
             max_queries_per_game=5,
             max_total_queries=30,
             user_id=user_id,
+            collection_focus=intent.collection_focus,
         )
         log.info(
             f"EditorialBrief for user {user_id}: "
             f"{len(feeds)} feeds, {len(search_queries)} queries, "
-            f"templates={active_templates}"
+            f"templates={active_templates}, "
+            f"focus={intent.collection_focus.get('type') if intent.collection_focus else 'none'}"
         )
         return brief
 
@@ -143,12 +148,18 @@ class EditorialBriefBuilder:
         priority_games: list,
         active_templates: list[str],
         custom_keywords: list[str],
+        focus: Optional[dict] = None,
     ) -> list[SearchQuery]:
         """Expand games × templates into search queries.
 
         For each game, distributes queries across active templates in round-robin
         fashion (1 keyword per template per round) to ensure all templates get
         representation. Respects max_queries_per_game and max_total_queries.
+
+        Collection focus: when focus.type is "topic" or "game+topic", also
+        generates topic-based queries ("{topic} {keyword}") with game_id=None
+        (general pool, for curiosity_short format). These are appended after
+        the game-based queries.
         """
         queries: list[SearchQuery] = []
         for game in priority_games:
@@ -195,6 +206,35 @@ class EditorialBriefBuilder:
                 round_idx += 1
             if len(queries) >= self._max_total:
                 break
+
+        # ── Collection focus: topic-based queries ───────────────────────────
+        # When the user sets a topic focus (with or without a game), generate
+        # queries like "{topic} secrets", "{topic} facts", etc. These KIs go
+        # to the general pool (game_id=None) and work with curiosity_short
+        # format (any gameplay as background).
+        if focus and focus.get("type") in ("topic", "game+topic") and focus.get("topic"):
+            topic = focus["topic"].strip()
+            if topic:
+                topic_queries = 0
+                max_topic_queries = self._max_per_game  # same cap as a game
+                for template_name in active_templates:
+                    if topic_queries >= max_topic_queries or len(queries) >= self._max_total:
+                        break
+                    template = SEARCH_TEMPLATES.get(template_name)
+                    if not template:
+                        continue
+                    all_keywords = merge_keywords(template, custom_keywords)
+                    for kw in all_keywords:
+                        if topic_queries >= max_topic_queries or len(queries) >= self._max_total:
+                            break
+                        queries.append(SearchQuery(
+                            text=f"{topic} {kw}",
+                            game_id=None,  # general pool — not game-specific
+                            template_name=template_name,
+                            item_type=template.item_type,
+                        ))
+                        topic_queries += 1
+
         return queries[:self._max_total]
 
     # Properties for limits (overridable in tests via subclassing)

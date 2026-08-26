@@ -9,6 +9,10 @@ Endpoints:
   Domain:
     GET    /api/channel/domains           — list available content domains
     POST   /api/channel/reset-domain      — destructive domain switch (reset channel)
+  Collection Focus:
+    GET    /api/channel/collection-focus  — get current focus (or null)
+    PUT    /api/channel/collection-focus  — set/update focus
+    DELETE /api/channel/collection-focus  — remove focus (back to normal)
 
 NOTE: File-upload knowledge base (RAG) endpoints have been removed.
 Channel knowledge is now managed via manual ideas (KnowledgeItem with
@@ -260,3 +264,116 @@ def reset_domain(
             raise HTTPException(422, str(e))
 
     return {"ok": True, **summary}
+
+
+# ── Collection Focus ─────────────────────────────────────────────────────────
+# Temporary editorial direction for a "campaign". When set, the
+# EditorialIntentBuilder/BriefBuilder direct RSS collection toward this
+# game and/or topic, regardless of gameplay inventory. Null = no focus.
+
+
+_FOCUS_TYPES = {"game", "topic", "game+topic"}
+_VALID_ITEM_TYPES = {"news", "curiosity", "lore", "fact"}
+
+
+@router.get("/channel/collection-focus")
+def get_collection_focus(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get the current collection focus (or null if none set)."""
+    profile = db.query(ChannelProfile).filter(
+        ChannelProfile.user_id == user.id
+    ).first()
+    if not profile:
+        return {"collection_focus": None}
+    return {"collection_focus": profile.collection_focus}
+
+
+@router.put("/channel/collection-focus")
+def set_collection_focus(
+    data: dict,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Set or update the collection focus.
+
+    Body:
+        {"type": "game", "game_id": 52189, "game_name": "Grand Theft Auto VI"}
+        {"type": "topic", "topic": "mistérios do oceano", "item_types": ["curiosity"]}
+        {"type": "game+topic", "game_id": 52189, "game_name": "GTA VI", "topic": "crime"}
+
+    item_types is optional — when set, only those KI types are collected.
+    """
+    focus_type = data.get("type")
+    if focus_type not in _FOCUS_TYPES:
+        raise HTTPException(
+            422,
+            f"Invalid focus type '{focus_type}'. Valid: {sorted(_FOCUS_TYPES)}",
+        )
+
+    focus: dict = {"type": focus_type}
+
+    # Validate game fields for game / game+topic
+    if focus_type in ("game", "game+topic"):
+        game_id = data.get("game_id")
+        game_name = data.get("game_name")
+        if not game_id or not isinstance(game_id, int):
+            raise HTTPException(422, "game_id (int) is required for this focus type")
+        if not game_name or not isinstance(game_name, str):
+            raise HTTPException(422, "game_name (str) is required for this focus type")
+        focus["game_id"] = game_id
+        focus["game_name"] = game_name.strip()
+
+    # Validate topic fields for topic / game+topic
+    if focus_type in ("topic", "game+topic"):
+        topic = data.get("topic")
+        if not topic or not isinstance(topic, str) or not topic.strip():
+            raise HTTPException(422, "topic (str) is required for this focus type")
+        focus["topic"] = topic.strip()
+
+    # Optional item_types filter
+    item_types = data.get("item_types")
+    if item_types is not None:
+        if not isinstance(item_types, list):
+            raise HTTPException(422, "item_types must be a list of strings")
+        validated_types = [t for t in item_types if t in _VALID_ITEM_TYPES]
+        if validated_types:
+            focus["item_types"] = validated_types
+
+    # Timestamp
+    from datetime import datetime, timezone
+    focus["added_at"] = datetime.now(timezone.utc).isoformat()
+
+    with session_scope() as session:
+        profile = session.query(ChannelProfile).filter(
+            ChannelProfile.user_id == user.id
+        ).first()
+        if not profile:
+            profile = ChannelProfile(user_id=user.id)
+            session.add(profile)
+            session.flush()
+        profile.collection_focus = focus
+        session.flush()
+
+    log.info(f"Collection focus set for user {user.id}: {focus_type}")
+    return {"ok": True, "collection_focus": focus}
+
+
+@router.delete("/channel/collection-focus")
+def clear_collection_focus(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Remove the collection focus (back to normal, gameplay-driven collection)."""
+    with session_scope() as session:
+        profile = session.query(ChannelProfile).filter(
+            ChannelProfile.user_id == user.id
+        ).first()
+        if not profile:
+            return {"ok": True, "collection_focus": None}
+        profile.collection_focus = None
+        session.flush()
+
+    log.info(f"Collection focus cleared for user {user.id}")
+    return {"ok": True, "collection_focus": None}

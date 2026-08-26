@@ -333,6 +333,7 @@ def serialize_profile(profile: ChannelProfile) -> dict[str, Any]:
         "custom_feeds": profile.custom_feeds or [],
         "gameplay_driven_collection": profile.gameplay_driven_collection if profile.gameplay_driven_collection is not None else True,
         "diversity_strictness": profile.diversity_strictness if profile.diversity_strictness is not None else 0.5,
+        "collection_focus": profile.collection_focus,
         # V2 learned
         "learned_preferences": profile.learned_preferences or {},
         "production_history_summary": profile.production_history_summary or {},

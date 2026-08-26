@@ -288,6 +288,9 @@ def reset_channel_domain(
         profile.content_type_affinity = {}
         profile.editorial_keywords = []
         profile.custom_feeds = []
+        # Clear collection focus — it's domain-specific (a game focus makes
+        # no sense after switching to kids, and vice versa).
+        profile.collection_focus = None
         # Keep free-text fields (niche, tone, etc.) — user may want to
         # reconfigure them, but they're not domain-specific per se.
     session.flush()

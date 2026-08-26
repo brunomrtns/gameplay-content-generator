@@ -102,6 +102,11 @@ class EditorialIntent:
     time_context: str = "normal"  # "normal" | "breaking_news_window" | "evergreen_fill"
     # Format rotation hint
     format_rotation: str = "balanced"  # "balanced" | "prefer_curiosity_short" | "prefer_generate_short"
+    # Collection focus — temporary editorial direction (game/topic/game+topic).
+    # When set, overrides/augments priority_games and adds topic-based queries.
+    # Shape: {"type": "game"|"topic"|"game+topic", "game_id": int,
+    #         "game_name": str, "topic": str, "item_types": [str]}
+    collection_focus: Optional[dict] = None
 
 
 # ── Editorial Brief ──────────────────────────────────────────────────────────
@@ -132,6 +137,8 @@ class EditorialBrief:
     max_total_queries: int = 30
     # User id this brief was built for (for audit)
     user_id: Optional[int] = None
+    # Collection focus (inherited from Intent) — drives topic-based queries
+    collection_focus: Optional[dict] = None
 
 
 # ── Collection Result ────────────────────────────────────────────────────────

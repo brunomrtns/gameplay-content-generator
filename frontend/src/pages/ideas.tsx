@@ -94,6 +94,16 @@ export function IdeasPage() {
   // Edit game for existing queue item — shows only games with gameplay available
   const [editQueueGameItem, setEditQueueGameItem] = useState<KnowledgeItem | null>(null);
   const [editSelectedGameplay, setEditSelectedGameplay] = useState<number | null>(null);
+  // Collection Focus (campaign direction)
+  const [focus, setFocus] = useState<any>(null);
+  const [showFocusModal, setShowFocusModal] = useState(false);
+  const [focusType, setFocusType] = useState<"game" | "topic" | "game+topic">("game");
+  const [focusGameSearch, setFocusGameSearch] = useState("");
+  const [focusGameResults, setFocusGameResults] = useState<any[]>([]);
+  const [focusSelectedGame, setFocusSelectedGame] = useState<any | null>(null);
+  const [focusTopic, setFocusTopic] = useState("");
+  const [focusItemTypes, setFocusItemTypes] = useState<string[]>([]);
+  const [focusSaving, setFocusSaving] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -101,7 +111,7 @@ export function IdeasPage() {
     try {
       // "manual" is a source_type filter, not item_type — handle specially
       const isManualFilter = filterType === "manual";
-      const [itemsRes, statsRes, queueRes, availRes, jobRes] = await Promise.all([
+      const [itemsRes, statsRes, queueRes, availRes, jobRes, focusRes] = await Promise.all([
         api.listKnowledgeItems({
           item_type: isManualFilter ? undefined : filterType || undefined,
           status: filterStatus || undefined,
@@ -111,6 +121,7 @@ export function IdeasPage() {
         api.getIdeaQueue(),
         api.getGameplayAvailability(),
         api.getCurrentJob(),
+        api.getCollectionFocus(),
       ]);
       let allItems = itemsRes.items || [];
       if (isManualFilter) {
@@ -125,6 +136,7 @@ export function IdeasPage() {
       setQueueIds(new Set(qIds));
       setAvailability(availRes.games || []);
       setCurrentJob(jobRes.job);
+      setFocus(focusRes.collection_focus);
     } catch (e: any) {
       setError(e.message || "Failed to load content ideas");
     } finally {
@@ -328,6 +340,112 @@ export function IdeasPage() {
     return "text-red-400";
   };
 
+  // ── Collection Focus handlers ──────────────────────────────────────────
+  const handleFocusGameSearch = async (q: string) => {
+    setFocusGameSearch(q);
+    if (q.length < 2) {
+      setFocusGameResults([]);
+      return;
+    }
+    try {
+      const res = await api.searchCatalog(q, 8);
+      setFocusGameResults(res.results || []);
+    } catch {
+      setFocusGameResults([]);
+    }
+  };
+
+  const handleSelectFocusGame = (game: any) => {
+    setFocusSelectedGame(game);
+    setFocusGameSearch(game.name);
+    setFocusGameResults([]);
+  };
+
+  const handleSaveFocus = async () => {
+    setFocusSaving(true);
+    setError(null);
+    try {
+      const payload: any = { type: focusType };
+      if (focusType === "game" || focusType === "game+topic") {
+        if (!focusSelectedGame) {
+          setError("Selecione um jogo do catálogo");
+          setFocusSaving(false);
+          return;
+        }
+        payload.game_id = focusSelectedGame.id;
+        payload.game_name = focusSelectedGame.name;
+      }
+      if (focusType === "topic" || focusType === "game+topic") {
+        if (!focusTopic.trim()) {
+          setError("Digite um tema para a coleta");
+          setFocusSaving(false);
+          return;
+        }
+        payload.topic = focusTopic.trim();
+      }
+      if (focusItemTypes.length > 0) {
+        payload.item_types = focusItemTypes;
+      }
+      await api.setCollectionFocus(payload);
+      setShowFocusModal(false);
+      // Reset modal state
+      setFocusGameSearch("");
+      setFocusGameResults([]);
+      setFocusSelectedGame(null);
+      setFocusTopic("");
+      setFocusItemTypes([]);
+      loadData();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setFocusSaving(false);
+    }
+  };
+
+  const handleClearFocus = async () => {
+    try {
+      await api.clearCollectionFocus();
+      setFocus(null);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const openFocusModal = () => {
+    // Pre-fill with current focus if any
+    if (focus) {
+      setFocusType(focus.type || "game");
+      if (focus.game_id) {
+        setFocusSelectedGame({ id: focus.game_id, name: focus.game_name });
+        setFocusGameSearch(focus.game_name || "");
+      }
+      if (focus.topic) setFocusTopic(focus.topic);
+      if (focus.item_types) setFocusItemTypes(focus.item_types);
+    } else {
+      setFocusType("game");
+      setFocusGameSearch("");
+      setFocusGameResults([]);
+      setFocusSelectedGame(null);
+      setFocusTopic("");
+      setFocusItemTypes([]);
+    }
+    setShowFocusModal(true);
+  };
+
+  const toggleFocusItemType = (t: string) => {
+    setFocusItemTypes((prev) =>
+      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t],
+    );
+  };
+
+  const focusLabel = (f: any): string => {
+    if (!f) return "";
+    if (f.type === "game") return `Jogo: ${f.game_name}`;
+    if (f.type === "topic") return `Tema: ${f.topic}`;
+    if (f.type === "game+topic") return `${f.game_name} + ${f.topic}`;
+    return "";
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -349,10 +467,198 @@ export function IdeasPage() {
             disabled={collecting}
             className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-500 disabled:opacity-50"
           >
-            {collecting ? "Coletando..." : "Coletar Agora"}
+            {collecting ? "Coletando..." : focus ? `Coletar (foco: ${focusLabel(focus)})` : "Coletar Agora"}
           </button>
         </div>
       </div>
+
+      {/* Collection Focus Bar */}
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3">
+        <svg className="h-5 w-5 text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+        {focus ? (
+          <>
+            <div className="flex-1 min-w-0">
+              <span className="text-xs text-text-muted">Foco de coleta ativo</span>
+              <p className="text-sm font-medium text-text truncate">
+                {focusLabel(focus)}
+                {focus.item_types && focus.item_types.length > 0 && (
+                  <span className="ml-2 text-xs text-text-muted">
+                    ({focus.item_types.join(", ")})
+                  </span>
+                )}
+              </p>
+            </div>
+            <button
+              onClick={openFocusModal}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs text-text-muted hover:text-text hover:border-text-muted"
+            >
+              Editar
+            </button>
+            <button
+              onClick={handleClearFocus}
+              className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/10"
+            >
+              Remover
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="flex-1 min-w-0">
+              <span className="text-sm text-text-muted">
+                Sem foco — coleta geral (derivada do gameplay inventory + perfil editorial)
+              </span>
+            </div>
+            <button
+              onClick={openFocusModal}
+              className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-500/20"
+            >
+              Definir Foco
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Collection Focus Modal */}
+      {showFocusModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowFocusModal(false)}>
+          <div
+            className="w-full max-w-lg rounded-xl border border-border bg-surface p-6 space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-text">Foco de Coleta</h2>
+              <button
+                onClick={() => setShowFocusModal(false)}
+                className="text-text-muted hover:text-text"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-sm text-text-muted">
+              Direcione a busca de ideias para um jogo, tema, ou ambos. As ideias coletadas aparecem na lista normal — o foco só decide o QUE buscar.
+            </p>
+
+            {/* Focus type selector */}
+            <div>
+              <label className="block text-xs font-medium text-text-muted mb-2">Tipo de foco</label>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { v: "game", label: "Jogo" },
+                  { v: "topic", label: "Tema livre" },
+                  { v: "game+topic", label: "Jogo + Tema" },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.v}
+                    onClick={() => setFocusType(opt.v)}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                      focusType === opt.v
+                        ? "border-amber-500 bg-amber-500/20 text-amber-300"
+                        : "border-border text-text-muted hover:text-text hover:border-text-muted"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Game selector (for game / game+topic) */}
+            {(focusType === "game" || focusType === "game+topic") && (
+              <div className="relative">
+                <label className="block text-xs font-medium text-text-muted mb-2">Jogo</label>
+                <input
+                  type="text"
+                  placeholder="Buscar jogo no catálogo..."
+                  value={focusGameSearch}
+                  onChange={(e) => handleFocusGameSearch(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                />
+                {focusGameResults.length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full rounded-lg border border-border bg-surface shadow-lg max-h-60 overflow-y-auto">
+                    {focusGameResults.map((g) => (
+                      <button
+                        key={g.id}
+                        onClick={() => handleSelectFocusGame(g)}
+                        className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-bg"
+                      >
+                        {g.cover_url && (
+                          <img src={g.cover_url} alt="" className="h-8 w-8 rounded object-cover" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-sm text-text truncate">{g.name}</p>
+                          {g.release_year && (
+                            <p className="text-xs text-text-muted">{g.release_year}</p>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {focusSelectedGame && (
+                  <p className="mt-2 text-xs text-green-400">
+                    Selecionado: {focusSelectedGame.name}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Topic input (for topic / game+topic) */}
+            {(focusType === "topic" || focusType === "game+topic") && (
+              <div>
+                <label className="block text-xs font-medium text-text-muted mb-2">Tema</label>
+                <input
+                  type="text"
+                  placeholder="Ex: mistérios do oceano, fatos sobre espaço, crime organizado..."
+                  value={focusTopic}
+                  onChange={(e) => setFocusTopic(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                />
+              </div>
+            )}
+
+            {/* Item types filter (optional) */}
+            <div>
+              <label className="block text-xs font-medium text-text-muted mb-2">
+                Tipos de ideia (opcional — vazio = todos)
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {(["news", "curiosity", "lore", "fact"] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => toggleFocusItemType(t)}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                      focusItemTypes.includes(t)
+                        ? "border-amber-500 bg-amber-500/20 text-amber-300"
+                        : "border-border text-text-muted hover:text-text"
+                    }`}
+                  >
+                    {TYPE_LABELS[t] || t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                onClick={() => setShowFocusModal(false)}
+                className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveFocus}
+                disabled={focusSaving}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50"
+              >
+                {focusSaving ? "Salvando..." : "Salvar Foco"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create Manual Idea Form */}
       {showCreateForm && (

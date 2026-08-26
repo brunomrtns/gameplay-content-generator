@@ -62,13 +62,14 @@ class EditorialIntentBuilder:
         recent_videos = self._get_recent_videos(session, user_id, limit=10)
         queue_state = self._get_queue_state(session, user_id)
 
+        focus = profile.collection_focus or None
         priority_games = self._compute_priority_games(
-            gameplay_inventory, recent_videos, profile
+            gameplay_inventory, recent_videos, profile, focus
         )
         cooldown_games = self._compute_cooldowns(
             recent_videos, profile.diversity_strictness if profile.diversity_strictness is not None else 0.5
         )
-        collection_targets = self._compute_targets(profile, queue_state)
+        collection_targets = self._compute_targets(profile, queue_state, focus)
         fill_strategy = self._determine_fill_strategy(queue_state, profile)
         format_rotation = self._determine_format_rotation(recent_videos)
 
@@ -79,13 +80,15 @@ class EditorialIntentBuilder:
             fill_strategy=fill_strategy,
             time_context="normal",
             format_rotation=format_rotation,
+            collection_focus=focus,
         )
         log.info(
             f"EditorialIntent for user {user_id}: "
             f"targets={collection_targets}, "
             f"priority_games={[g.name for g in priority_games]}, "
             f"cooldowns={cooldown_games}, "
-            f"fill={fill_strategy}, rotation={format_rotation}"
+            f"fill={fill_strategy}, rotation={format_rotation}, "
+            f"focus={focus.get('type') if focus else 'none'}"
         )
         return intent
 
@@ -165,19 +168,45 @@ class EditorialIntentBuilder:
         gameplay_inventory: list[dict],
         recent_videos: list[Video],
         profile: ChannelProfile,
+        focus: Optional[dict] = None,
     ) -> list[GameTarget]:
         """Compute which games to prioritize for collection.
 
         Priority = (clips_available / max_clips) * (1 - recent_coverage_penalty)
 
         If gameplay_driven_collection is False, all games get equal priority.
+
+        Collection focus: when focus.type is "game" or "game+topic", the
+        focused game is injected with maximum priority (1.0) regardless of
+        gameplay inventory. This lets the user start a campaign on a game
+        that has no gameplay uploaded yet (e.g. GTA 6 pre-release).
         """
-        if not gameplay_inventory:
-            return []
+        # ── Collection focus: inject focused game at max priority ──────────
+        focus_targets: list[GameTarget] = []
+        if focus and focus.get("type") in ("game", "game+topic"):
+            fg_id = focus.get("game_id")
+            fg_name = focus.get("game_name") or ""
+            if fg_id and fg_name:
+                # Check if the focused game is already in the inventory
+                inv_match = next(
+                    (g for g in gameplay_inventory if g["game_id"] == fg_id),
+                    None,
+                )
+                clips = inv_match["clips_ready"] if inv_match else 0
+                focus_targets.append(GameTarget(
+                    game_id=fg_id,
+                    name=fg_name,
+                    priority=1.0,
+                    reason="foco de coleta (campanha do usuário)",
+                    clips_ready=clips,
+                ))
+
+        if not gameplay_inventory and not focus_targets:
+            return focus_targets
 
         # If gameplay-driven collection is disabled, all games equal priority
         if profile.gameplay_driven_collection is False:
-            return [
+            base = [
                 GameTarget(
                     game_id=g["game_id"],
                     name=g["name"],
@@ -187,43 +216,47 @@ class EditorialIntentBuilder:
                 )
                 for g in gameplay_inventory
             ]
+        else:
+            # Count recent coverage per game
+            coverage = Counter()
+            for v in recent_videos:
+                if v.game_id:
+                    coverage[v.game_id] += 1
 
-        # Count recent coverage per game
-        coverage = Counter()
-        for v in recent_videos:
-            if v.game_id:
-                coverage[v.game_id] += 1
+            max_clips = max((g["clips_ready"] for g in gameplay_inventory), default=1)
+            max_coverage = max(coverage.values(), default=0)
 
-        max_clips = max((g["clips_ready"] for g in gameplay_inventory), default=1)
-        max_coverage = max(coverage.values(), default=0)
+            base = []
+            for g in gameplay_inventory:
+                # Skip the focused game here — it's already in focus_targets
+                if focus_targets and g["game_id"] == focus_targets[0].game_id:
+                    continue
+                clips_ratio = g["clips_ready"] / max_clips if max_clips > 0 else 0
+                cov = coverage.get(g["game_id"], 0)
+                coverage_penalty = cov / max(max_coverage, 3) if max_coverage > 0 else 0
+                # Priority floor of 0.15 ensures lightly-clipped games still receive
+                # some collection attention, preventing a single heavily-clipped game
+                # from monopolizing collection. See CONVERGENCE_RISK_ANALYSIS.md Risk 5.
+                priority = max(0.15, clips_ratio * (1 - coverage_penalty))
 
-        targets = []
-        for g in gameplay_inventory:
-            clips_ratio = g["clips_ready"] / max_clips if max_clips > 0 else 0
-            cov = coverage.get(g["game_id"], 0)
-            coverage_penalty = cov / max(max_coverage, 3) if max_coverage > 0 else 0
-            # Priority floor of 0.15 ensures lightly-clipped games still receive
-            # some collection attention, preventing a single heavily-clipped game
-            # from monopolizing collection. See CONVERGENCE_RISK_ANALYSIS.md Risk 5.
-            priority = max(0.15, clips_ratio * (1 - coverage_penalty))
+                reason_parts = [f"{g['clips_ready']} clips"]
+                if cov > 0:
+                    reason_parts.append(f"coberto {cov}x recentemente")
+                else:
+                    reason_parts.append("sem cobertura recente")
 
-            reason_parts = [f"{g['clips_ready']} clips"]
-            if cov > 0:
-                reason_parts.append(f"coberto {cov}x recentemente")
-            else:
-                reason_parts.append("sem cobertura recente")
+                base.append(GameTarget(
+                    game_id=g["game_id"],
+                    name=g["name"],
+                    priority=round(priority, 3),
+                    reason=", ".join(reason_parts),
+                    clips_ready=g["clips_ready"],
+                ))
 
-            targets.append(GameTarget(
-                game_id=g["game_id"],
-                name=g["name"],
-                priority=round(priority, 3),
-                reason=", ".join(reason_parts),
-                clips_ready=g["clips_ready"],
-            ))
-
-        # Sort by priority descending
-        targets.sort(key=lambda t: t.priority, reverse=True)
-        return targets
+        # Focus targets go first (highest priority), then the rest sorted desc
+        combined = focus_targets + base
+        combined.sort(key=lambda t: t.priority, reverse=True)
+        return combined
 
     # ── Cooldowns ──────────────────────────────────────────────────────────
 
@@ -259,11 +292,15 @@ class EditorialIntentBuilder:
 
     # ── Collection targets ─────────────────────────────────────────────────
 
-    def _compute_targets(self, profile: ChannelProfile, queue_state: dict) -> dict[str, int]:
+    def _compute_targets(self, profile: ChannelProfile, queue_state: dict, focus: Optional[dict] = None) -> dict[str, int]:
         """Compute how many KIs to collect per item_type this cycle.
 
         Based on content_type_affinity (higher affinity → more items) and
         queue state (if queue already has items of a type, reduce target).
+
+        Collection focus: when focus.item_types is set, zero out targets
+        for item types not in the focus list (the user only wants those
+        types for this campaign).
         """
         affinity = profile.content_type_affinity or {}
         types_in_queue = queue_state.get("types_in_queue", set())
@@ -283,6 +320,13 @@ class EditorialIntentBuilder:
         for item_type in list(targets.keys()):
             if item_type in types_in_queue and queue_state["length"] >= queue_state["max_size"] // 2:
                 targets[item_type] = max(0, targets[item_type] - 2)
+
+        # Collection focus: restrict to focus.item_types if set
+        if focus and focus.get("item_types"):
+            allowed = set(focus["item_types"])
+            for item_type in list(targets.keys()):
+                if item_type not in allowed:
+                    targets[item_type] = 0
 
         return targets
 

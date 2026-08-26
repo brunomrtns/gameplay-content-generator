@@ -540,6 +540,25 @@ export const api = {
     return res.json() as Promise<{ results: any[]; count: number }>;
   },
 
+  // ── Collection Focus (campaign direction) ──────────────────────────────
+  getCollectionFocus: () =>
+    request<{ collection_focus: any }>("/channel/collection-focus"),
+  setCollectionFocus: (data: {
+    type: "game" | "topic" | "game+topic";
+    game_id?: number;
+    game_name?: string;
+    topic?: string;
+    item_types?: string[];
+  }) =>
+    request<{ ok: boolean; collection_focus: any }>("/channel/collection-focus", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  clearCollectionFocus: () =>
+    request<{ ok: boolean; collection_focus: null }>("/channel/collection-focus", {
+      method: "DELETE",
+    }),
+
   // ── Kids Domain ─────────────────────────────────────────────────────────
   listKidsTopics: () => request<{ topics: any[] }>("/kids/topics"),
   createKidsTopic: (data: { title: string; category?: string; age_range?: string; description?: string }) =>

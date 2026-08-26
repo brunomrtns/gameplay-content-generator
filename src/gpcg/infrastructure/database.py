@@ -210,6 +210,7 @@ def init_db() -> None:
     _ensure_column(engine, "channel_profiles", "production_history_summary", "JSON")
     # Domain model: channel domain (games, kids, movies, etc.)
     _ensure_column(engine, "channel_profiles", "domain", "VARCHAR(30) DEFAULT 'games'")
+    _ensure_column(engine, "channel_profiles", "collection_focus", "JSON")
     # Domain guard: job domain (set at creation, checked on result submission)
     _ensure_column(engine, "jobs", "domain", "VARCHAR(30) DEFAULT 'games'")
     # ── Editorial Intelligence V2 — KnowledgeItem lifecycle ────────────────

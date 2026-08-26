@@ -627,6 +627,15 @@ class ChannelProfile(Base):
     gameplay_driven_collection: Mapped[bool] = mapped_column(Boolean, default=True)
     diversity_strictness: Mapped[float] = mapped_column(Float, default=0.5)
 
+    # Collection focus — temporary editorial direction for a "campaign".
+    # When set, the EditorialIntentBuilder/BriefBuilder direct collection
+    # (RSS search queries) toward this game and/or topic, regardless of
+    # gameplay inventory. Null = no focus (default, legacy behavior).
+    # Shape: {"type": "game"|"topic"|"game+topic",
+    #         "game_id": int, "game_name": str,
+    #         "topic": str, "item_types": [str], "added_at": ISO}
+    collection_focus: Mapped[Optional[dict]] = mapped_column(JSON, default=None, nullable=True)
+
     # ═══════════════════════════════════════════════════════════════════════
     # GROUP 2: Learning (system-acquired, adaptive with decay)
     # ═══════════════════════════════════════════════════════════════════════
