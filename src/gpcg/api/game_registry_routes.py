@@ -429,7 +429,7 @@ def get_gameplay_sources_for_game(
     """List individual gameplay sources for a specific game, with free-time info.
 
     Used by the idea-queue modal to let the user pick a specific source.
-    Only returns sources with ≥3 minutes (180s) of FREE gameplay time,
+    Only returns sources with ≥2 minutes (120s) of FREE gameplay time,
     considering the user's clip usage history and max_uses config.
 
     Returns per-source:
@@ -509,10 +509,10 @@ def get_gameplay_sources_for_game(
             "availability": avail["status"],
         })
 
-    # Filter: only sources with ≥180s (3 min) of free gameplay
-    result = [s for s in result if s["free_seconds"] >= 180.0]
+    # Filter: only sources with ≥120s (2 min) of free gameplay
+    result = [s for s in result if s["free_seconds"] >= 120.0]
 
     # Sort: most free time first
     result.sort(key=lambda s: s["free_seconds"], reverse=True)
 
-    return {"game_id": game_id, "sources": result, "min_free_seconds": 180}
+    return {"game_id": game_id, "sources": result, "min_free_seconds": 120}

@@ -1146,7 +1146,7 @@ export function IdeasPage() {
                       </p>
                     ) : (
                       <p className="text-xs text-text-muted mt-1">
-                        Nenhuma gameplay individual tem 3 min de material livre no momento — o sistema usará todas as gameplays do jogo automaticamente, o que é o comportamento padrão.
+                        Nenhuma gameplay individual tem 2 min de material livre no momento — o sistema usará todas as gameplays do jogo automaticamente, o que é o comportamento padrão.
                       </p>
                     )}
                   </>
@@ -1293,7 +1293,7 @@ export function IdeasPage() {
                       </p>
                     ) : (
                       <p className="text-xs text-text-muted mt-1">
-                        Nenhuma gameplay individual tem 3 min de material livre no momento — o sistema usará todas as gameplays do jogo automaticamente, o que é o comportamento padrão.
+                        Nenhuma gameplay individual tem 2 min de material livre no momento — o sistema usará todas as gameplays do jogo automaticamente, o que é o comportamento padrão.
                       </p>
                     )}
                   </>
