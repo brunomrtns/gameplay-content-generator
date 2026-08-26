@@ -107,23 +107,32 @@ bump_version() {
 # ── Step 0: Verificar working tree ───────────────────────────────────────────
 log "Verificando pré-requisitos..."
 
-# ── Safety: aguardar worker local se estiver em download de mapeamento ────────
-# O deploy reinicia o container da API na VPS, o que interrompe downloads em
-# andamento. Se o worker local estiver baixando uma gameplay, aguardamos.
+# ── Safety: aguardar worker local se estiver processando qualquer job ────────
+# O deploy reinicia o container da API na VPS, o que causa 502 Bad Gateway
+# temporário. Isso interrompe qualquer job que o worker esteja processando
+# (download de gameplay, geração de vídeo, coleta de conteúdo). Aguardamos
+# até o worker estar idle para não prejudicar jobs em andamento.
 check_worker_busy() {
   # Verifica se o serviço gpcg-worker está rodando localmente
   if ! systemctl --user is-active gpcg-worker &>/dev/null; then
     return 1  # worker não está rodando, pode deployar
   fi
 
-  # Pergunta à API se há jobs de mapeamento em stage de download
+  # Pergunta à API se há jobs rodando no worker que seriam interrompidos
+  # pelo reinício do container da API durante o deploy.
+  # Inclui:
+  #   - mapping em stage de download (baixando gameplay da VPS)
+  #   - qualquer generate_short / curiosity_short rodando (worker fala
+  #     com a API durante content_planning, script, render, upload)
+  #   - content_collect rodando (RSS + scoring)
   local raw_output
   raw_output=$(vps "docker exec gpcg-api python3 -c \"
 import sqlite3, json
 c = sqlite3.connect('/app/data/gpcg.db')
 c.row_factory = sqlite3.Row
 cur = c.cursor()
-rows = cur.execute(\\\"SELECT j.id, j.stage, j.progress, w.worker_id FROM jobs j JOIN workers w ON j.worker_id = w.id WHERE j.status = 'running' AND j.type = 'mapping' AND j.stage IN ('download', 'downloading')\\\").fetchall()
+# Jobs rodando atribuídos a um worker (exclui jobs VPS-only com worker_id NULL)
+rows = cur.execute(\\\"SELECT j.id, j.type, j.stage, j.progress, w.worker_id FROM jobs j JOIN workers w ON j.worker_id = w.id WHERE j.status = 'running' AND j.worker_id IS NOT NULL\\\").fetchall()
 if rows:
     for r in rows:
         print(json.dumps(dict(r)))
@@ -139,7 +148,7 @@ else:
     log "Aviso: não foi possível verificar estado do worker — continuando deploy"
     return 1
   elif [[ "$worker_status" == "IDLE" ]]; then
-    return 1  # nenhum job em download, pode deployar
+    return 1  # nenhum job rodando, pode deployar
   else
     echo "$worker_status"
     return 0
@@ -154,12 +163,12 @@ while true; do
     break  # pode deployar
   fi
   if [[ $WAITED -eq 0 ]]; then
-    log "Worker local está baixando gameplay — aguardando para não interromper:"
+    log "Worker local está processando job(s) — aguardando para não interromper:"
     echo "$BUSY_OUTPUT" | sed 's/^/    /'
   fi
   if [[ $WAITED -ge $MAX_WAIT ]]; then
     err "Timeout ($((MAX_WAIT/60))min) aguardando worker. Deploy abortado."
-    err "Rode o deploy novamente quando o mapeamento terminar."
+    err "Rode o deploy novamente quando o worker terminar."
     exit 1
   fi
   if [[ $((WAITED % 30)) -eq 0 ]] && [[ $WAITED -gt 0 ]]; then
