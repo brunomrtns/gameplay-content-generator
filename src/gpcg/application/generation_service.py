@@ -819,6 +819,19 @@ class GenerationService:
                 }
                 session.flush()
 
+        # ── Stage: presentation (optional — thumbnail + opening) ─────────────
+        # Non-fatal: if the stage fails, the pipeline continues without
+        # the Presentation Layer (graceful degradation to current behavior).
+        config_snapshot = self._get_artifact(job_id, "config_snapshot") or {}
+        presentation_cfg_dict = config_snapshot.get("presentation") or {}
+        from gpcg.domain.presentation_config import PresentationConfig
+        presentation_config = PresentationConfig.from_dict(presentation_cfg_dict)
+        if presentation_config.enabled:
+            self._set_stage(job_id, JobStage.presentation)
+            self._run_presentation_stage(
+                job_id, script_id, presentation_config, is_curiosity, bg_game_id
+            )
+
         # ── Stage: music_selection ──────────────────────────────────────────
         self._set_stage(job_id, JobStage.music_selection)
         with self._session_scope() as session:
@@ -873,7 +886,8 @@ class GenerationService:
 
                 clips = []
                 for ci in clips_info:
-                    asset = session.get(GameplayAsset, ci["asset_id"])
+                    # Presentation opening clip has asset_id=None (pre-rendered)
+                    asset = session.get(GameplayAsset, ci["asset_id"]) if ci.get("asset_id") else None
                     clips.append(SelectedClip(
                         asset=asset,
                         source_path=ci["source_path"],
@@ -1027,6 +1041,97 @@ class GenerationService:
 
     # ── Helpers ─────────────────────────────────────────────────────────────
 
+    def _run_presentation_stage(
+        self,
+        job_id: int,
+        script_id: int,
+        config: "PresentationConfig",
+        is_curiosity: bool,
+        bg_game_id: Optional[int],
+    ) -> None:
+        """Run the Presentation Layer stage (thumbnail + opening).
+
+        Non-fatal: on any failure, logs a warning and continues. The pipeline
+        will proceed without the Presentation Layer (current behavior).
+        """
+        from gpcg.application.presentation_service import PresentationService
+
+        clips_info = self._get_artifact(job_id, "selected_clips") or []
+        video_format = self._get_artifact(job_id, "video_format") or self.settings.gpcg_video_format
+        narration_wav = self._get_artifact(job_id, "narration_wav")
+
+        # Determine the gameplay source for auto thumbnail selection
+        gameplay_source_id = None
+        gameplay_source_path = ""
+        if clips_info:
+            first_clip = clips_info[0]
+            gameplay_source_id = first_clip.get("source_id")
+            gameplay_source_path = first_clip.get("source_path", "")
+
+        # Get topic + title + script first line
+        with self._session_scope() as session:
+            job = session.get(Job, job_id)
+            plan = session.get(ContentPlan, job.content_plan_id)
+            script = session.get(Script, script_id) if script_id else None
+            topic = plan.topic if plan else ""
+            # Title: prefer social_title (from metadata_generation), fallback to topic
+            title = self._get_artifact(job_id, "social_title") or topic
+            script_first_line = ""
+            if script and script.final:
+                lines = [l.strip() for l in script.final.split("\n") if l.strip()]
+                script_first_line = lines[0] if lines else ""
+
+        # Work directory for presentation assets
+        work_dir = self.settings.presentation_dir / f"job_{job_id}"
+        work_dir.mkdir(parents=True, exist_ok=True)
+
+        # The scene_dir will be created by RenderPlanBuilder later.
+        # We render the opening to a temp path here, and it will be
+        # processed as a regular clip (the builder extracts it).
+        service = PresentationService()
+        with self._session_scope() as session:
+            result = service.apply(
+                session=session,
+                job_id=job_id,
+                topic=topic,
+                title=title,
+                script_first_line=script_first_line,
+                gameplay_source_id=gameplay_source_id,
+                gameplay_source_path=gameplay_source_path,
+                selected_clips=clips_info,
+                config=config,
+                scene_dir=work_dir,
+                video_format=video_format,
+                narration_wav=Path(narration_wav) if narration_wav else None,
+            )
+
+        if not result.success:
+            log.info(f"presentation stage: no output for job {job_id} ({result.error})")
+            return
+
+        # Store artifacts
+        artifacts_update = {}
+        if result.thumbnail_path:
+            artifacts_update["presentation_thumbnail_path"] = result.thumbnail_path
+        if result.opening_scene_path:
+            artifacts_update["presentation_opening_path"] = result.opening_scene_path
+            artifacts_update["presentation_opening_duration"] = result.opening_duration
+
+        # Update selected_clips if the opening was prepended
+        if result.updated_clips:
+            artifacts_update["selected_clips"] = result.updated_clips
+
+        with self._session_scope() as session:
+            job = session.get(Job, job_id)
+            job.artifacts = {**job.artifacts, **artifacts_update}
+            session.flush()
+
+        log.info(
+            f"presentation stage complete for job {job_id}: "
+            f"thumbnail={'yes' if result.thumbnail_path else 'no'}, "
+            f"opening={'yes' if result.opening_scene_path else 'no'}"
+        )
+
     def _run_metadata_generation(self, job_id: int) -> None:
         """Generate social metadata (title, description, tags) via LLM.
 
@@ -1124,12 +1229,15 @@ class GenerationService:
                 # Use per-user YouTube OAuth (user.google_user_id) if available,
                 # otherwise fall back to the global config user ID.
                 yt_user_id = job.user_id if job.user_id else self.settings.gpcg_youtube_user_id
+                # Presentation Layer: pass thumbnail if available
+                thumb_path = self._get_artifact(job_id, "presentation_thumbnail_path")
                 result = self.youtube_adapter.upload_to_youtube(
                     video_path,
                     title=title,
                     description=description,
                     tags=tags,
                     user_id=yt_user_id,
+                    thumbnail_path=thumb_path,
                 )
             except Exception as e:
                 log.error(f"youtube_upload: adapter error: {e}")

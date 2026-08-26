@@ -118,6 +118,7 @@ class JobStage(str, enum.Enum):
     tts = "tts"
     gameplay_selection = "gameplay_selection"
     visual_selection = "visual_selection"  # Kids: image selection (analogous to gameplay_selection)
+    presentation = "presentation"  # Presentation Layer: thumbnail + opening (optional)
     music_selection = "music_selection"
     render_plan = "render_plan"
     render = "render"

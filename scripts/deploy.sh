@@ -415,6 +415,20 @@ location_block = """    # ── GPCG (Gameplay Content Generator) ────�
         proxy_buffering    on;
         proxy_cache_valid  200 24h;
     }
+    # Presentation Layer images — cached (user-uploaded, rarely change)
+    location ~ ^/gpcg/api/presentation/image/ {
+        limit_req zone=api_limit burst=30 nodelay;
+        rewrite ^/gpcg/(.*)$ /$1 break;
+        proxy_pass         http://gpcg_api;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_buffering    on;
+        proxy_cache_valid  200 24h;
+    }
     # All other GPCG API routes
     location /gpcg/ {
         limit_req zone=api_limit burst=30 nodelay;

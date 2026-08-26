@@ -395,6 +395,18 @@ export const api = {
   deleteVoice: (filename: string) =>
     request<any>(`/voices/${encodeURIComponent(filename)}`, { method: "DELETE" }),
 
+  // ── Presentation Layer ─────────────────────────────────────────────────
+  uploadPresentationImage: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<{ storage_key: string; filename: string; file_size: number }>(
+      "/presentation/upload-image",
+      { method: "POST", body: fd }
+    );
+  },
+  presentationImageUrl: (storageKey: string) =>
+    `${API_BASE}/presentation/image/${storageKey}`,
+
   // ── Videos ─────────────────────────────────────────────────────────────
   listVideos: (game_id?: number) =>
     request<any[]>(`/videos${game_id ? `?game_id=${game_id}` : ""}`),

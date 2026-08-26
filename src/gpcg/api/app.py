@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from gpcg.api import routes
 from gpcg.api.auth_routes import router as auth_router
 from gpcg.api.automation_routes import router as automation_router
-from gpcg.api.worker_routes import router as worker_router
+from gpcg.api.workers import router as worker_router
 from gpcg.api.upload_routes import router as upload_router
 from gpcg.api.knowledge_routes import router as knowledge_router
 from gpcg.api.game_registry_routes import router as game_registry_router

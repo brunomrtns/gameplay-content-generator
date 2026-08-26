@@ -16,10 +16,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from pathlib import Path
 
 from gpcg.core.models import (
     Automation,
@@ -79,6 +80,7 @@ _CONFIG_SNAPSHOT_FIELDS = (
     "transition_type", "transition_duration",
     "creative_style", "voice",
     "max_clip_uses", "fallback_policy",
+    "presentation",  # Presentation Layer config (thumbnail + opening)
 )
 
 
@@ -1606,6 +1608,59 @@ def create_job_from_automation(user_id: int) -> int | None:
         session.flush()
 
         return job.id
+
+
+# ── Presentation Layer — image upload + serving ──────────────────────────────
+
+
+@router.post("/presentation/upload-image")
+async def upload_presentation_image(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+):
+    """Upload an image for the Presentation Layer (thumbnail/opening).
+
+    Saves to data/presentation/{user_id}/ and returns the storage_key
+    that can be used in the presentation config.
+    """
+    from fastapi import UploadFile as _UF
+    from gpcg.config import get_settings
+    settings = get_settings()
+    user_dir = settings.presentation_dir / f"user_{user.id}"
+    user_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate a unique filename
+    import time as _time
+    ext = Path(file.filename or "image.jpg").suffix or ".jpg"
+    storage_key = f"user_{user.id}/pres_{int(_time.time())}_{file.filename or 'image'}{ext}"
+    dest = settings.presentation_dir / storage_key
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(dest, "wb") as f:
+        while chunk := await file.read(1024 * 1024):
+            f.write(chunk)
+
+    file_size = dest.stat().st_size
+    log.info(f"Presentation image uploaded by user {user.id}: {storage_key} ({file_size} bytes)")
+    return {"storage_key": storage_key, "filename": file.filename, "file_size": file_size}
+
+
+@router.get("/presentation/image/{storage_key:path}")
+def serve_presentation_image(
+    storage_key: str,
+    user: User = Depends(get_current_user),
+):
+    """Serve a presentation image by storage_key."""
+    from fastapi.responses import FileResponse
+    from gpcg.config import get_settings
+    settings = get_settings()
+    # Prevent path traversal
+    if ".." in storage_key or storage_key.startswith("/"):
+        raise HTTPException(status_code=400, detail="Invalid storage key")
+    path = settings.presentation_dir / storage_key
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(str(path))
 
 
 # ── YouTube OAuth ─────────────────────────────────────────────────────────────

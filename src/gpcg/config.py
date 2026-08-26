@@ -550,6 +550,13 @@ class Settings(BaseSettings):
         return p
 
     @property
+    def presentation_dir(self) -> Path:
+        """Directory for Presentation Layer assets (uploaded images, thumbnails)."""
+        p = self.data_dir / "presentation"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    @property
     def video_generate_root(self) -> Path:
         return Path(self.video_generate_dir)
 

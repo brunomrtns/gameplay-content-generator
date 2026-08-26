@@ -4,6 +4,8 @@ import { useDomain } from "@/lib/domain-config";
 import { usePoll } from "@/hooks/usePoll";
 import { Badge, Button, Card, Label, Select, Spinner } from "@/components/ui";
 import { SubtitlePreview } from "@/components/subtitle-preview";
+import { ThumbnailPreview } from "@/components/thumbnail-preview";
+import { PresentationControls, type PresentationConfig } from "@/components/presentation-controls";
 import type { VideoCustomization } from "@/components/video-customization";
 import {
   VIDEO_FORMATS,
@@ -80,6 +82,8 @@ interface AutomationConfig extends VideoCustomization {
   kids_queue_mode?: string;
   kids_auto_fill_queue?: boolean;
   kids_max_queue_size?: number;
+  // Presentation Layer: thumbnail + opening
+  presentation?: PresentationConfig;
 }
 
 function SectionTitle({ icon: Icon, title, desc }: { icon: any; title: string; desc?: string }) {
@@ -124,6 +128,7 @@ export function AutomationPage() {
   const [saving, setSaving] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [uploadingVoice, setUploadingVoice] = useState(false);
+  const [previewMode, setPreviewMode] = useState<"video" | "capa">("video");
   const [loaded, setLoaded] = useState(false);
   const voiceInput = useRef<HTMLInputElement>(null);
 
@@ -519,6 +524,12 @@ export function AutomationPage() {
             </p>
           </Card>
 
+          {/* Section 6b: Apresentação (Presentation Layer) */}
+          <PresentationControls
+            config={config.presentation}
+            update={update}
+          />
+
           {/* Section 7: Fila de Produção (Games) */}
           {domainConfig.features.gameplayUpload && (
           <Card>
@@ -648,8 +659,41 @@ export function AutomationPage() {
         <div className="lg:col-span-1">
           <div className="sticky top-24 space-y-4">
             <Card>
-              <h3 className="text-sm font-semibold mb-4">Preview ao vivo</h3>
-              <SubtitlePreview opts={config} />
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold">Preview ao vivo</h3>
+                {config.presentation?.enabled && (
+                  <div className="flex gap-1 rounded-lg bg-bg/60 p-0.5">
+                    <button
+                      className={`px-2.5 py-1 text-xs rounded-md transition-all ${previewMode === "video" ? "bg-teal-500 text-white" : "text-text-muted"}`}
+                      onClick={() => setPreviewMode("video")}
+                    >
+                      Vídeo
+                    </button>
+                    <button
+                      className={`px-2.5 py-1 text-xs rounded-md transition-all ${previewMode === "capa" ? "bg-teal-500 text-white" : "text-text-muted"}`}
+                      onClick={() => setPreviewMode("capa")}
+                    >
+                      Capa
+                    </button>
+                  </div>
+                )}
+              </div>
+              {previewMode === "capa" && config.presentation?.enabled ? (
+                <ThumbnailPreview
+                  opts={{
+                    video_format: config.video_format,
+                    thumbnail_text_enabled: config.presentation.thumbnail_text_enabled,
+                    thumbnail_text_source: config.presentation.thumbnail_text_source,
+                    thumbnail_text_custom: config.presentation.thumbnail_text_custom,
+                    thumbnail_text_position: config.presentation.thumbnail_text_position,
+                    thumbnail_text_color: config.presentation.thumbnail_text_color,
+                    thumbnail_text_size: config.presentation.thumbnail_text_size,
+                    thumbnail_image_path: config.presentation.thumbnail_image_path,
+                  }}
+                />
+              ) : (
+                <SubtitlePreview opts={config} />
+              )}
 
               {/* Summary */}
               <div className="mt-6 space-y-2 border-t border-border pt-4">

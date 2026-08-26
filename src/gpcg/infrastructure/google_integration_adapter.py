@@ -66,6 +66,7 @@ class GoogleIntegrationAdapter:
         user_id: Optional[int] = None,
         privacy: Optional[str] = None,
         category_id: Optional[int] = None,
+        thumbnail_path: Optional[str] = None,
     ) -> UploadResult:
         """Enqueue a YouTube upload and wait for completion.
 
@@ -106,6 +107,14 @@ class GoogleIntegrationAdapter:
             "categoryId": cat,
             "privacy": priv,
         }
+        # Presentation Layer: include thumbnail if available
+        if thumbnail_path:
+            # Translate path for google-integration mount (same as videoPath)
+            tp = str(thumbnail_path)
+            if tp.startswith("/app/data/"):
+                body["thumbnailPath"] = "/app/gpcg-data/" + tp[len("/app/data/"):]
+            else:
+                body["thumbnailPath"] = tp
 
         log.info(f"Enqueuing YouTube upload: {title} ({video_path})")
         try:

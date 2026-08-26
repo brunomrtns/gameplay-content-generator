@@ -562,12 +562,12 @@ def test_sync_job_result_default_visual_strategy_is_auto():
     not 'gameplay_compilation' (which is Games-specific and would contaminate Kids).
     """
     # The fix changed the default from "gameplay_compilation" to "auto" in
-    # worker_routes.py sync_job_result. Verify the code has the correct default.
+    # sync_job_result. Verify the code has the correct default.
     import ast
     from pathlib import Path
 
-    worker_routes = Path(__file__).parent.parent / "src" / "gpcg" / "api" / "worker_routes.py"
-    content = worker_routes.read_text()
+    generation = Path(__file__).parent.parent / "src" / "gpcg" / "api" / "workers" / "generation.py"
+    content = generation.read_text()
 
     # Find the line with visual_strategy default
     assert '"gameplay_compilation"' not in content.split("visual_strategy=req.content_plan.get")[0].split("\n")[-1] or \
@@ -579,8 +579,8 @@ def test_get_job_data_skips_gameplay_sources_for_kids():
     import ast
     from pathlib import Path
 
-    worker_routes = Path(__file__).parent.parent / "src" / "gpcg" / "api" / "worker_routes.py"
-    content = worker_routes.read_text()
+    generation = Path(__file__).parent.parent / "src" / "gpcg" / "api" / "workers" / "generation.py"
+    content = generation.read_text()
 
     # Verify there's a domain check before querying gameplay sources
     assert 'job.domain != "kids"' in content or 'job.domain == "games"' in content
@@ -644,16 +644,16 @@ def test_cleanup_job_carries_filenames():
 def test_kids_asset_download_endpoint_exists():
     """P2 regression: worker should have an endpoint to download Kids assets."""
     from pathlib import Path
-    worker_routes = Path(__file__).parent.parent / "src" / "gpcg" / "api" / "worker_routes.py"
-    content = worker_routes.read_text()
+    file_transfer = Path(__file__).parent.parent / "src" / "gpcg" / "api" / "workers" / "file_transfer.py"
+    content = file_transfer.read_text()
     assert "/kids/assets/" in content and "download" in content.lower()
 
 
 def test_worker_downloads_kids_assets():
-    """P2 regression: remote_worker should have _download_kids_assets method."""
+    """P2 regression: worker should have _download_kids_assets method."""
     from pathlib import Path
-    remote_worker = Path(__file__).parent.parent / "src" / "gpcg" / "worker" / "remote_worker.py"
-    content = remote_worker.read_text()
+    file_transfer = Path(__file__).parent.parent / "src" / "gpcg" / "worker" / "file_transfer.py"
+    content = file_transfer.read_text()
     assert "_download_kids_assets" in content
 
 
@@ -1057,8 +1057,8 @@ def test_domain_reset_cancels_kids_asset_jobs(db_session, user_with_kids):
 def test_worker_has_kids_asset_process_handler():
     """Remote worker has _process_kids_asset_process_job method."""
     from pathlib import Path
-    remote_worker = Path(__file__).parent.parent / "src" / "gpcg" / "worker" / "remote_worker.py"
-    content = remote_worker.read_text()
+    kids = Path(__file__).parent.parent / "src" / "gpcg" / "worker" / "handlers" / "kids.py"
+    content = kids.read_text()
     assert "_process_kids_asset_process_job" in content
     assert "kids_asset_process" in content
 
@@ -1066,8 +1066,8 @@ def test_worker_has_kids_asset_process_handler():
 def test_worker_has_ffprobe_method():
     """Remote worker has _ffprobe_video static method."""
     from pathlib import Path
-    remote_worker = Path(__file__).parent.parent / "src" / "gpcg" / "worker" / "remote_worker.py"
-    content = remote_worker.read_text()
+    kids = Path(__file__).parent.parent / "src" / "gpcg" / "worker" / "handlers" / "kids.py"
+    content = kids.read_text()
     assert "_ffprobe_video" in content
     assert "_generate_thumbnail" in content
 
@@ -1075,8 +1075,8 @@ def test_worker_has_ffprobe_method():
 def test_worker_routes_has_process_result_endpoint():
     """Worker routes has /kids/assets/{id}/process-result endpoint."""
     from pathlib import Path
-    worker_routes = Path(__file__).parent.parent / "src" / "gpcg" / "api" / "worker_routes.py"
-    content = worker_routes.read_text()
+    kids = Path(__file__).parent.parent / "src" / "gpcg" / "api" / "workers" / "kids.py"
+    content = kids.read_text()
     assert "/kids/assets/" in content and "process-result" in content
     assert "thumbnail" in content
 
