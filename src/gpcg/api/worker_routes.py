@@ -241,6 +241,34 @@ def _check_worker_offline(worker: Worker) -> bool:
     return elapsed > timeout
 
 
+_TRANSIENT_ERROR_PATTERNS = (
+    "timeout",
+    "timed out",
+    "read operation timed out",
+    "connect",
+    "connection",
+    "502",
+    "503",
+    "504",
+    "bad gateway",
+    "service unavailable",
+    "gateway timeout",
+    "connection reset",
+    "connection refused",
+    "remote protocol error",
+    "network",
+)
+
+
+def _is_transient_error(error: str | None) -> bool:
+    """Check if an error message looks like a transient/network failure
+    that warrants an automatic retry."""
+    if not error:
+        return False
+    err_lower = error.lower()
+    return any(pat in err_lower for pat in _TRANSIENT_ERROR_PATTERNS)
+
+
 def _requeue_stale_jobs_in_claim(db: Session) -> int:
     """Re-queue jobs stuck in 'running' whose worker is offline or vanished.
 
@@ -284,6 +312,19 @@ def _requeue_stale_jobs_in_claim(db: Session) -> int:
                     (Worker.last_heartbeat.is_(None))
                     | (Worker.last_heartbeat < cutoff)
                 )
+            )
+            |
+            (
+                # worker is online but not processing this job (orphaned
+                # after a deploy/restart interrupted the API mid-job).
+                # The worker recovered but the job was left in 'running'.
+                (Job.worker_id.isnot(None))
+                & (Worker.status == "online")
+                & (
+                    (Worker.current_job_id.is_(None))
+                    | (Worker.current_job_id != Job.id)
+                )
+                & (Job.updated_at < cutoff)
             )
         )
         .all()
@@ -967,7 +1008,12 @@ def submit_job_result(
                 source.processing_status = GameplayProcessingStatus.ready.value
                 source.ingestion_status = IngestionStatus.ready.value
             elif req.status == JobStatus.failed.value:
-                source.processing_status = GameplayProcessingStatus.failed.value
+                # Don't mark as failed if we're going to retry — keep it
+                # in the previous state so the retried job can proceed.
+                if job.attempts < job.max_attempts and _is_transient_error(req.error):
+                    source.processing_status = GameplayProcessingStatus.uploaded.value
+                else:
+                    source.processing_status = GameplayProcessingStatus.failed.value
 
     # Rollback: re-queue the KnowledgeItem if this job consumed one from
     # the idea queue and failed. The KI stays fresh (not marked used) until
@@ -996,6 +1042,28 @@ def submit_job_result(
                             log.info(f"job #{job_id} failed: re-queued KI #{queued_ki_id} at top of idea queue (usage released: {released})")
             except Exception as e:
                 log.warning(f"job #{job_id} failed: could not re-queue KI #{queued_ki_id}: {e}")
+
+    # ── Auto-retry for transient failures ──────────────────────────────────
+    # Instead of marking the job as failed immediately, re-queue it if the
+    # error looks transient (timeout, 502, connection reset) and we haven't
+    # exhausted max_attempts. This prevents jobs from dying just because the
+    # VPS was briefly unavailable during a deploy.
+    if req.status == JobStatus.failed.value and job.attempts < job.max_attempts and _is_transient_error(req.error):
+        job.status = JobStatus.queued.value
+        job.worker_id = None
+        job.started_at = None
+        job.error = f"Auto-retry (attempt {job.attempts + 1}/{job.max_attempts}): {req.error}"
+        log.info(
+            f"Job #{job.id} auto-requeued (transient error, attempt "
+            f"{job.attempts}/{job.max_attempts}): {req.error}"
+        )
+        db.commit()
+        return {
+            "ok": True,
+            "job_id": job.id,
+            "status": "queued",
+            "message": "Auto-requeued due to transient error",
+        }
 
     db.commit()
     log.info(f"Job #{job.id} result: {req.status}")

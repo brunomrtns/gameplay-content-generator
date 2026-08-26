@@ -107,6 +107,72 @@ bump_version() {
 # ── Step 0: Verificar working tree ───────────────────────────────────────────
 log "Verificando pré-requisitos..."
 
+# ── Safety: aguardar worker local se estiver em download de mapeamento ────────
+# O deploy reinicia o container da API na VPS, o que interrompe downloads em
+# andamento. Se o worker local estiver baixando uma gameplay, aguardamos.
+check_worker_busy() {
+  # Verifica se o serviço gpcg-worker está rodando localmente
+  if ! systemctl --user is-active gpcg-worker &>/dev/null; then
+    return 1  # worker não está rodando, pode deployar
+  fi
+
+  # Pergunta à API se há jobs de mapeamento em stage de download
+  local raw_output
+  raw_output=$(vps "docker exec gpcg-api python3 -c \"
+import sqlite3, json
+c = sqlite3.connect('/app/data/gpcg.db')
+c.row_factory = sqlite3.Row
+cur = c.cursor()
+rows = cur.execute(\\\"SELECT j.id, j.stage, j.progress, w.worker_id FROM jobs j JOIN workers w ON j.worker_id = w.id WHERE j.status = 'running' AND j.type = 'mapping' AND j.stage IN ('download', 'downloading')\\\").fetchall()
+if rows:
+    for r in rows:
+        print(json.dumps(dict(r)))
+else:
+    print('IDLE')
+\"" 2>/dev/null)
+
+  # Extrair apenas a linha relevante (IDLE ou JSON do job)
+  local worker_status
+  worker_status=$(echo "$raw_output" | grep -E '^(IDLE|\{)' | tail -1)
+
+  if [[ -z "$worker_status" ]]; then
+    log "Aviso: não foi possível verificar estado do worker — continuando deploy"
+    return 1
+  elif [[ "$worker_status" == "IDLE" ]]; then
+    return 1  # nenhum job em download, pode deployar
+  else
+    echo "$worker_status"
+    return 0
+  fi
+}
+
+WAITED=0
+MAX_WAIT=900  # 15 minutos máximo
+while true; do
+  BUSY_OUTPUT=$(check_worker_busy) || BUSY_OUTPUT=""
+  if [[ -z "$BUSY_OUTPUT" ]]; then
+    break  # pode deployar
+  fi
+  if [[ $WAITED -eq 0 ]]; then
+    log "Worker local está baixando gameplay — aguardando para não interromper:"
+    echo "$BUSY_OUTPUT" | sed 's/^/    /'
+  fi
+  if [[ $WAITED -ge $MAX_WAIT ]]; then
+    err "Timeout ($((MAX_WAIT/60))min) aguardando worker. Deploy abortado."
+    err "Rode o deploy novamente quando o mapeamento terminar."
+    exit 1
+  fi
+  if [[ $((WAITED % 30)) -eq 0 ]] && [[ $WAITED -gt 0 ]]; then
+    log "Ainda aguardando... (${WAITED}s)"
+  fi
+  sleep 10
+  WAITED=$((WAITED + 10))
+done
+
+if [[ $WAITED -gt 0 ]]; then
+  ok "Worker livre — continuando deploy (aguardou ${WAITED}s)"
+fi
+
 if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
   if [[ "$AUTO_COMMIT" -eq 1 ]]; then
 

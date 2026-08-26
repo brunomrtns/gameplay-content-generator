@@ -255,11 +255,13 @@ class GameplayRetriever:
         if video_type == "GENERAL_TOPIC":
             query = select(GameplaySource).where(
                 GameplaySource.ingestion_status == "ready",
+                GameplaySource.enabled == True,
             )
         else:
             query = select(GameplaySource).where(
                 GameplaySource.game_id.in_(game_ids),
                 GameplaySource.ingestion_status == "ready",
+                GameplaySource.enabled == True,
             )
         # V2: filter by user_id if provided
         if user_id is not None:
@@ -451,11 +453,13 @@ class GameplayRetriever:
         if video_type == "GENERAL_TOPIC" and plan.video_type == "GENERAL_TOPIC":
             query = select(GameplaySource).where(
                 GameplaySource.ingestion_status == "ready",
+                GameplaySource.enabled == True,
             )
         else:
             query = select(GameplaySource).where(
                 GameplaySource.game_id.in_(game_ids),
                 GameplaySource.ingestion_status == "ready",
+                GameplaySource.enabled == True,
             )
         # V2: filter by user_id if provided
         if user_id is not None:

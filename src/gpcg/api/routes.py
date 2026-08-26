@@ -195,6 +195,7 @@ def list_sources(
             GameplaySource.is_public == True,
             GameplaySource.user_id != user.id,
             GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            GameplaySource.enabled == True,
             GameplaySource.ingestion_status != IngestionStatus.deleted.value,
         ).order_by(GameplaySource.created_at.desc())
         if game_id is not None:
@@ -234,6 +235,7 @@ def list_sources(
             "downloaded_at": s.downloaded_at.isoformat() if s.downloaded_at else None,
             "analysis_status": s.analysis_status,
             "is_public": s.is_public,
+            "enabled": s.enabled,
             "owner_user_id": s.user_id,
             "is_own": s.user_id == user.id,
         }
@@ -467,6 +469,35 @@ def toggle_gameplay_visibility(
         "success": True,
         "source_id": source_id,
         "is_public": is_public,
+    }
+
+
+@router.patch("/gameplays/{source_id}/enabled")
+def toggle_gameplay_enabled(
+    source_id: int,
+    enabled: bool = Query(..., description="Set to true to make available for generation, false to park"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle a gameplay source's availability for generation.
+
+    When disabled, the gameplay stays in the library but is excluded from
+    generation/automation selection. Useful for parking gameplays you want
+    to keep but don't want used right now.
+    """
+    source = db.get(GameplaySource, source_id)
+    if source is None:
+        raise HTTPException(404, "gameplay source not found")
+    if source.user_id != user.id:
+        raise HTTPException(403, "not your gameplay")
+
+    source.enabled = enabled
+    db.commit()
+    log.info(f"gameplay #{source_id} enabled set to {enabled} by user #{user.id}")
+    return {
+        "success": True,
+        "source_id": source_id,
+        "enabled": enabled,
     }
 
 

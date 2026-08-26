@@ -58,6 +58,7 @@ def detect_problems(db: Session, user_id: int) -> dict[str, Any]:
         select(GameplaySource).where(
             GameplaySource.user_id == user_id,
             GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            GameplaySource.enabled == True,
             GameplaySource.ingestion_status != IngestionStatus.deleted.value,
         )
     ).scalars().all()
@@ -154,6 +155,7 @@ def detect_problems(db: Session, user_id: int) -> dict[str, Any]:
                 .where(
                     GameplaySource.game_id == ki.game_id,
                     GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            GameplaySource.enabled == True,
                     GameplaySource.ingestion_status != IngestionStatus.deleted.value,
                     ((GameplaySource.user_id == user_id) |
                      (GameplaySource.is_public == True)),

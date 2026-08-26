@@ -290,6 +290,11 @@ class GameplaySource(Base):
     # exhausted). Default: False (private).
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
+    # V3: User-controlled availability toggle. When False, the gameplay is
+    # excluded from generation/automation selection but kept in the library
+    # for future use. Default: True (available).
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     game: Mapped[Optional["Game"]] = relationship(back_populates="sources")

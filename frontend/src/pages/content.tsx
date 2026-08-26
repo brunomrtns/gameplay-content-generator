@@ -29,6 +29,8 @@ import {
   Users,
   Gamepad2,
   Pencil,
+  Power,
+  PowerOff,
 } from "lucide-react";
 import { GameSearchModal, type CatalogGame } from "@/components/game-search-modal";
 
@@ -331,6 +333,16 @@ function MediaTab() {
     }
   };
 
+  const handleToggleEnabled = async (sourceId: number, enabled: boolean, filename: string) => {
+    try {
+      await api.toggleGameplayEnabled(sourceId, enabled);
+      toast.success(`"${filename}" ${enabled ? "disponível para uso" : "estacionada"}.`);
+      refetch();
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao alterar disponibilidade");
+    }
+  };
+
   const handleAssignGame = async (game: CatalogGame) => {
     if (gameModalSourceId === null) return;
     try {
@@ -499,8 +511,21 @@ function MediaTab() {
                           {procCfg.label}
                         </Badge>
                       )}
+                      {s.enabled === false && (
+                        <Badge variant="warning">
+                          <PowerOff className="h-3 w-3" />
+                          Estacionada
+                        </Badge>
+                      )}
                       {!isProcessing && !isMapping && (
                         <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleToggleEnabled(s.id, !s.enabled, s.filename)}
+                            className={`transition-colors p-1 rounded ${s.enabled ? "text-green-400" : "text-text-muted hover:text-green-400"}`}
+                            title={s.enabled ? "Disponível — clique para estacionar" : "Estacionada — clique para disponibilizar"}
+                          >
+                            {s.enabled ? <Power className="h-4 w-4" /> : <PowerOff className="h-4 w-4" />}
+                          </button>
                           <button
                             onClick={() => handleToggleVisibility(s.id, !s.is_public, s.filename)}
                             className={`transition-colors p-1 rounded ${s.is_public ? "text-accent" : "text-text-muted hover:text-accent"}`}

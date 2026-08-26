@@ -273,6 +273,7 @@ def start_automation(
     sources = db.query(GameplaySource).filter(
         GameplaySource.user_id == user.id,
         GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            GameplaySource.enabled == True,
     ).count()
     if sources == 0:
         raise HTTPException(status_code=400, detail="Envie gameplays primeiro")
@@ -360,6 +361,7 @@ def check_automation(
         ready_count = db.query(GameplaySource).filter(
             GameplaySource.user_id == auto.user_id,
             GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            GameplaySource.enabled == True,
         ).count()
         if ready_count == 0:
             continue
@@ -1220,6 +1222,7 @@ def create_job_from_automation(user_id: int) -> int | None:
         ready_count = session.query(GameplaySource).filter(
             GameplaySource.user_id == user_id,
             GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            GameplaySource.enabled == True,
         ).count()
         if ready_count == 0:
             return None
@@ -1284,12 +1287,14 @@ def create_job_from_automation(user_id: int) -> int | None:
                 ).filter(
                     Game.id == gameplay_preference,
                     GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            GameplaySource.enabled == True,
                 ).first()
                 if bg_game:
                     # Check ownership/visibility: user's own or public
                     has_access = session.query(GameplaySource).filter(
                         GameplaySource.game_id == gameplay_preference,
                         GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            GameplaySource.enabled == True,
                         ((GameplaySource.user_id == user_id) |
                          (GameplaySource.is_public == True)),
                     ).first()
@@ -1312,6 +1317,7 @@ def create_job_from_automation(user_id: int) -> int | None:
                 ).filter(
                     GameplaySource.user_id == user_id,
                     GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            GameplaySource.enabled == True,
                 ).order_by(Game.id).first()
 
             if not bg_game:
@@ -1368,6 +1374,13 @@ def create_job_from_automation(user_id: int) -> int | None:
 
             # If KI has a game_id, create a game-specific short;
             # otherwise, create a curiosity_short with background gameplay.
+            # FALLBACK: if the KI's game_id doesn't resolve to a local Game
+            # (e.g. it's an IGDB catalog ID) or has no usable clips, but the
+            # user set a gameplay_preference that IS valid, fall through to
+            # the curiosity_short path using the preference as background.
+            # This prevents KIs about games without gameplay from being
+            # silently dropped from the queue.
+            _job_created = False
             if ki.game_id:
                 game = session.get(Game, ki.game_id)
                 if game:
@@ -1381,53 +1394,45 @@ def create_job_from_automation(user_id: int) -> int | None:
                     ).filter(
                         GameplaySource.game_id == ki.game_id,
                         GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            GameplaySource.enabled == True,
                         ((GameplaySource.user_id == user_id) |
                          (GameplaySource.is_public == True)),
                     ).count()
-                    if user_clips == 0:
+                    if user_clips > 0:
+                        job = service.create_job(
+                            game.id,
+                            user_id=user_id,
+                            **subtitle_kwargs,
+                        )
+                        # Store the KI reference for the content planner
+                        with session_scope() as s2:
+                            j = s2.get(Job, job.id)
+                            j.artifacts = {
+                                **j.artifacts,
+                                **extra_artifacts,
+                            }
+                            s2.flush()
+                        log.info(f"automation: created generate_short job #{job.id} from queued KI #{ki_id} (game={game.canonical_name})")
+                        _job_created = True
+                    else:
                         log.warning(
                             f"automation: queued KI #{ki_id} references game '{game.canonical_name}' "
-                            f"but user #{user_id} has no usable clips — skipping"
+                            f"but user #{user_id} has no usable clips — "
+                            f"falling back to curiosity_short with gameplay_preference"
                         )
-                        # Remove from queue and return None (will retry next cycle)
-                        from sqlalchemy.orm.attributes import flag_modified
-                        auto2 = session.query(Automation).filter(Automation.user_id == user_id).first()
-                        cfg2 = dict(auto2.config or {})
-                        q2 = _normalize_idea_queue(cfg2.get("idea_queue", []))
-                        q2 = [e for e in q2 if e.get("ki_id") != ki_id]
-                        cfg2["idea_queue"] = q2
-                        auto2.config = cfg2
-                        flag_modified(auto2, "config")
-                        session.commit()
-                        return None
-
-                    job = service.create_job(
-                        game.id,
-                        user_id=user_id,
-                        **subtitle_kwargs,
-                    )
-                    # Store the KI reference for the content planner
-                    with session_scope() as s2:
-                        j = s2.get(Job, job.id)
-                        j.artifacts = {
-                            **j.artifacts,
-                            **extra_artifacts,
-                        }
-                        s2.flush()
-                    log.info(f"automation: created generate_short job #{job.id} from queued KI #{ki_id} (game={game.canonical_name})")
+                        # Fall through to curiosity_short path below
                 else:
-                    log.warning(f"automation: queued KI #{ki_id} references missing game {ki.game_id}")
-                    # Remove from queue
-                    from sqlalchemy.orm.attributes import flag_modified
-                    q = _normalize_idea_queue(cfg.get("idea_queue", []))
-                    q = [e for e in q if e.get("ki_id") != ki_id]
-                    cfg["idea_queue"] = q
-                    auto.config = cfg
-                    flag_modified(auto, "config")
-                    session.commit()
-                    return None
-            else:
+                    log.warning(
+                        f"automation: queued KI #{ki_id} references game_id {ki.game_id} "
+                        f"not in local games table — falling back to curiosity_short"
+                    )
+                    # Fall through to curiosity_short path below
+
+            if not _job_created:
                 # General idea → curiosity_short with background gameplay
+                # Also reached when ki.game_id didn't resolve or had no clips,
+                # but gameplay_preference is valid (user wants to talk about
+                # a game without gameplay using another game's gameplay as background).
                 # V3: If gameplay_preference was set and validated (bg_game found
                 # for that specific game), use it as background_game_id.
                 # Otherwise fall back to auto-selected bg_game.
@@ -1688,6 +1693,7 @@ def dashboard(
         ready_gameplays = db.query(GameplaySource).filter(
             GameplaySource.user_id == user.id,
             GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            GameplaySource.enabled == True,
         ).count()
     else:
         total_gameplays = 0
@@ -1859,6 +1865,7 @@ def cleanup_idea_queue(
                 .where(
                     GameplaySource.game_id == ki.game_id,
                     GameplaySource.ingestion_status == IngestionStatus.ready.value,
+            GameplaySource.enabled == True,
                     GameplaySource.ingestion_status != IngestionStatus.deleted.value,
                     ((GameplaySource.user_id == user.id) |
                      (GameplaySource.is_public == True)),

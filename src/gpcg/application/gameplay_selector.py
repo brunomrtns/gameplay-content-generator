@@ -171,6 +171,7 @@ class GameplaySelector:
             .join(GameplaySource, GameplayAsset.source_id == GameplaySource.id)
             .where(GameplaySource.game_id == game_id)
             .where(GameplaySource.ingestion_status == "ready")
+            .where(GameplaySource.enabled == True)
         )
 
         if public_only:

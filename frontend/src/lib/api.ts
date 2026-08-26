@@ -416,6 +416,8 @@ export const api = {
     request<any>(`/videos/${id}/regenerate`, { method: "POST" }),
   toggleGameplayVisibility: (sourceId: number, isPublic: boolean) =>
     request<any>(`/gameplays/${sourceId}/visibility?is_public=${isPublic}`, { method: "PATCH" }),
+  toggleGameplayEnabled: (sourceId: number, enabled: boolean) =>
+    request<any>(`/gameplays/${sourceId}/enabled?enabled=${enabled}`, { method: "PATCH" }),
   deleteSource: (sourceId: number) =>
     request<{ ok: boolean; source_id: number; cleanup_job_id: number }>(`/sources/${sourceId}`, { method: "DELETE" }),
 

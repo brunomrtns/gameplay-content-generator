@@ -200,6 +200,7 @@ class EditorialStrategyService:
             .join(GameplaySource, GameplaySource.game_id == Game.id)
             .where(GameplaySource.user_id == user_id)
             .where(GameplaySource.ingestion_status == IngestionStatus.ready.value)
+            .where(GameplaySource.enabled == True)
             .group_by(Game.id)
         ).all()
 
@@ -262,6 +263,7 @@ class EditorialStrategyService:
                 .join(GameplaySource, GameplayAsset.source_id == GameplaySource.id)
                 .where(GameplaySource.game_id == game.id)
                 .where(GameplaySource.ingestion_status == IngestionStatus.ready.value)
+            .where(GameplaySource.enabled == True)
                 .where(
                     (GameplaySource.user_id == user_id) |
                     (GameplaySource.is_public == True)

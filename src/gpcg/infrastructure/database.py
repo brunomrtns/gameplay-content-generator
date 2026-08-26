@@ -188,6 +188,8 @@ def init_db() -> None:
     _ensure_column(engine, "videos", "knowledge_item_id", "INTEGER")
     # V2: GameplaySource.is_public — public gameplays available as fallback
     _ensure_column(engine, "gameplay_sources", "is_public", "BOOLEAN DEFAULT 0")
+    # V3: GameplaySource.enabled — user-controlled availability toggle
+    _ensure_column(engine, "gameplay_sources", "enabled", "BOOLEAN DEFAULT 1")
     # REFACTORY_V2: is_public on content tables for hybrid pool model.
     # NULL user_id = system-collected (shared). user_id set + is_public controls
     # visibility to other users. See docs/REFACTORY_V2_DIAGNOSTIC.md §I.1.

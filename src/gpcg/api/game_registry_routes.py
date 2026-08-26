@@ -318,6 +318,7 @@ def get_gameplay_availability(
         select(GameplaySource, Game)
         .join(Game, GameplaySource.game_id == Game.id)
         .where(GameplaySource.ingestion_status == IngestionStatus.ready.value)
+        .where(GameplaySource.enabled == True)
     )
     # User's own sources
     own_sources = sources_query.where(GameplaySource.user_id == user.id)
