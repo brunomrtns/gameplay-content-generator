@@ -2241,6 +2241,7 @@ def get_job_data(
         sources_query = db.query(GameplaySource).filter(
             GameplaySource.user_id == job.user_id,
             GameplaySource.processing_status == "ready",
+            GameplaySource.enabled == True,
         )
         sources = sources_query.all()
     else:
@@ -2256,6 +2257,7 @@ def get_job_data(
             "processing_status": src.processing_status,
             "metadata_json": src.metadata_json,
             "file_path": src.file_path,  # worker resolves to local path
+            "enabled": src.enabled,
         }
         # Events for this source
         events = db.query(GameplayEvent).filter(GameplayEvent.source_id == src.id).all()

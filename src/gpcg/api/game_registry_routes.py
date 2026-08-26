@@ -418,3 +418,101 @@ def get_gameplay_availability(
     result.sort(key=lambda g: (0 if g["ownership"] == "own" else 1, status_order.get(g["availability"], 4), g["game_name"]))
 
     return {"games": result, "max_uses": max_uses}
+
+
+@router.get("/gameplay-availability/{game_id}/sources")
+def get_gameplay_sources_for_game(
+    game_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List individual gameplay sources for a specific game, with free-time info.
+
+    Used by the idea-queue modal to let the user pick a specific source.
+    Only returns sources with ≥3 minutes (180s) of FREE gameplay time,
+    considering the user's clip usage history and max_uses config.
+
+    Returns per-source:
+        - source_id, filename, duration
+        - free_seconds: estimated free gameplay time (considering used ranges)
+        - total_events, eligible_events
+        - availability: "abundant" | "partial" | "low" | "none" | "reuse_only"
+    """
+    from sqlalchemy import select, func as sql_func
+    from gpcg.core.models import Automation
+    from gpcg.domains.games.models import (
+        GameplaySource,
+        GameplayAsset,
+        GameplayEvent,
+        IngestionStatus,
+    )
+    from gpcg.application.clip_usage_service import (
+        get_used_ranges, estimate_availability,
+    )
+
+    # Read max_clip_uses from automation config
+    auto = db.query(Automation).filter(Automation.user_id == user.id).first()
+    max_uses = 1
+    accept_public = False
+    if auto and isinstance(auto.config, dict):
+        max_uses = auto.config.get("max_clip_uses", 1)
+        fallback_policy = auto.config.get("fallback_policy")
+        if fallback_policy == "allow_public":
+            accept_public = True
+        else:
+            accept_public = auto.config.get("accept_public_gameplays", False)
+
+    # Get enabled, ready sources for this game
+    sources_q = (
+        select(GameplaySource)
+        .where(GameplaySource.game_id == game_id)
+        .where(GameplaySource.ingestion_status == IngestionStatus.ready.value)
+        .where(GameplaySource.enabled == True)
+        .where((GameplaySource.user_id == user.id) |
+               (GameplaySource.is_public == True if accept_public else False))
+    )
+    sources = db.execute(sources_q).scalars().all()
+
+    result = []
+    for src in sources:
+        # Get the primary asset (duration)
+        asset = db.execute(
+            select(GameplayAsset).where(GameplayAsset.source_id == src.id)
+        ).scalars().first()
+        if not asset:
+            continue
+        source_duration = asset.duration
+
+        # Get used ranges for this consumer
+        used = get_used_ranges(db, src.id, consumer_user_id=user.id)
+
+        # Get events for this source
+        events = db.execute(
+            select(GameplayEvent.start_time, GameplayEvent.end_time)
+            .where(GameplayEvent.source_id == src.id)
+            .order_by(GameplayEvent.start_time)
+        ).all()
+        event_tuples = [(r[0], r[1]) for r in events]
+
+        avail = estimate_availability(
+            source_duration, used, event_tuples, max_uses=max_uses,
+        )
+
+        result.append({
+            "source_id": src.id,
+            "filename": src.filename,
+            "duration": round(source_duration, 1),
+            "free_seconds": avail["available_seconds"],
+            "used_seconds": avail["used_seconds"],
+            "total_events": avail["total_events"],
+            "eligible_events": avail["eligible_events"],
+            "availability": avail["status"],
+        })
+
+    # Filter: only sources with ≥180s (3 min) of free gameplay
+    result = [s for s in result if s["free_seconds"] >= 180.0]
+
+    # Sort: most free time first
+    result.sort(key=lambda s: s["free_seconds"], reverse=True)
+
+    return {"game_id": game_id, "sources": result, "min_free_seconds": 180}

@@ -54,10 +54,11 @@ def _normalize_queue_entry(entry) -> dict:
             "ki_id": entry.get("ki_id") or entry.get("id"),
             "gameplay_preference": entry.get("gameplay_preference"),
             "reuse_override": entry.get("reuse_override"),
+            "gameplay_source_id": entry.get("gameplay_source_id"),
         }
     if isinstance(entry, int):
-        return {"ki_id": entry, "gameplay_preference": None, "reuse_override": None}
-    return {"ki_id": None, "gameplay_preference": None, "reuse_override": None}
+        return {"ki_id": entry, "gameplay_preference": None, "reuse_override": None, "gameplay_source_id": None}
+    return {"ki_id": None, "gameplay_preference": None, "reuse_override": None, "gameplay_source_id": None}
 
 
 def _normalize_idea_queue(raw) -> list[dict]:
@@ -1253,6 +1254,7 @@ def create_job_from_automation(user_id: int) -> int | None:
         ki_id = queue_entry.get("ki_id") if isinstance(queue_entry, dict) else queue_entry
         gameplay_preference = queue_entry.get("gameplay_preference") if isinstance(queue_entry, dict) else None
         reuse_override = queue_entry.get("reuse_override") if isinstance(queue_entry, dict) else None
+        gameplay_source_id = queue_entry.get("gameplay_source_id") if isinstance(queue_entry, dict) else None
         from gpcg.application.generation_service import GenerationService
         from gpcg.core.models import KnowledgeItem, KnowledgeItemStatus
         from gpcg.infrastructure.llm import get_llm
@@ -1303,6 +1305,23 @@ def create_job_from_automation(user_id: int) -> int | None:
                         bg_game = None
                 else:
                     log.warning(f"automation: gameplay_preference game #{gameplay_preference} has no ready gameplay")
+
+            # V4: Validate gameplay_source_id if specified
+            if gameplay_source_id:
+                src = session.query(GameplaySource).filter(
+                    GameplaySource.id == gameplay_source_id,
+                    GameplaySource.ingestion_status == IngestionStatus.ready.value,
+                    GameplaySource.enabled == True,
+                    ((GameplaySource.user_id == user_id) |
+                     (GameplaySource.is_public == True)),
+                ).first()
+                if not src:
+                    log.warning(f"automation: gameplay_source_id #{gameplay_source_id} not accessible/enabled — ignoring")
+                    gameplay_source_id = None
+                elif gameplay_preference and src.game_id != gameplay_preference:
+                    log.warning(f"automation: gameplay_source_id #{gameplay_source_id} belongs to game #{src.game_id}, "
+                                f"not #{gameplay_preference} — ignoring")
+                    gameplay_source_id = None
 
             # Fallback: automatic background game selection
             # CRITICAL: only pick games that have usable clips (GameplayAsset),
@@ -1368,6 +1387,7 @@ def create_job_from_automation(user_id: int) -> int | None:
                 "idea_source": "user_queue",
                 "gameplay_preference": gameplay_preference,  # null=auto, game_id=user chose
                 "reuse_override": reuse_override,  # null, "allow_reuse", "skip"
+                "gameplay_source_id": gameplay_source_id,  # null=all sources, source_id=specific
                 "gameplay_selection_mode": "manual" if gameplay_preference else "auto",
                 "config_snapshot": config_snapshot,
             }

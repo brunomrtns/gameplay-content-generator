@@ -337,6 +337,7 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
                 ingestion_status="ready",
                 processing_status=src_data.get("processing_status", "ready"),
                 metadata_json=raw_meta,
+                enabled=src_data.get("enabled", True),
             ))
             session.flush()
 

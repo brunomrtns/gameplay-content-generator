@@ -21,6 +21,7 @@ interface KnowledgeItem {
   tags: string[];
   gameplay_preference?: number | null;
   reuse_override?: string | null;
+  gameplay_source_id?: number | null;
 }
 
 interface Stats {
@@ -90,11 +91,19 @@ export function IdeasPage() {
   const [queueModalItem, setQueueModalItem] = useState<KnowledgeItem | null>(null);
   const [selectedGameplay, setSelectedGameplay] = useState<number | null>(null);
   const [selectedReuseOverride, setSelectedReuseOverride] = useState<string | null>(null);
+  // V4: Specific source selection (optional, within chosen game)
+  const [availableSources, setAvailableSources] = useState<any[]>([]);
+  const [selectedSource, setSelectedSource] = useState<number | null>(null);
+  const [loadingSources, setLoadingSources] = useState(false);
   // V3: Currently processing job
   const [currentJob, setCurrentJob] = useState<any>(null);
   // Edit game for existing queue item — shows only games with gameplay available
   const [editQueueGameItem, setEditQueueGameItem] = useState<KnowledgeItem | null>(null);
   const [editSelectedGameplay, setEditSelectedGameplay] = useState<number | null>(null);
+  // V4: Edit modal source selection
+  const [editAvailableSources, setEditAvailableSources] = useState<any[]>([]);
+  const [editSelectedSource, setEditSelectedSource] = useState<number | null>(null);
+  const [editLoadingSources, setEditLoadingSources] = useState(false);
   // Collection Focus (campaign direction)
   const [focus, setFocus] = useState<any>(null);
   const [showFocusModal, setShowFocusModal] = useState(false);
@@ -219,6 +228,27 @@ export function IdeasPage() {
     setQueueModalItem(item);
     setSelectedGameplay(null);
     setSelectedReuseOverride(null);
+    setAvailableSources([]);
+    setSelectedSource(null);
+  };
+
+  // V4: When user selects a game, fetch its eligible sources (≥3min free)
+  const handleGameplaySelect = async (gameId: number | null) => {
+    setSelectedGameplay(gameId);
+    setSelectedReuseOverride(null);
+    setAvailableSources([]);
+    setSelectedSource(null);
+    if (gameId) {
+      setLoadingSources(true);
+      try {
+        const res = await api.getGameplaySourcesForGame(gameId);
+        setAvailableSources(res.sources || []);
+      } catch {
+        setAvailableSources([]);
+      } finally {
+        setLoadingSources(false);
+      }
+    }
   };
 
   const handleAddToQueue = async () => {
@@ -228,6 +258,7 @@ export function IdeasPage() {
         queueModalItem.id,
         selectedGameplay,
         selectedReuseOverride,
+        selectedSource,
       );
       setQueueIds((prev) => new Set(prev).add(queueModalItem.id));
       // Update queue display
@@ -235,10 +266,13 @@ export function IdeasPage() {
         ...queueModalItem,
         gameplay_preference: selectedGameplay,
         reuse_override: selectedReuseOverride,
+        gameplay_source_id: selectedSource,
       }]);
       setQueueModalItem(null);
       setSelectedGameplay(null);
       setSelectedReuseOverride(null);
+      setAvailableSources([]);
+      setSelectedSource(null);
     } catch (e: any) {
       setError(e.message);
     }
@@ -266,26 +300,57 @@ export function IdeasPage() {
         editQueueGameItem.id,
         editSelectedGameplay, // null = auto, game_id = specific
         editQueueGameItem.reuse_override ?? null,
+        editSelectedSource,
       );
       // Update local state
       setQueue((prev) =>
         prev.map((i) =>
           i.id === editQueueGameItem.id
-            ? { ...i, gameplay_preference: editSelectedGameplay }
+            ? { ...i, gameplay_preference: editSelectedGameplay, gameplay_source_id: editSelectedSource }
             : i,
         ),
       );
       setEditQueueGameItem(null);
       setEditSelectedGameplay(null);
+      setEditAvailableSources([]);
+      setEditSelectedSource(null);
     } catch (e: any) {
       setError(e.message);
     }
   };
 
-  // Open edit modal — preselect current game
+  // V4: When user changes game in edit modal, fetch sources
+  const handleEditGameplaySelect = async (gameId: number | null) => {
+    setEditSelectedGameplay(gameId);
+    setEditAvailableSources([]);
+    setEditSelectedSource(null);
+    if (gameId) {
+      setEditLoadingSources(true);
+      try {
+        const res = await api.getGameplaySourcesForGame(gameId);
+        setEditAvailableSources(res.sources || []);
+      } catch {
+        setEditAvailableSources([]);
+      } finally {
+        setEditLoadingSources(false);
+      }
+    }
+  };
+
+  // Open edit modal — preselect current game and source
   const openEditQueueGame = (item: KnowledgeItem) => {
     setEditQueueGameItem(item);
     setEditSelectedGameplay(item.gameplay_preference ?? null);
+    setEditSelectedSource(item.gameplay_source_id ?? null);
+    setEditAvailableSources([]);
+    // Pre-load sources if a game is already selected
+    if (item.gameplay_preference) {
+      setEditLoadingSources(true);
+      api.getGameplaySourcesForGame(item.gameplay_preference)
+        .then((res) => setEditAvailableSources(res.sources || []))
+        .catch(() => setEditAvailableSources([]))
+        .finally(() => setEditLoadingSources(false));
+    }
   };
 
   const handleMoveQueueItem = async (index: number, direction: "up" | "down") => {
@@ -851,6 +916,12 @@ export function IdeasPage() {
                         </svg>
                       </button>
                     )}
+                    {/* V4: Show specific source badge if set */}
+                    {item.gameplay_source_id && (
+                      <span className="rounded-full border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-xs font-medium text-purple-300">
+                        Source #{item.gameplay_source_id}
+                      </span>
+                    )}
                     {!item.gameplay_preference && !item.game_id && (
                       <button
                         onClick={() => openEditQueueGame(item)}
@@ -1036,10 +1107,7 @@ export function IdeasPage() {
             </label>
             <select
               value={selectedGameplay ?? ""}
-              onChange={(e) => {
-                setSelectedGameplay(e.target.value ? Number(e.target.value) : null);
-                setSelectedReuseOverride(null);
-              }}
+              onChange={(e) => handleGameplaySelect(e.target.value ? Number(e.target.value) : null)}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40 mb-3"
             >
               <option value="">Automático (sistema escolhe)</option>
@@ -1049,6 +1117,40 @@ export function IdeasPage() {
                 </option>
               ))}
             </select>
+
+            {/* V4: Specific source selector (optional, only if ≥3min free) */}
+            {selectedGameplay && (
+              <div className="mb-3">
+                {loadingSources ? (
+                  <p className="text-xs text-text-muted">Carregando gameplays disponíveis…</p>
+                ) : availableSources.length > 0 ? (
+                  <>
+                    <label className="block text-sm font-medium text-text mb-1.5">
+                      Gameplay específica (opcional)
+                    </label>
+                    <select
+                      value={selectedSource ?? ""}
+                      onChange={(e) => setSelectedSource(e.target.value ? Number(e.target.value) : null)}
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
+                    >
+                      <option value="">Usar todas as gameplays do jogo</option>
+                      {availableSources.map((s) => (
+                        <option key={s.source_id} value={s.source_id}>
+                          {(s.filename || `Source #${s.source_id}`).slice(0, 50)} · {Math.floor(s.free_seconds / 60)}min livre · {s.eligible_events}/{s.total_events} eventos
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-text-muted mt-1">
+                      Apenas gameplays com ≥3 min de material livre aparecem aqui.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-text-muted">
+                    Nenhuma gameplay individual com ≥3 min livre disponível para este jogo.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Availability badges for selected game */}
             {selectedGameplay && (() => {
@@ -1150,7 +1252,7 @@ export function IdeasPage() {
             </label>
             <select
               value={editSelectedGameplay ?? ""}
-              onChange={(e) => setEditSelectedGameplay(e.target.value ? Number(e.target.value) : null)}
+              onChange={(e) => handleEditGameplaySelect(e.target.value ? Number(e.target.value) : null)}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40 mb-3"
             >
               <option value="">Automático (sistema escolhe)</option>
@@ -1160,6 +1262,37 @@ export function IdeasPage() {
                 </option>
               ))}
             </select>
+
+            {/* V4: Specific source selector in edit modal */}
+            {editSelectedGameplay && (
+              <div className="mb-3">
+                {editLoadingSources ? (
+                  <p className="text-xs text-text-muted">Carregando gameplays disponíveis…</p>
+                ) : editAvailableSources.length > 0 ? (
+                  <>
+                    <label className="block text-sm font-medium text-text mb-1.5">
+                      Gameplay específica (opcional)
+                    </label>
+                    <select
+                      value={editSelectedSource ?? ""}
+                      onChange={(e) => setEditSelectedSource(e.target.value ? Number(e.target.value) : null)}
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
+                    >
+                      <option value="">Usar todas as gameplays do jogo</option>
+                      {editAvailableSources.map((s) => (
+                        <option key={s.source_id} value={s.source_id}>
+                          {(s.filename || `Source #${s.source_id}`).slice(0, 50)} · {Math.floor(s.free_seconds / 60)}min livre · {s.eligible_events}/{s.total_events} eventos
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                ) : (
+                  <p className="text-xs text-text-muted">
+                    Nenhuma gameplay individual com ≥3 min livre disponível.
+                  </p>
+                )}
+              </div>
+            )}
 
             {editSelectedGameplay && (() => {
               const game = availability.find((g) => g.game_id === editSelectedGameplay);

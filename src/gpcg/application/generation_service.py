@@ -763,6 +763,8 @@ class GenerationService:
                 # V3: Read gameplay preference + reuse override from job artifacts
                 gameplay_preference = job.artifacts.get("gameplay_preference")
                 reuse_override = job.artifacts.get("reuse_override")
+                # V4: Read specific source preference (null=all sources, source_id=specific)
+                gameplay_source_id = job.artifacts.get("gameplay_source_id")
 
                 # V3: Determine effective max_uses for this job
                 # Precedence: override explícito da ideia > configuração do usuário > default
@@ -783,6 +785,7 @@ class GenerationService:
                     narrative_beats=job.artifacts.get("creative_plan", {}).get("narrative_beats", []),
                     max_uses=effective_max_uses,
                     gameplay_preference_game_id=gameplay_preference,
+                    gameplay_source_id=gameplay_source_id,
                 )
                 if not clips:
                     bg_name = session.get(Game, select_game_id).canonical_name if select_game_id else "N/A"

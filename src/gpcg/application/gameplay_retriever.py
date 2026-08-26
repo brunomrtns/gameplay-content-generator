@@ -127,6 +127,7 @@ class GameplayRetriever:
         recent_game_ids: Optional[list[int]] = None,
         max_uses: int = 1,
         gameplay_preference_game_id: Optional[int] = None,
+        gameplay_source_id: Optional[int] = None,
     ) -> list[SelectedClip]:
         """Retrieve gameplay clips for a video.
 
@@ -190,8 +191,16 @@ class GameplayRetriever:
                 log.info(f"gameplay_preference: user chose game #{gameplay_preference_game_id}, "
                          f"switching GENERAL_TOPIC → GAME_RELATED for source filtering")
 
+        # V4: If user specified a specific source (gameplay_source_id),
+        # we filter to ONLY that source. This takes precedence over
+        # everything else — the user explicitly chose this gameplay file.
+        if gameplay_source_id is not None:
+            log.info(f"gameplay_source_id: user chose source #{gameplay_source_id}, "
+                     f"restricting retrieval to this single source")
+
         # Decide whether to use semantic retrieval or fallback
-        use_semantic = self._should_use_semantic(session, game_ids, creative_plan, video_type, user_id)
+        use_semantic = self._should_use_semantic(session, game_ids, creative_plan, video_type, user_id,
+                                                  gameplay_source_id=gameplay_source_id)
 
         if use_semantic and creative_plan is not None:
             clips = self._retrieve_semantic(
@@ -199,6 +208,7 @@ class GameplayRetriever:
                 user_id=user_id, accept_public=accept_public,
                 narrative_beats=narrative_beats, recent_game_ids=recent_game_ids,
                 max_uses=max_uses, video_type=video_type,
+                gameplay_source_id=gameplay_source_id,
             )
             if clips:
                 return clips
@@ -240,6 +250,7 @@ class GameplayRetriever:
         plan: Optional[VideoCreativePlan],
         video_type: str,
         user_id: Optional[int] = None,
+        gameplay_source_id: Optional[int] = None,
     ) -> bool:
         """Check if semantic retrieval should be used."""
         if plan is None or not plan.success:
@@ -263,6 +274,9 @@ class GameplayRetriever:
                 GameplaySource.ingestion_status == "ready",
                 GameplaySource.enabled == True,
             )
+        # V4: restrict to a single source if specified
+        if gameplay_source_id is not None:
+            query = query.where(GameplaySource.id == gameplay_source_id)
         # V2: filter by user_id if provided
         if user_id is not None:
             query = query.where(GameplaySource.user_id == user_id)
@@ -420,6 +434,7 @@ class GameplayRetriever:
         recent_game_ids: Optional[list[int]] = None,
         max_uses: int = 1,
         video_type: str = "GAME_RELATED",
+        gameplay_source_id: Optional[int] = None,
     ) -> list[SelectedClip]:
         """Retrieve clips using the semantic index.
 
@@ -461,6 +476,9 @@ class GameplayRetriever:
                 GameplaySource.ingestion_status == "ready",
                 GameplaySource.enabled == True,
             )
+        # V4: restrict to a single source if specified
+        if gameplay_source_id is not None:
+            query = query.where(GameplaySource.id == gameplay_source_id)
         # V2: filter by user_id if provided
         if user_id is not None:
             query = query.where(GameplaySource.user_id == user_id)
@@ -576,7 +594,10 @@ class GameplayRetriever:
                 )
                 for ev in events:
                     if ev.id not in {e.id for _, e, _ in all_events}:
-                        all_events.append((src, ev, 0.3))
+                        # Use the event's interesting_score as the score so
+                        # more interesting events are prioritized over less
+                        # interesting ones (instead of a flat 0.3 for all).
+                        all_events.append((src, ev, ev.interesting_score * 0.3))
 
         # Last resort: grab all events regardless of score
         if not all_events:

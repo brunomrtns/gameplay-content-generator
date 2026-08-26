@@ -320,21 +320,23 @@ def _normalize_queue_entry(entry) -> dict:
     """Normalize a queue entry to dict format.
 
     Backward compat: plain int → {"ki_id": int, "gameplay_preference": None, "reuse_override": None}
+    V4: added gameplay_source_id (null=auto/all sources, source_id=specific source)
     """
     if isinstance(entry, dict):
         return {
             "ki_id": entry.get("ki_id") or entry.get("id"),
             "gameplay_preference": entry.get("gameplay_preference"),
             "reuse_override": entry.get("reuse_override"),
+            "gameplay_source_id": entry.get("gameplay_source_id"),
         }
     if isinstance(entry, int):
-        return {"ki_id": entry, "gameplay_preference": None, "reuse_override": None}
+        return {"ki_id": entry, "gameplay_preference": None, "reuse_override": None, "gameplay_source_id": None}
     if isinstance(entry, str):
         try:
-            return {"ki_id": int(entry), "gameplay_preference": None, "reuse_override": None}
+            return {"ki_id": int(entry), "gameplay_preference": None, "reuse_override": None, "gameplay_source_id": None}
         except ValueError:
-            return {"ki_id": None, "gameplay_preference": None, "reuse_override": None}
-    return {"ki_id": None, "gameplay_preference": None, "reuse_override": None}
+            return {"ki_id": None, "gameplay_preference": None, "reuse_override": None, "gameplay_source_id": None}
+    return {"ki_id": None, "gameplay_preference": None, "reuse_override": None, "gameplay_source_id": None}
 
 
 def _normalize_idea_queue(raw) -> list[dict]:
@@ -395,6 +397,7 @@ def get_idea_queue(
             item_out = _item_to_out(ki, db).model_dump()
             item_out["gameplay_preference"] = entry.get("gameplay_preference")
             item_out["reuse_override"] = entry.get("reuse_override")
+            item_out["gameplay_source_id"] = entry.get("gameplay_source_id")
             items.append(item_out)
     return {"queue": queue, "items": items}
 
@@ -404,6 +407,7 @@ class IdeaQueueAddRequest(BaseModel):
     knowledge_item_id: int
     gameplay_preference: Optional[int] = None  # null=auto, game_id=user chose
     reuse_override: Optional[str] = None  # null, "allow_reuse", "skip"
+    gameplay_source_id: Optional[int] = None  # null=all sources of game, source_id=specific
 
 
 @router.post("/idea-queue/add")
@@ -436,6 +440,7 @@ def add_to_idea_queue(
             "ki_id": req.knowledge_item_id,
             "gameplay_preference": req.gameplay_preference,
             "reuse_override": req.reuse_override,
+            "gameplay_source_id": req.gameplay_source_id,
         })
         config["idea_queue"] = queue
         auto.config = config
@@ -504,6 +509,7 @@ class IdeaQueueUpdateRequest(BaseModel):
     knowledge_item_id: int
     gameplay_preference: Optional[int] = None  # null=auto, game_id=user chose
     reuse_override: Optional[str] = None  # null, "allow_reuse", "skip"
+    gameplay_source_id: Optional[int] = None  # null=all sources of game, source_id=specific
 
 
 @router.post("/idea-queue/update")
@@ -528,6 +534,7 @@ def update_idea_queue_item(
         if entry.get("ki_id") == req.knowledge_item_id:
             entry["gameplay_preference"] = req.gameplay_preference
             entry["reuse_override"] = req.reuse_override
+            entry["gameplay_source_id"] = req.gameplay_source_id
             updated = True
             break
 

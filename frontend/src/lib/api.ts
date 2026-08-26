@@ -484,6 +484,7 @@ export const api = {
     knowledgeItemId: number,
     gameplayPreference?: number | null,
     reuseOverride?: string | null,
+    gameplaySourceId?: number | null,
   ) =>
     request<{ queue: any[]; message: string }>("/idea-queue/add", {
       method: "POST",
@@ -491,6 +492,7 @@ export const api = {
         knowledge_item_id: knowledgeItemId,
         gameplay_preference: gameplayPreference ?? null,
         reuse_override: reuseOverride ?? null,
+        gameplay_source_id: gameplaySourceId ?? null,
       }),
     }),
   removeFromIdeaQueue: (knowledgeItemId: number) =>
@@ -507,6 +509,7 @@ export const api = {
     knowledgeItemId: number,
     gameplayPreference?: number | null,
     reuseOverride?: string | null,
+    gameplaySourceId?: number | null,
   ) =>
     request<{ queue: any[]; message: string }>("/idea-queue/update", {
       method: "POST",
@@ -514,12 +517,17 @@ export const api = {
         knowledge_item_id: knowledgeItemId,
         gameplay_preference: gameplayPreference ?? null,
         reuse_override: reuseOverride ?? null,
+        gameplay_source_id: gameplaySourceId ?? null,
       }),
     }),
 
   // ── Gameplay Availability (V3) ────────────────────────────────────────
   getGameplayAvailability: () =>
     request<{ games: any[]; max_uses: number }>("/gameplay-availability"),
+  getGameplaySourcesForGame: (gameId: number) =>
+    request<{ game_id: number; sources: any[]; min_free_seconds: number }>(
+      `/gameplay-availability/${gameId}/sources`
+    ),
 
   // ── Catalog (IGDB) ──────────────────────────────────────────────────────
   // These go to the catalog service, not the main API — so we can't use the
