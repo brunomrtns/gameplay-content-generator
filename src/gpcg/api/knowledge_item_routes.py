@@ -193,21 +193,24 @@ def trigger_content_collection(
     """Trigger manual content collection (creates a content_collect job).
 
     The job collects RSS for all games with gameplay available.
+    Multiple jobs can be queued — they are processed in order by the worker.
     """
     import uuid
-    from sqlalchemy import select
+    from sqlalchemy import select, func
 
-    # Dedup: check for existing queued/running content_collect job
-    existing = db.execute(
-        select(Job).where(
+    # Soft cap: prevent spamming the queue with too many pending jobs.
+    # Allow up to 3 queued content_collect jobs (the current one may be
+    # running, so this leaves room for a couple more in the queue).
+    queued_count = db.execute(
+        select(func.count(Job.id)).where(
             Job.type == JobType.content_collect.value,
-            Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
+            Job.status == JobStatus.queued.value,
         )
-    ).scalar_one_or_none()
-    if existing:
+    ).scalar() or 0
+    if queued_count >= 3:
         raise HTTPException(
             status_code=409,
-            detail="Content collection job already queued or running",
+            detail="Já existem 3 jobs de coleta na fila. Aguarde processar para criar mais.",
         )
 
     # Set domain from channel profile
