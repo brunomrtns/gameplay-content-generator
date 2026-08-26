@@ -67,7 +67,7 @@ def _resolve_local_asset_path(storage_key: str, filename: str, storage_root: Pat
     return None
 
 
-def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Path) -> Optional[str]:
+def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Path, source_id: Optional[int] = None) -> Optional[str]:
     """Resolve a VPS gameplay file path to a local file path.
 
     The VPS stores gameplay at /app/data/gameplays/{filename} (container path).
@@ -94,9 +94,18 @@ def _resolve_local_gameplay_path(vps_path: str, filename: str, storage_root: Pat
     # Try both the original filename and the stripped version.
     import re
     stripped = re.sub(r'^[0-9a-f]{8}_', '', filename)
+    # Also try with source_id prefix stripped (e.g. "200_filename.mp4")
+    stripped_num = re.sub(r'^\d+_', '', filename)
     candidates = [filename]
     if stripped != filename:
         candidates.append(stripped)
+    if stripped_num != filename and stripped_num not in candidates:
+        candidates.append(stripped_num)
+    # Also try with source_id prefix added (worker saves as {source_id}_{filename})
+    if source_id is not None:
+        prefixed = f"{source_id}_{filename}"
+        if prefixed not in candidates:
+            candidates.insert(0, prefixed)
 
     # Search common locations (storage_root-relative)
     search_dirs = [
@@ -276,7 +285,8 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
             # we need to find the file on the local HD
             vps_path = src_data.get("file_path", "")
             filename = src_data.get("filename", "")
-            local_path = _resolve_local_gameplay_path(vps_path, filename, storage_root or Path("/media/bruno/ToshibaHD/gpcg"))
+            source_id = src_data.get("id")
+            local_path = _resolve_local_gameplay_path(vps_path, filename, storage_root or Path("/media/bruno/ToshibaHD/gpcg"), source_id=source_id)
             if local_path:
                 log.info(f"Resolved gameplay path: {vps_path} → {local_path}")
             else:
