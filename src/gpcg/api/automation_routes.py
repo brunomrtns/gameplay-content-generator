@@ -467,7 +467,7 @@ def _reconcile_idea_queue(
     return [
         {
             "ki_id": ki.id,
-            "gameplay_preference": None,
+            "gameplay_preference": ki.game_id,
             "reuse_override": None,
         }
         for ki in kis
@@ -499,6 +499,9 @@ def _reconcile_with_composite_score(
     if not candidates:
         return []
 
+    # Build ki_id -> game_id lookup for setting gameplay_preference
+    ki_game_map = {ki.id: ki.game_id for ki in candidates}
+
     # Build the brief for this channel (needed for scoring context)
     try:
         profile = get_or_create_profile(db, user_id)
@@ -509,7 +512,7 @@ def _reconcile_with_composite_score(
         # Fallback to legacy
         candidates.sort(key=lambda ki: ki.editorial_score, reverse=True)
         return [
-            {"ki_id": ki.id, "gameplay_preference": None, "reuse_override": None}
+            {"ki_id": ki.id, "gameplay_preference": ki.game_id, "reuse_override": None}
             for ki in candidates[:max_size]
         ]
 
@@ -563,7 +566,7 @@ def _reconcile_with_composite_score(
         result_ids.extend(ki_id for _, ki_id in sampled)
 
     return [
-        {"ki_id": ki_id, "gameplay_preference": None, "reuse_override": None}
+        {"ki_id": ki_id, "gameplay_preference": ki_game_map.get(ki_id), "reuse_override": None}
         for ki_id in result_ids
     ]
 
