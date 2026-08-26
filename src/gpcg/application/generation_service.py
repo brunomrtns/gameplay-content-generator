@@ -110,6 +110,7 @@ class GenerationService:
         story_finder: Optional[StoryFinder] = None,
         humanizer: Optional[Humanizer] = None,
         session_scope=None,
+        progress_callback: Optional[callable] = None,
     ) -> None:
         self.llm = llm
         self.vg_adapter = vg_adapter
@@ -118,6 +119,9 @@ class GenerationService:
         # When a session_scope is injected (worker local_db_sync), all DB access
         # uses the temporary DB without mutating global database state.
         self._session_scope = session_scope or _global_session_scope
+        # Progress callback: when set (worker mode), reports stage + progress
+        # to the VPS so the UI shows real-time progress instead of stuck at 5%.
+        self._progress_callback = progress_callback
         self.selector = GameplaySelector()
         self.plan_builder = RenderPlanBuilder()
         self.qa = QAService(llm=llm)
@@ -1528,9 +1532,16 @@ class GenerationService:
                 JobStage.done,
             ]
             idx = stage_order.index(stage) if stage in stage_order else 0
-            job.progress = idx / len(stage_order) * 100
+            progress_pct = idx / len(stage_order)
+            job.progress = progress_pct * 100
             session.flush()
         log.info(f"job #{job_id} → stage={stage.value}")
+        # Report progress to VPS (worker mode) so the UI updates in real-time
+        if self._progress_callback:
+            try:
+                self._progress_callback(stage.value, progress_pct)
+            except Exception:
+                pass
 
     def _get_artifact(self, job_id: int, key: str):
         with self._session_scope() as session:

@@ -26,7 +26,7 @@ log = get_logger(__name__)
 IMPLEMENTED_DOMAINS = {ContentDomain.games.value, ContentDomain.kids.value}
 
 
-def get_generation_service(domain: str, session_scope: Any) -> Any:
+def get_generation_service(domain: str, session_scope: Any, progress_callback: Any = None) -> Any:
     """Return the generation service for the given domain.
 
     This is the single dispatch point. The worker calls this instead of
@@ -35,6 +35,7 @@ def get_generation_service(domain: str, session_scope: Any) -> Any:
     Args:
         domain: Domain string ("games", "kids", etc.)
         session_scope: A session scope context manager for DB access.
+        progress_callback: Optional callback(stage, pct) for progress updates.
 
     Returns:
         A generation service instance with a ``run_job(job_id)`` method.
@@ -44,11 +45,11 @@ def get_generation_service(domain: str, session_scope: Any) -> Any:
     """
     if domain == ContentDomain.games.value:
         from gpcg.application.generation_service import GenerationService
-        return GenerationService(session_scope=session_scope)
+        return GenerationService(session_scope=session_scope, progress_callback=progress_callback)
 
     if domain == ContentDomain.kids.value:
         from gpcg.domains.kids.pipeline import KidsGenerationService
-        return KidsGenerationService(session_scope=session_scope)
+        return KidsGenerationService(session_scope=session_scope, progress_callback=progress_callback)
 
     raise ValueError(
         f"Domain '{domain}' does not have a pipeline implementation. "

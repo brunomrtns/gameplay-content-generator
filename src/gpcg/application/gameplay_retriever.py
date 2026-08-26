@@ -504,34 +504,84 @@ class GameplayRetriever:
             )
             compatible_sources = [best_src]
 
-        # Collect events from all compatible sources
-        all_events: list[tuple[GameplaySource, GameplayEvent]] = []
+        # Collect events from all compatible sources using BEAT-AWARE retrieval.
+        # Instead of a single gameplay_query, we search per-beat: each narrative
+        # beat (hook, development, payoff, etc.) gets its own keyword search
+        # across ALL sources. This produces multi-source diversity (different
+        # beats match events from different gameplay files) and semantic matching
+        # between what's being said and what's shown.
+        all_events: list[tuple[GameplaySource, GameplayEvent, float]] = []
+        # (source, event, beat_match_score) — score > 0 means it matched a beat
 
-        # First try: semantic search with the plan's query
-        if plan.gameplay_query:
+        # Build beat queries: one search query per narrative beat
+        beat_queries: list[tuple[str, str]] = []  # (beat_label, query_text)
+        if beats:
+            for beat in beats:
+                label = getattr(beat, "label", "") if not isinstance(beat, dict) else beat.get("label", "")
+                desc = getattr(beat, "description", "") if not isinstance(beat, dict) else beat.get("description", "")
+                query = desc or label
+                if query:
+                    beat_queries.append((label, query))
+
+        # Also include the plan's gameplay_query as a general fallback query
+        general_query = plan.gameplay_query or plan.central_idea or ""
+
+        if beat_queries:
+            # BEAT-AWARE: search events for each beat across ALL sources
+            seen_event_ids: set[int] = set()
+            for beat_label, beat_query in beat_queries:
+                beat_matches: list[tuple[GameplaySource, GameplayEvent, float]] = []
+                for src in compatible_sources:
+                    events = self.index_service.search_events(
+                        session, src.id, beat_query,
+                        min_confidence=0.2, limit=5,
+                    )
+                    for ev in events:
+                        if ev.id in seen_event_ids:
+                            continue
+                        # Score: interesting_score (0-1) + visual_confidence (0-1)
+                        # Beat matches get priority over generic interesting events
+                        score = 1.0 + ev.interesting_score * 0.5 + ev.visual_confidence * 0.3
+                        beat_matches.append((src, ev, score))
+
+                # Sort beat matches by score (descending) and take top 3
+                beat_matches.sort(key=lambda x: x[2], reverse=True)
+                for src, ev, score in beat_matches[:3]:
+                    if ev.id not in seen_event_ids:
+                        all_events.append((src, ev, score))
+                        seen_event_ids.add(ev.id)
+
+            log.info(
+                f"beat-aware retrieval: {len(beat_queries)} beats → "
+                f"{len(all_events)} matched events from {len(set(s.id for s, _, _ in all_events))} sources"
+            )
+
+        # Supplement with general query if we still need more events
+        if len(all_events) < 15 and general_query:
             for src in compatible_sources:
                 events = self.index_service.search_events(
-                    session, src.id, plan.gameplay_query,
+                    session, src.id, general_query,
                     min_confidence=0.3, limit=10,
                 )
                 for ev in events:
-                    all_events.append((src, ev))
+                    if ev.id not in {e.id for _, e, _ in all_events}:
+                        all_events.append((src, ev, 0.5))  # lower priority than beat matches
 
-        # If no query or no matches, get the most interesting events
-        if not all_events:
+        # If still not enough, get most interesting events from all sources
+        if len(all_events) < 10:
             for src in compatible_sources:
                 events = self.index_service.get_interesting_events(
                     session, src.id,
-                    min_interesting=0.3, limit=10,
+                    min_interesting=0.2, limit=10,
                 )
                 for ev in events:
-                    all_events.append((src, ev))
+                    if ev.id not in {e.id for _, e, _ in all_events}:
+                        all_events.append((src, ev, 0.3))
 
-        # Last resort: if still no events (e.g. interesting_score not set),
-        # grab random events regardless of score
+        # Last resort: grab all events regardless of score
         if not all_events:
-            log.info(f"no interesting events (score>=0.3) for games {game_ids}, "
-                     f"using random events from {len(compatible_sources)} sources")
+            log.info(f"no interesting events for games {game_ids}, "
+                     f"using all events from {len(compatible_sources)} sources")
             for src in compatible_sources:
                 events = session.execute(
                     select(GameplayEvent)
@@ -540,30 +590,29 @@ class GameplayRetriever:
                     .limit(20)
                 ).scalars().all()
                 for ev in events:
-                    all_events.append((src, ev))
+                    all_events.append((src, ev, 0.0))
 
         if not all_events:
             return []
 
-        # Sort by interesting score (descending) but add randomization
-        # to avoid always picking the same clips. We group events into
-        # score tiers and shuffle within each tier.
+        # Sort by beat match score (descending) — beat matches first, then
+        # general query matches, then interesting events. Add randomization
+        # within score tiers to avoid always picking the same clips.
         rng.shuffle(all_events)
-        all_events.sort(key=lambda x: x[1].interesting_score, reverse=True)
-        # Re-shuffle within score tiers to add variety while still preferring
-        # higher-scoring ones. Events within 0.1 of each other are same tier.
+        all_events.sort(key=lambda x: x[2], reverse=True)
+        # Re-shuffle within score tiers (events within 0.1 of each other)
         tiered: list = []
         current_tier: list = []
         current_score = None
-        for ev in all_events:
-            score = ev[1].interesting_score
+        for item in all_events:
+            score = item[2]
             if current_score is None or abs(score - current_score) < 0.1:
-                current_tier.append(ev)
+                current_tier.append(item)
                 current_score = score
             else:
                 rng.shuffle(current_tier)
                 tiered.extend(current_tier)
-                current_tier = [ev]
+                current_tier = [item]
                 current_score = score
         if current_tier:
             rng.shuffle(current_tier)
@@ -691,7 +740,7 @@ class GameplayRetriever:
             return True
 
         # Pass 1: select events that are NOT in cooldown
-        for src, ev in all_events:
+        for src, ev, _score in all_events:
             if total >= target_duration:
                 break
             if _is_in_cooldown(ev.start_time, ev.end_time, src.id):
@@ -703,33 +752,50 @@ class GameplayRetriever:
         if total < target_duration - 0.5:
             log.info(f"pass 1 filled {total:.1f}s/{target_duration:.1f}s, "
                      f"accepting cooldown events for remaining")
-            for src, ev in all_events:
+            for src, ev, _score in all_events:
                 if total >= target_duration:
                     break
                 _try_select(src, ev)
 
+        # Log source diversity
+        used_source_ids = set(c.asset.source_id for c in clips)
         log.info(
-            f"semantic retrieval: {len(clips)} clips from {len(compatible_sources)} sources, "
+            f"semantic retrieval: {len(clips)} clips from {len(used_source_ids)} sources, "
             f"{total:.1f}s / {target_duration:.1f}s target"
         )
 
-        # If we didn't fill the target, supplement with random selection.
+        # If we didn't fill the target, supplement with remaining events from
+        # all compatible sources (not random). This keeps semantic quality even
+        # for the filler portion.
         # V3: For GENERAL_TOPIC, do NOT mix with other sources — respect the
         # "one source per video" rule. Just use what's available from the
         # selected source.
         if total < target_duration - 0.5 and plan.video_type != "GENERAL_TOPIC":
             remaining = target_duration - total
-            log.info(f"supplementing with {remaining:.1f}s of random selection")
-            # V2: try primary game first, then other game_ids
-            primary_game_id = game_ids[0] if game_ids else 0
-            supplement = self.fallback_selector.select(
-                session, primary_game_id, remaining,
-                scene_duration=scene_duration, rng=rng,
-            )
-            # Adjust scene indices for supplements
-            for clip in supplement:
-                clip.scene_index += scene_idx
-                clips.append(clip)
+            # Try to use remaining events from all_events that weren't selected
+            remaining_events = [
+                (src, ev) for src, ev, _ in all_events
+                if ev.id not in {c.event_id for c in clips if c.event_id is not None}
+            ]
+            if remaining_events:
+                log.info(f"supplementing with {remaining:.1f}s from remaining semantic events")
+                for src, ev in remaining_events:
+                    if total >= target_duration - 0.5:
+                        break
+                    _try_select(src, ev)
+
+            # If still not enough, fall back to random selection from ALL sources
+            if total < target_duration - 0.5:
+                remaining = target_duration - total
+                log.info(f"supplementing with {remaining:.1f}s of random selection")
+                primary_game_id = game_ids[0] if game_ids else 0
+                supplement = self.fallback_selector.select(
+                    session, primary_game_id, remaining,
+                    scene_duration=scene_duration, rng=rng,
+                )
+                for clip in supplement:
+                    clip.scene_index += scene_idx
+                    clips.append(clip)
         elif total < target_duration - 0.5 and plan.video_type == "GENERAL_TOPIC":
             log.info(
                 f"GENERAL_TOPIC: selected source filled {total:.1f}s/{target_duration:.1f}s, "

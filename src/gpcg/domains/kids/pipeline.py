@@ -75,11 +75,13 @@ class KidsGenerationService:
         llm: Optional[LLMClient] = None,
         vg_adapter: Optional[VideoGenerateAdapter] = None,
         session_scope=None,
+        progress_callback: Optional[callable] = None,
     ) -> None:
         self.llm = llm
         self.vg_adapter = vg_adapter
         self.settings = get_settings()
         self._session_scope = session_scope
+        self._progress_callback = progress_callback
         self.plan_builder = None  # Lazy init — uses RenderPlanBuilder from Games infra
 
     def run_job(self, job_id: int) -> bool:
@@ -630,6 +632,11 @@ Write a kid-friendly narration script in pt-BR. Target ~{target_chars} character
                 job.stage = stage.value
                 session.flush()
         log.info(f"Kids job #{job_id} → stage={stage.value}")
+        if self._progress_callback:
+            try:
+                self._progress_callback(stage.value, 0.5)
+            except Exception:
+                pass
 
     def _get_artifact(self, job_id: int, key: str):
         with self._session_scope() as session:

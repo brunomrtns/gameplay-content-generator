@@ -680,7 +680,7 @@ def run_generation_locally(
         from gpcg.domains.registry import get_generation_service
 
         job_domain = job.get("domain", "games")
-        gen = get_generation_service(job_domain, session_scope=temp_session_scope)
+        gen = get_generation_service(job_domain, session_scope=temp_session_scope, progress_callback=progress_callback)
 
         log.info(f"Running {type(gen).__name__} for job #{job_id} (domain={job_domain}) on local DB")
         gen.run_job(job_id)
