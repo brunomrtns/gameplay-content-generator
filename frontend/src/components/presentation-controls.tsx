@@ -99,16 +99,18 @@ function SectionTitle({ icon: Icon, title, desc }: { icon: any; title: string; d
 
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-sm text-text-secondary">{label}</span>
+    <label className="flex items-center gap-3 cursor-pointer">
       <button
         type="button"
         onClick={() => onChange(!checked)}
-        className={`relative h-6 w-11 rounded-full transition-colors ${checked ? "bg-teal-500" : "bg-border"}`}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? "bg-accent" : "bg-surface-hover"}`}
       >
-        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${checked ? "translate-x-5" : "translate-x-0.5"}`} />
+        <span
+          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform duration-200 ${checked ? "translate-x-5" : "translate-x-0"}`}
+        />
       </button>
-    </div>
+      <span className="text-sm text-text-secondary">{label}</span>
+    </label>
   );
 }
 
