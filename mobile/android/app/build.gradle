@@ -91,7 +91,7 @@ android {
         applicationId "com.brunomrtns.gpcg"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 7
+        versionCode 8
         versionName "0.9.10"
     }
     signingConfigs {
