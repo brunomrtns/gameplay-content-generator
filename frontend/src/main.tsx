@@ -4,6 +4,7 @@ import { createBrowserRouter, RouterProvider, Navigate, Outlet } from "react-rou
 import { Layout } from "@/components/layout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LoginPage } from "@/pages/login";
+import { LandingPage } from "@/pages/landing";
 import { DashboardPage } from "@/pages/dashboard";
 import { ContentPage } from "@/pages/content";
 import { JobsPage } from "@/pages/jobs";
@@ -99,8 +100,8 @@ const router = createBrowserRouter(
         },
       ],
     },
-    { path: "/", element: <Navigate to="/dashboard" replace /> },
-    { path: "*", element: <Navigate to="/dashboard" replace /> },
+    { path: "/", element: <LandingPage /> },
+    { path: "*", element: <Navigate to="/" replace /> },
   ],
   { basename },
 );
