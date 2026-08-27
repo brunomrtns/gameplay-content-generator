@@ -12,6 +12,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 import httpx
@@ -143,7 +144,7 @@ def sso_redirect():
 
 
 @router.post("/token")
-def exchange_token(
+async def exchange_token(
     request: Request,
     db: Session = Depends(get_db),
 ):
@@ -168,10 +169,11 @@ def exchange_token(
     # If no cookies in request, try the body (mobile app sends them explicitly)
     if not bi_auth:
         try:
-            import json as _json
-            body = _json.loads(request._body.decode() if hasattr(request, "_body") and request._body else "")
-            bi_auth = body.get("bi_auth") if isinstance(body, dict) else None
-            bi_refresh = body.get("bi_refresh") if isinstance(body, dict) else None
+            raw = await request.body()
+            if raw:
+                body = json.loads(raw)
+                bi_auth = body.get("bi_auth") if isinstance(body, dict) else None
+                bi_refresh = body.get("bi_refresh") if isinstance(body, dict) else None
         except Exception:
             bi_auth = None
             bi_refresh = None
