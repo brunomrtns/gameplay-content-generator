@@ -43,7 +43,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-MOBILE_ROOT="$(cd "$PROJECT_ROOT/../GpcgMobile" 2>/dev/null && pwd || echo "")"
+MOBILE_ROOT="$(cd "$PROJECT_ROOT/mobile" 2>/dev/null && pwd || echo "")"
 
 # Estado: hashes da última verificação bem-sucedida
 STATE_FILE="$PROJECT_ROOT/.cross-platform-state"
@@ -112,7 +112,7 @@ done
 
 # ── Verificar que o mobile existe ─────────────────────────────────────────────
 if [[ -z "$MOBILE_ROOT" || ! -d "$MOBILE_ROOT" ]]; then
-  err "Diretório do mobile não encontrado em $PROJECT_ROOT/../GpcgMobile"
+  err "Diretório do mobile não encontrado em $PROJECT_ROOT/mobile"
   err "Verifique se o repositório mobile está no caminho correto."
   exit 1
 fi

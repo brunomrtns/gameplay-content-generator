@@ -659,7 +659,7 @@ fi
 # Versionamento: a cada build, o versionCode é incrementado automaticamente
 # e o versionName segue o padrão X.Y.Z (alinhado com o backend quando possível).
 
-MOBILE_ROOT="$(cd "$PROJECT_ROOT/../GpcgMobile" 2>/dev/null && pwd || echo "")"
+MOBILE_ROOT="$(cd "$PROJECT_ROOT/mobile" 2>/dev/null && pwd || echo "")"
 XPLAT_RESULT="$PROJECT_ROOT/.cross-platform-result"
 
 # Ler resultado da verificação cross-platform

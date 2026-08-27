@@ -51,6 +51,16 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 
+# Mobile (React Native)
+mobile/node_modules/
+mobile/android/app/build/
+mobile/android/build/
+mobile/android/.gradle/
+mobile/android/app/release.keystore
+mobile/android/keystore.properties
+mobile/android/app/debug.keystore
+mobile/.expo/
+
 # IDE
 .vscode/
 .idea/

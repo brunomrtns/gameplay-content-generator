@@ -1,0 +1,7 @@
+{
+  "name": "GpcgMobile",
+  "displayName": "GPCG",
+  "android": {
+    "package": "com.brunomrtns.gpcg"
+  }
+}
