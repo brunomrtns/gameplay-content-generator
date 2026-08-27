@@ -5,14 +5,22 @@ domain-level cookies `bi_auth` (JWT access token, 15min) and `bi_refresh`
 (JWT refresh token, 7d). This middleware reads the `bi_auth` cookie and
 calls the Identity Service's `/api/auth/check` endpoint to validate the
 user. If valid, a local User is found-or-created by email.
+
+Mobile app auth: the mobile app exchanges SSO cookies for a JWT token
+via POST /api/auth/token, then sends the token as Bearer in the
+Authorization header. This module supports both auth methods:
+  1. Cookie-based (web) — bi_auth cookie → BI Identity check
+  2. Token-based (mobile) — Bearer JWT → local verification
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
 import httpx
+import jwt
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -25,6 +33,8 @@ log = logging.getLogger(__name__)
 # Cache the BI user object on the request so we don't call /api/auth/check
 # multiple times per request (get_current_user + get_admin_user).
 _BI_USER_KEY = "_bi_user"
+# Cache the local user resolved from Bearer token on the request.
+_TOKEN_USER_KEY = "_token_user"
 
 
 def _validate_bi_user(request: Request) -> Optional[dict]:
@@ -169,17 +179,89 @@ def _is_gpcg_admin(bi_user: dict) -> bool:
     return False
 
 
+# ── Mobile Token (JWT) ───────────────────────────────────────────────────────
+
+
+def issue_mobile_token(user: User) -> str:
+    """Issue a JWT token for the mobile app.
+
+    The token encodes the user_id and email, signed with
+    gpcg_mobile_token_secret, expiring after gpcg_mobile_token_expiry.
+    The mobile app sends this as Bearer token in Authorization header.
+    """
+    settings = get_settings()
+    now = int(time.time())
+    payload = {
+        "sub": str(user.id),
+        "email": user.email,
+        "iat": now,
+        "exp": now + settings.gpcg_mobile_token_expiry,
+        "iss": "gpcg-mobile",
+    }
+    return jwt.encode(payload, settings.gpcg_mobile_token_secret, algorithm="HS256")
+
+
+def _validate_bearer_token(request: Request, db: Session) -> Optional[User]:
+    """Validate a Bearer JWT token from the Authorization header.
+
+    Returns the local User if valid, None otherwise.
+    Caches the result on the request state to avoid duplicate verification.
+    """
+    # Return cached result if available
+    cached = getattr(request.state, _TOKEN_USER_KEY, None)
+    if cached is not None:
+        return cached
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+
+    token = auth_header[7:]  # strip "Bearer "
+    settings = get_settings()
+    try:
+        payload = jwt.decode(
+            token,
+            settings.gpcg_mobile_token_secret,
+            algorithms=["HS256"],
+            issuer="gpcg-mobile",
+        )
+    except jwt.PyJWTError:
+        return None
+
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+
+    user = db.get(User, int(user_id))
+    if user is None:
+        return None
+
+    # Cache on request state
+    setattr(request.state, _TOKEN_USER_KEY, user)
+    return user
+
+
 def get_current_user(
     request: Request,
     db: Session = Depends(get_db),
 ) -> User:
-    """FastAPI dependency: validate BI Identity cookie, return local User.
+    """FastAPI dependency: validate auth (cookie OR Bearer token), return local User.
 
-    Reads the `bi_auth` cookie, calls the Identity Service to validate,
-    and finds-or-creates a local User matching by email.
+    Supports two auth methods:
+    1. Cookie-based (web): reads `bi_auth` cookie, validates via BI Identity.
+    2. Token-based (mobile): reads `Authorization: Bearer <token>` header,
+       verifies JWT signed with gpcg_mobile_token_secret.
 
-    Raises 401 if no cookie, invalid cookie, or user not found.
+    Raises 401 if neither method yields a valid user.
     """
+    # Try Bearer token first (mobile) — fast, no network call
+    token_user = _validate_bearer_token(request, db)
+    if token_user is not None:
+        if not token_user.is_active:
+            raise HTTPException(status_code=403, detail="Account deactivated")
+        return token_user
+
+    # Fall back to cookie-based auth (web)
     bi_user = _validate_bi_user(request)
     if bi_user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")

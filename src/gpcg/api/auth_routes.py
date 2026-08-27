@@ -3,6 +3,7 @@
 Endpoints:
   GET  /api/auth/me             — get current user info (from BI Identity)
   GET  /api/auth/sso-redirect   — redirect to BI Identity login
+  POST /api/auth/token          — exchange SSO cookie for JWT (mobile app)
   POST /api/auth/logout         — logout (clears local state, redirects to /id/login)
   GET  /api/auth/users          — list all local users (admin only)
   DELETE /api/auth/users/{id}   — delete user (admin only)
@@ -26,6 +27,7 @@ from gpcg.infrastructure.auth import (
     get_current_user,
     _validate_bi_user,
     _is_gpcg_admin,
+    issue_mobile_token,
 )
 from gpcg.infrastructure.database import get_db, session_scope
 
@@ -49,6 +51,12 @@ class UserResponse(BaseModel):
 class AdminUpdateUserRequest(BaseModel):
     name: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class MobileTokenRequest(BaseModel):
+    """Body for POST /auth/token — mobile app sends SSO cookies explicitly."""
+    bi_auth: str
+    bi_refresh: Optional[str] = None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -132,6 +140,64 @@ def sso_redirect():
         url="/id/login?redirect=/gpcg/dashboard",
         status_code=302,
     )
+
+
+@router.post("/token")
+def exchange_token(
+    request: Request,
+    body: MobileTokenRequest,
+    db: Session = Depends(get_db),
+):
+    """Exchange SSO cookie for a JWT token (mobile app auth).
+
+    The mobile app opens a WebView to the BI Identity login flow.
+    After login, the WebView has bi_auth/bi_refresh cookies. The mobile
+    app extracts those cookies and sends them to this endpoint, which
+    validates them via the BI Identity Service and returns a JWT token
+    that the mobile app uses as Bearer token in subsequent requests.
+
+    Request body:
+      { "bi_auth": "...", "bi_refresh": "..." }
+
+    Returns:
+      { "token": "<jwt>", "user": { id, email, name, is_admin, ... } }
+    """
+    # Validate via BI Identity
+    settings = get_settings()
+    cookies = {"bi_auth": body.bi_auth}
+    if body.bi_refresh:
+        cookies["bi_refresh"] = body.bi_refresh
+
+    try:
+        resp = httpx.get(
+            f"{settings.bi_identity_url}/api/auth/check",
+            cookies=cookies,
+            timeout=10.0,
+        )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Identity Service unavailable")
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="SSO cookie invalid or expired")
+
+    data = resp.json()
+    bi_user = data.get("user") if "user" in data else data
+    if not bi_user or not bi_user.get("email"):
+        raise HTTPException(status_code=401, detail="Identity Service returned no user")
+
+    # Find or create local user
+    from gpcg.infrastructure.auth import _find_or_create_local_user
+    user = _find_or_create_local_user(bi_user, db)
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account deactivated")
+
+    # Issue JWT token
+    token = issue_mobile_token(user)
+
+    return {
+        "token": token,
+        "user": _user_to_response(user, request),
+    }
 
 
 @router.get("/me")

@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # Deprecated: JWT settings (kept for backward compat, no longer used)
     gpcg_jwt_secret: str = "deprecated-sso"
     gpcg_jwt_expiry: int = 7 * 24 * 3600
+    # Mobile app token — issued by /api/auth/token in exchange for SSO cookie.
+    # The mobile app sends this as Bearer token in Authorization header.
+    gpcg_mobile_token_secret: str = "change-me-in-production"
+    gpcg_mobile_token_expiry: int = 30 * 24 * 3600  # 30 days
 
     # ── Gameplay Inbox ───────────────────────────────────────────────────────
     gameplay_inbox_dir: str = "/media/bruno/ToshibaHD"
