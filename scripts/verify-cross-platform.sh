@@ -67,7 +67,7 @@ write_result() {
   [[ ${#WEB_ONLY_CHANGES[@]} -gt 0 ]] && web_changed=1
   [[ ${#MOBILE_ONLY_CHANGES[@]} -gt 0 ]] && mobile_changed=1
   [[ ${#BOTH_CHANGED[@]} -gt 0 ]] && { web_changed=1; mobile_changed=1; }
-  [[ "$1" == "consented" ]] && consented=1
+  [[ "${1:-}" == "consented" ]] && consented=1
   echo "MOBILE_CHANGED=$mobile_changed WEB_CHANGED=$web_changed CONSENTED=$consented" > "$RESULT_FILE"
 }
 
