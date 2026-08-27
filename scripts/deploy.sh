@@ -740,7 +740,8 @@ if [[ "$SHOULD_BUILD_APK" -eq 1 ]]; then
       log "  Registrando release no banco..."
       WORKER_KEY=$(grep -E 'GPCG_WORKER_API_KEY' "$PROJECT_ROOT/.env" 2>/dev/null | head -1 | sed 's/.*=//' | tr -d '"' || echo "")
       if [[ -n "$WORKER_KEY" ]]; then
-        vps "curl -sf -X POST 'http://localhost:8787/api/app/release?version=${MOBILE_VERSION}&version_code=${MOBILE_VERSION_CODE}&changelog=Deploy+v${DEPLOY_VERSION}&size_bytes=${APK_SIZE}&deployed_by=deploy.sh' -H 'X-Worker-Key: ${WORKER_KEY}'" 2>&1 && ok "Release registrada no DB" || warn "Falha ao registrar release no DB (APK disponível via arquivo)"
+        # Usar URL pública (nginx proxy) pois a porta 8787 é interna do Docker
+        vps "curl -sf -X POST 'https://brunointegrations.com/gpcg/api/app/release?version=${MOBILE_VERSION}&version_code=${MOBILE_VERSION_CODE}&changelog=Deploy+v${DEPLOY_VERSION}&size_bytes=${APK_SIZE}&deployed_by=deploy.sh' -H 'X-Worker-Key: ${WORKER_KEY}'" 2>&1 && ok "Release registrada no DB" || warn "Falha ao registrar release no DB (APK disponível via arquivo)"
       else
         warn "WORKER_API_KEY não encontrada — release não registrada no DB"
       fi
