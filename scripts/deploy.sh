@@ -400,6 +400,36 @@ content = re.sub(
 # ── Replace (or add) the /gpcg/ location block ───────────────────────────
 # Always rewrite the full block so config stays consistent across deploys.
 location_block = """    # ── GPCG (Gameplay Content Generator) ────────────────────────────────
+    # Mobile APK download — large file, no buffering, long timeout
+    location = /gpcg/api/app/download {
+        limit_req zone=api_limit burst=10 nodelay;
+        rewrite ^/gpcg/(.*)$ /$1 break;
+        proxy_pass         http://gpcg_api;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_buffering    off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        client_max_body_size 200m;
+    }
+    # Mobile app version check — public, fast
+    location = /gpcg/api/app/version {
+        limit_req zone=api_limit burst=30 nodelay;
+        rewrite ^/gpcg/(.*)$ /$1 break;
+        proxy_pass         http://gpcg_api;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_buffering    on;
+        proxy_cache_valid  200 10s;
+    }
     # Video files — cached at nginx level for fast repeated loads
     location ~ ^/gpcg/api/videos/[0-9]+/file$ {
         limit_req zone=api_limit burst=30 nodelay;
@@ -599,6 +629,100 @@ Rollback: $DEPLOY_TAG"
     err "Smoke test falhou — versão não bumpada"
     err "Para rollback: git checkout $DEPLOY_TAG && ./deploy.sh --no-build"
   fi
+fi
+
+# ── Step 9: Build e upload do APK mobile ─────────────────────────────────────
+# Após o deploy bem-sucedido, builda o APK release do mobile e faz upload
+# para a VPS, onde fica disponível para download via /api/app/download.
+# O mobile app checa /api/app/version na inicialização e mostra banner
+# de atualização se houver uma versão mais nova.
+#
+# Versionamento: a cada deploy, o versionCode é incrementado automaticamente
+# e o versionName segue o padrão X.Y.Z (alinhado com o backend quando possível).
+# O nome do arquivo APK inclui a versão: gpcg-v1.0.3.apk
+
+MOBILE_ROOT="$(cd "$PROJECT_ROOT/../GpcgMobile" 2>/dev/null && pwd || echo "")"
+BUILD_APK=${BUILD_APK:-1}  # default: build APK
+
+if [[ -n "$MOBILE_ROOT" && -d "$MOBILE_ROOT" && "$BUILD_APK" -eq 1 && "${API_OK:-0}" -eq 1 ]]; then
+  log "Step 9: Build e upload do APK mobile..."
+
+  # ── Versionamento: bump versionCode + alinhar versionName ────────────────
+  BUILD_GRADLE="$MOBILE_ROOT/android/app/build.gradle"
+  CUR_MOBILE_VERSION=$(grep 'versionName' "$BUILD_GRADLE" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+  CUR_MOBILE_CODE=$(grep 'versionCode' "$BUILD_GRADLE" | head -1 | sed 's/[^0-9]*\([0-9]*\).*/\1/')
+
+  # Alinhar versionName com a versão do backend (NEW_VERSION ou CURRENT_VERSION)
+  DEPLOY_VERSION="${NEW_VERSION:-$CURRENT_VERSION}"
+  NEW_MOBILE_CODE=$((CUR_MOBILE_CODE + 1))
+
+  log "  Versão mobile atual: v$CUR_MOBILE_VERSION (code: $CUR_MOBILE_CODE)"
+  log "  Nova versão mobile:  v$DEPLOY_VERSION (code: $NEW_MOBILE_CODE)"
+
+  # Atualizar build.gradle com nova versão
+  sed -i "s/versionCode [0-9]*/versionCode $NEW_MOBILE_CODE/" "$BUILD_GRADLE"
+  sed -i "s/versionName \".*\"/versionName \"$DEPLOY_VERSION\"/" "$BUILD_GRADLE"
+
+  MOBILE_VERSION="$DEPLOY_VERSION"
+  MOBILE_VERSION_CODE="$NEW_MOBILE_CODE"
+
+  # Buildar APK release
+  log "  Buildando APK release..."
+  APK_BUILD_LOG=$(mktemp)
+  if ! (cd "$MOBILE_ROOT/android" && ./gradlew assembleRelease > "$APK_BUILD_LOG" 2>&1); then
+    err "Build do APK falhou"
+    tail -20 "$APK_BUILD_LOG"
+    rm -f "$APK_BUILD_LOG"
+    err "APK não foi atualizado, mas o deploy do backend foi concluído"
+  else
+    rm -f "$APK_BUILD_LOG"
+    APK_FILE="$MOBILE_ROOT/android/app/build/outputs/apk/release/app-release.apk"
+    if [[ ! -f "$APK_FILE" ]]; then
+      err "APK não encontrado em $APK_FILE"
+    else
+      APK_SIZE=$(stat -c%s "$APK_FILE" 2>/dev/null || stat -f%z "$APK_FILE" 2>/dev/null || echo "0")
+      APK_SIZE_MB=$((APK_SIZE / 1048576))
+      ok "APK buildado: ${APK_SIZE_MB}MB"
+
+      # Nome do arquivo com versão
+      APK_NAMED="gpcg-v${MOBILE_VERSION}.apk"
+
+      # Criar metadata JSON
+      RELEASE_JSON=$(cat <<JSONEOF
+{
+  "version": "$MOBILE_VERSION",
+  "versionCode": $MOBILE_VERSION_CODE,
+  "download_url": "/api/app/download",
+  "released_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "changelog": "Deploy v${DEPLOY_VERSION}",
+  "size_bytes": $APK_SIZE
+}
+JSONEOF
+)
+
+      # Upload APK + metadata para VPS
+      log "  Enviando APK para VPS..."
+      vps "mkdir -p $VPS_PATH/data/app"
+
+      # Enviar APK (nome fixo gpcg-latest.apk para o endpoint servir)
+      if my-vps --no-lock --rsync "$APK_FILE" "$VPS_PATH/data/app/gpcg-latest.apk" 2>&1; then
+        ok "APK enviado para VPS: $APK_NAMED"
+      else
+        err "Falha ao enviar APK para VPS"
+      fi
+
+      # Enviar metadata
+      echo "$RELEASE_JSON" | vps "cat > $VPS_PATH/data/app/release.json"
+      ok "Metadata enviado: v$MOBILE_VERSION (code: $MOBILE_VERSION_CODE)"
+
+      log "  Download público: https://brunointegrations.com/gpcg/api/app/download"
+      log "  Version check:    https://brunointegrations.com/gpcg/api/app/version"
+    fi
+  fi
+elif [[ -z "$MOBILE_ROOT" || ! -d "$MOBILE_ROOT" ]]; then
+  log "Step 9: Mobile não encontrado — APK não buildado"
+else
+  log "Step 9: APK não buildado (deploy com warnings ou BUILD_APK=0)"
 fi
 
 # ── Resumo final ─────────────────────────────────────────────────────────────

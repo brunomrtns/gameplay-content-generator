@@ -81,3 +81,6 @@ data/*.db
 
 # Cross-platform verification state (deploy)
 .cross-platform-state
+
+# Mobile app distribution (APK + metadata, uploaded by deploy)
+data/app/
