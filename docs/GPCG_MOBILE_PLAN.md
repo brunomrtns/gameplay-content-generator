@@ -86,6 +86,112 @@ O GPCG Mobile é o app nativo (Android + iOS) do Gameplay Content Generator. Ele
 
 ## 3. Mapeamento da Interface Atual (Web → Mobile)
 
+### 3.0 Regras de Negócio Críticas (NÃO ESQUECER)
+
+Estas regras foram identificadas no review detalhado do código e DEVEM ser respeitadas no mobile:
+
+1. **Domain Switch é destrutivo.** Trocar de games → kids (ou outro domínio) apaga TODO o estado de produção: jobs, vídeos não publicados, planos, fatos, documentos, knowledge items, gameplays. Vídeos já publicados no YouTube NÃO são removidos. A conexão YouTube não é alterada. Exige confirmação dupla com modal mostrando resumo do que foi deletado.
+
+2. **Gameplay delete exige confirmação dupla.** Dois `confirm()` consecutivos avisando que TODOS os clips, eventos e arquivos físicos serão removidos. No mobile: dois Alert.alert consecutivos.
+
+3. **Gameplay tem dois status simultâneos:**
+   - `ingestion_status`: discovered → probing → ready → error
+   - `processing_status`: uploading → uploaded → waiting_worker → downloading → downloaded → mapping → ready/mapped
+   - Só pode solicitar mapeamento quando `ingestion_status=ready` E `processing_status=uploaded` (ou vazio)
+   - Só mostra timeline de eventos quando `processing_status=ready` ou `mapped`
+
+4. **Gameplay tem 3 controles:**
+   - **Enabled** (power on/off): estaciona/disponibiliza pra automação
+   - **Visibility** (eye): privada/pública
+   - **Delete** (trash): remove tudo
+
+5. **Gameplays públicas da comunidade** aparecem em seção separada, read-only, com badge "Pública". Outros usuários podem ver mas não editar.
+
+6. **Mapping Timeline** — visualização expandível dos eventos VLM detectados:
+   - Timeline bar colorido por tipo de evento (COMBAT=red, VEHICLE=blue, IDLE=gray, CUTSCENE=purple, MENU=yellow, EXPLORATION=green, DIALOGUE=cyan)
+   - Lista de eventos com timestamp, tipo, descrição, transcript, interesting_score (★ se ≥0.7)
+   - Carregamento lazy (só carrega quando usuário expande)
+
+7. **Queue Mode (Games):**
+   - `automatic`: fila + decisão editorial automática
+   - `manual`: só produz da fila do usuário; quando esvazia, produção para
+   - `auto_fill_queue`: reconciliador preenche fila automaticamente quando vazia
+   - `max_queue_size`: limite do auto-preenchimento (1-50)
+
+8. **Queue Mode (Kids):**
+   - `manual`: usuário adiciona ideias manualmente
+   - `auto`: sistema preenche com melhores ideias avaliadas
+   - `kids_auto_fill_queue`: default true
+   - `kids_max_queue_size`: default 10
+
+9. **Reuse Policy:** `max_clip_uses` controla quantas vezes uma região de gameplay aparece:
+   - 1 = cada trecho em apenas 1 vídeo (padrão)
+   - 2 = permite uma reutilização
+   - 3 = permite duas reutilizações
+   - 0 = ilimitado
+
+10. **Fallback Policy:** `fallback_policy` controla uso de gameplays públicas:
+    - `stop` = só minhas gameplays
+    - `allow_public` = permite gameplays públicas como fallback quando as minhas se esgotarem
+
+11. **Video Status Flow:**
+    - `pending_approval` ou `publish_failed` → pode publicar manualmente
+    - `published` + `youtube_url` → tem link externo pro YouTube
+    - QA score mostrado em todas as thumbnails (verde se passed, vermelho se failed)
+
+12. **Channel Profile** tem 7 campos:
+    - `channel_description` (textarea)
+    - `niche` (input)
+    - `target_audience` (input)
+    - `tone_of_voice` (input)
+    - `narrative_style` (input)
+    - `content_goals` (textarea)
+    - `special_rules` (textarea — regras especiais pra IA)
+
+13. **Creative Styles (8 opções):** humor, absurd, sarcastic, storytelling, curiosity, nostalgia, dark_humor, high_energy
+
+14. **YouTube Categories (5 opções):** Games(20), Pessoas e blogs(22), Entretenimento(24), Comédia(23), Educação(27)
+
+15. **YouTube Privacy (3 opções):** public, unlisted (default), private
+
+16. **Video Formats (4 opções):** 9:16, 16:9, 1:1, 4:5
+
+17. **Subtitle Fonts (4 opções):** Padrão, DejaVuSans-Bold, DejaVuSans, LiberationSans-Bold
+
+18. **Subtitle Colors (6 opções):** Padrão, white, yellow, cyan, red, lime
+
+19. **Subtitle Positions (4 opções):** Padrão, bottom, middle, top
+
+20. **Subtitle Cases (4 opções):** Padrão, upper, lower, none
+
+21. **Transition Types (23 opções):** fade, fadeblack, fadewhite, wipeleft/right, slideleft/right/up/down, smoothleft/right/up/down, circleopen/close, dissolve, zoomin, hblur, diagtl/tr/bl/br
+
+22. **Box Colors (6 opções):** Padrão, black@0.7/0.5/0.3, white@0.7/0.5
+
+23. **Presentation Layer** (seção 6b da automação):
+    - Toggle enable/disable
+    - Thumbnail mode: `auto` (sistema escolhe frame) ou `fixed` (imagem enviada)
+    - Thumbnail text: source (title/topic/custom), custom text, position, color, size, outline
+    - Opening: mode (same_as_thumbnail/auto/fixed), duration, image
+    - Preview toggle Video/Capa (segmented control) — só aparece quando presentation enabled
+
+24. **Automation config cleanup:** ao salvar, valores vazios/zero são removidos exceto booleanos (false é válido).
+
+25. **Domain config é dinâmico:** vem do servidor via `api.listDomains()`. Domínios não implementados aparecem como "em breve" e são disabled.
+
+26. **Polling intervals específicos:**
+    - Dashboard: 10s
+    - Jobs: 5s
+    - Gameplays (content): 5s
+    - Automation config: 30s
+    - Games list: 15s
+    - Voices: 15s
+    - Workers: 10s (WorkerStatusCard)
+
+27. **Inbox scan:** botão "Escanear inbox" descobre gravações automaticamente da pasta inbox no HD do worker. Retorna count de arquivos encontrados.
+
+28. **Domain labels:** games=Games, kids=Kids, movies=Filmes & Séries, conspiracy=Mistérios & Teorias, technology=Tecnologia
+
 ### 3.1 Navegação Principal
 
 **Web:** Sidebar/topbar com NavLink (react-router-dom). Itens vindos do `domain-config.tsx`:
