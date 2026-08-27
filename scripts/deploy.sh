@@ -725,12 +725,17 @@ if [[ "$SHOULD_BUILD_APK" -eq 1 ]]; then
       # Nome do arquivo com versão
       APK_NAMED="gpcg-v${MOBILE_VERSION}.apk"
 
-      # Upload APK para VPS
+      # Upload APK para VPS (direto no volume Docker)
       log "  Enviando APK para VPS..."
-      vps "mkdir -p $VPS_PATH/data/app"
+      VPS_DATA_DIR=$(vps "docker volume inspect gpcg_gpcg-data --format '{{.Mountpoint}}'" 2>/dev/null | tr -d '[:space:]')
+      if [[ -z "$VPS_DATA_DIR" ]]; then
+        # Fallback: tentar path padrão do VPS
+        VPS_DATA_DIR="$VPS_PATH/data"
+      fi
+      vps "mkdir -p $VPS_DATA_DIR/app"
 
       # Enviar APK (nome fixo gpcg-latest.apk para o endpoint servir)
-      if my-vps --no-lock --rsync "$APK_FILE" "$VPS_PATH/data/app/gpcg-latest.apk" 2>&1; then
+      if my-vps --no-lock --rsync "$APK_FILE" "$VPS_DATA_DIR/app/gpcg-latest.apk" 2>&1; then
         ok "APK enviado para VPS: $APK_NAMED"
       else
         err "Falha ao enviar APK para VPS"

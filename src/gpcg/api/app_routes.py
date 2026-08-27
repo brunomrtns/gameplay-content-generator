@@ -16,15 +16,16 @@ from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import FileResponse
 from sqlalchemy import desc
 
-from gpcg.config import PROJECT_ROOT
+from gpcg.config import get_settings
 from gpcg.core.models import AppRelease
 from gpcg.infrastructure.database import session_scope
 
 router = APIRouter(tags=["app"])
 
-# Where the APK is stored
-APP_RELEASE_DIR = PROJECT_ROOT / "data" / "app"
-APK_PATH = APP_RELEASE_DIR / "gpcg-latest.apk"
+# Where the APK is stored (uses configured data_dir, same as other data)
+def _apk_path() -> Path:
+    settings = get_settings()
+    return settings.data_dir / "app" / "gpcg-latest.apk"
 
 
 def _get_latest_release() -> AppRelease | None:
@@ -74,14 +75,15 @@ async def download_app():
     No auth required so users can download without logging in.
     Returns the APK file with proper headers for Android installation.
     """
-    if not APK_PATH.exists():
+    apk_path = _apk_path()
+    if not apk_path.exists():
         raise HTTPException(status_code=404, detail="Nenhum APK disponível")
 
     release = _get_latest_release()
     version = release.version if release else "unknown"
 
     return FileResponse(
-        path=str(APK_PATH),
+        path=str(apk_path),
         media_type="application/vnd.android.package-archive",
         filename=f"gpcg-{version}.apk",
         headers={
