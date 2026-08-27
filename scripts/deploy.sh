@@ -596,21 +596,36 @@ ok "Nginx recarregado"
 
 # ── Step 6: Aguardar health check ────────────────────────────────────────────
 log "Step 6/7: Aguardando health check..."
-sleep 10
-HEALTH=$(vps "docker inspect --format='{{.State.Health.Status}}' gpcg-api 2>/dev/null || echo 'starting'")
-log "  Health status: $HEALTH"
+# Esperar a API ficar healthy com retry (até 60s)
+HEALTH_WAIT=0
+HEALTH="starting"
+while [[ "$HEALTH" != "healthy" && $HEALTH_WAIT -lt 60 ]]; do
+  sleep 5
+  HEALTH_WAIT=$((HEALTH_WAIT + 5))
+  HEALTH=$(vps "docker inspect --format='{{.State.Health.Status}}' gpcg-api 2>/dev/null || echo 'starting'")
+  log "  Health status: $HEALTH (${HEALTH_WAIT}s)"
+done
 
 # ── Step 7: Smoke test ───────────────────────────────────────────────────────
 log "Step 7/7: Smoke test..."
 
+# Retry no smoke test da API pública (até 30s)
 log "  Verificando API pública..."
-API_PUBLIC=$(curl -sf --max-time 10 https://brunointegrations.com/gpcg/api/health 2>&1 || echo "FAIL")
 API_OK=0
-if [[ "$API_PUBLIC" != "FAIL" ]]; then
-  ok "API pública respondendo: $API_PUBLIC"
-  API_OK=1
-else
-  err "API pública não respondeu"
+SMOKE_WAIT=0
+while [[ $SMOKE_WAIT -lt 30 ]]; do
+  API_PUBLIC=$(curl -sf --max-time 10 https://brunointegrations.com/gpcg/api/health 2>&1 || echo "FAIL")
+  if [[ "$API_PUBLIC" != "FAIL" ]]; then
+    ok "API pública respondendo: $API_PUBLIC"
+    API_OK=1
+    break
+  fi
+  sleep 5
+  SMOKE_WAIT=$((SMOKE_WAIT + 5))
+  log "  Tentando novamente... (${SMOKE_WAIT}s)"
+done
+if [[ "$API_OK" -eq 0 ]]; then
+  err "API pública não respondeu após ${SMOKE_WAIT}s"
 fi
 
 log "  Verificando Catalog Service..."
