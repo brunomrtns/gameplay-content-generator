@@ -60,6 +60,7 @@ NO_COMMIT=0
 AUTO_COMMIT=0
 BUMP="patch"
 RUN_TESTS=1
+CONSENT_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -68,6 +69,18 @@ while [[ $# -gt 0 ]]; do
     --auto-commit)  AUTO_COMMIT=1; shift ;;
     --no-test)      RUN_TESTS=0;   shift ;;
     --bump)         BUMP="$2";     shift 2 ;;
+    --consent)
+      # Repassa a frase de consentimento para verify-cross-platform.sh.
+      # NÃO é skip — a frase exata ainda é exigida pelo script de verificação.
+      shift
+      if [[ $# -gt 0 ]]; then
+        CONSENT_ARGS+=("--consent" "$1")
+        shift
+      else
+        err "--consent requer a frase de consentimento como argumento"
+        exit 1
+      fi
+      ;;
     -h|--help)
       echo "Uso: ./deploy.sh [opções]"
       echo ""
@@ -76,6 +89,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --auto-commit      Commita mudanças não-commitadas antes do deploy"
       echo "  --no-test          Pula os testes"
       echo "  --bump patch|minor|major  Tipo de bump (default: patch)"
+      echo "  --consent FRASE    Passa frase de consentimento cross-platform (não é skip)"
       exit 0
       ;;
     *) echo "Argumento desconhecido: $1"; exit 1 ;;
@@ -222,13 +236,13 @@ log "Versão atual: v$CURRENT_VERSION"
 
 # ── Step 0.3: Verificação cross-platform (web ↔ mobile) ──────────────────────
 # PROIBIDO adicionar qualquer flag/option de skip para esta verificação.
-# A única forma de passar com divergências é via tela de consentimento
-# interativo no verify-cross-platform.sh, digitando exatamente:
+# A única forma de passar com divergências é via consentimento explícito
+# no verify-cross-platform.sh, digitando exatamente:
 #   "eu tenho consentimento que essa funcionalidade nao se aplica a midia <web|mobile>"
-# Não existe caminho de escape automatizado. Não adicione --skip-xplat-verify
-# ou qualquer mecanismo similar. Esta regra é definitiva.
+# O --consent repassa a frase mas NÃO é skip — a frase exata ainda é validada.
+# Não adicione --skip-xplat-verify ou qualquer mecanismo de bypass. Esta regra é definitiva.
 log "Step 0.3: Verificando paridade web ↔ mobile..."
-if ! "$SCRIPT_DIR/verify-cross-platform.sh"; then
+if ! "$SCRIPT_DIR/verify-cross-platform.sh" "${CONSENT_ARGS[@]}"; then
   err "Verificação cross-platform falhou — deploy abortado"
   err "Corrija as divergências entre web e mobile antes de deployar."
   exit 1

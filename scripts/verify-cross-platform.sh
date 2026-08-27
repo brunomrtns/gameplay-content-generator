@@ -71,18 +71,35 @@ write_result() {
 INTERACTIVE=1
 RESET=0
 STATUS_ONLY=0
+CONSENT_PHRASES=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --non-interactive) INTERACTIVE=0; shift ;;
     --reset)           RESET=1; shift ;;
     --status)          STATUS_ONLY=1; shift ;;
+    --consent)
+      # Passa a frase de consentimento via linha de comando (não é skip —
+      # a frase exata ainda é exigida). Pode ser repetido para múltiplas mídias.
+      # Ex: --consent "eu tenho consentimento que essa funcionalidade nao se aplica a midia mobile"
+      shift
+      if [[ $# -gt 0 ]]; then
+        CONSENT_PHRASES+=("$1")
+        shift
+      else
+        err "--consent requer a frase de consentimento como argumento"
+        exit 1
+      fi
+      ;;
     -h|--help)
       echo "Uso: ./verify-cross-platform.sh [opções]"
       echo ""
       echo "  --non-interactive  Trava sem pedir consentimento (para CI)"
       echo "  --reset            Reseta estado (primeira vez ou após mudanças intencionais)"
       echo "  --status           Mostra estado atual sem verificar"
+      echo "  --consent FRASE    Passa a frase de consentimento (não é skip — a frase exata é exigida)"
+      echo "                      Pode ser repetido para múltiplas mídias."
+      echo "                      Ex: --consent \"eu tenho consentimento que essa funcionalidade nao se aplica a midia mobile\""
       exit 0
       ;;
     *) echo "Argumento desconhecido: $1"; exit 1 ;;
@@ -413,14 +430,35 @@ for media in "${MEDIAS_TO_CONFIRM[@]}"; do
   echo -e "\033[1;33m    $REQUIRED_PHRASE\033[0m"
   echo ""
 
-  read -r -p "  > " user_input
-
-  if [[ "$user_input" == "$REQUIRED_PHRASE" ]]; then
-    ok "Consentimento confirmado para mídia: $media"
+  # Se a frase foi passada via --consent, usar ela (não é skip — a frase
+  # exata ainda é validada). Caso contrário, pedir interativamente.
+  user_input=""
+  if [[ ${#CONSENT_PHRASES[@]} -gt 0 ]]; then
+    # Procurar uma frase que corresponda a esta mídia
+    for phrase in "${CONSENT_PHRASES[@]}"; do
+      if [[ "$phrase" == "$REQUIRED_PHRASE" ]]; then
+        user_input="$phrase"
+        ok "Consentimento via --consent para mídia: $media"
+        break
+      fi
+    done
+    if [[ -z "$user_input" ]]; then
+      err "Nenhuma frase de --consent corresponde à mídia: $media"
+      err "Esperado: \"$REQUIRED_PHRASE\""
+      ALL_CONFIRMED=0
+    fi
   else
-    err "Frase incorreta para mídia: $media"
-    err "Esperado: \"$REQUIRED_PHRASE\""
-    ALL_CONFIRMED=0
+    read -r -p "  > " user_input
+  fi
+
+  if [[ -n "$user_input" ]]; then
+    if [[ "$user_input" == "$REQUIRED_PHRASE" ]]; then
+      ok "Consentimento confirmado para mídia: $media"
+    else
+      err "Frase incorreta para mídia: $media"
+      err "Esperado: \"$REQUIRED_PHRASE\""
+      ALL_CONFIRMED=0
+    fi
   fi
 done
 
