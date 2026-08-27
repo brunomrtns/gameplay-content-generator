@@ -12,6 +12,12 @@
 - **Frontend build:** `cd frontend && npm run build`
 - **Frontend typecheck:** `cd frontend && npm run typecheck`
 - **Deploy:** `./scripts/deploy.sh` (syncs to VPS, builds Docker, updates nginx)
+- **Cross-platform verify:** `./scripts/verify-cross-platform.sh` (verifica paridade web ↔ mobile)
+  Roda automaticamente no Step 0.3 do deploy. **PROIBIDO** adicionar qualquer
+  flag/option de skip para esta verificação (ex: `--skip-xplat-verify`).
+  A única forma de passar com divergências é via tela de consentimento interativo,
+  digitando exatamente: `eu tenho consentimento que essa funcionalidade nao se aplica a midia <web|mobile>`.
+  Não existe caminho de escape automatizado.
 - **Catalog Service:** `gpcg catalog` (runs the Game Catalog Service on port 8788,
   syncs from IGDB, serves catalog query API. Requires IGDB_CLIENT_ID and
   IGDB_CLIENT_SECRET in .env. See docs/CATALOG_SERVICE_PLAN.md)

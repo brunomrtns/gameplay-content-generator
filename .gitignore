@@ -78,3 +78,6 @@ data/voices
 data/gpcg.db
 data/*.db
 
+
+# Cross-platform verification state (deploy)
+.cross-platform-state

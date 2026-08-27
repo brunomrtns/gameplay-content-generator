@@ -7,6 +7,7 @@
 #
 # O que faz:
 #   0. Verifica working tree limpa (ou commita automaticamente com --auto-commit)
+#   0.3. Verifica paridade web ↔ mobile (cross-platform)
 #   0.5. Roda testes (pytest)
 #   1. Cria tag de rollback pre-deploy-TIMESTAMP
 #   2. Sincroniza o código para /opt/gpcg na VPS (via rsync)
@@ -218,6 +219,21 @@ fi
 # Versão atual
 CURRENT_VERSION=$(get_version)
 log "Versão atual: v$CURRENT_VERSION"
+
+# ── Step 0.3: Verificação cross-platform (web ↔ mobile) ──────────────────────
+# PROIBIDO adicionar qualquer flag/option de skip para esta verificação.
+# A única forma de passar com divergências é via tela de consentimento
+# interativo no verify-cross-platform.sh, digitando exatamente:
+#   "eu tenho consentimento que essa funcionalidade nao se aplica a midia <web|mobile>"
+# Não existe caminho de escape automatizado. Não adicione --skip-xplat-verify
+# ou qualquer mecanismo similar. Esta regra é definitiva.
+log "Step 0.3: Verificando paridade web ↔ mobile..."
+if ! "$SCRIPT_DIR/verify-cross-platform.sh"; then
+  err "Verificação cross-platform falhou — deploy abortado"
+  err "Corrija as divergências entre web e mobile antes de deployar."
+  exit 1
+fi
+ok "Paridade web ↔ mobile verificada"
 
 # ── Step 0.5: Rodar testes ───────────────────────────────────────────────────
 if [[ "$RUN_TESTS" -eq 1 ]]; then
