@@ -688,12 +688,21 @@ fi
 # Decidir se precisa buildar APK
 SHOULD_BUILD_APK=0
 if [[ "${API_OK:-0}" -eq 1 && -n "$MOBILE_ROOT" && -d "$MOBILE_ROOT" ]]; then
+  # Ler versionCode atual do build.gradle
+  BUILD_GRADLE="$MOBILE_ROOT/android/app/build.gradle"
+  GRADLE_VERSION_CODE=$(grep 'versionCode' "$BUILD_GRADLE" | head -1 | sed 's/[^0-9]//g')
+  # Ler último versionCode registrado no servidor
+  SERVER_VERSION_CODE=$(curl -sf --max-time 10 https://brunointegrations.com/gpcg/api/app/version 2>/dev/null | grep -o '"versionCode":[0-9]*' | grep -o '[0-9]*' || echo "0")
+
   if [[ "$MOBILE_CHANGED" -eq 1 ]]; then
     SHOULD_BUILD_APK=1
     log "Step 9: Mobile mudou — buildando APK..."
   elif [[ "$WEB_CHANGED" -eq 1 && "$CONSENTED" -eq 1 ]]; then
     SHOULD_BUILD_APK=1
     log "Step 9: Web mudou com consentimento — buildando APK para alinhar..."
+  elif [[ -n "$GRADLE_VERSION_CODE" && "$GRADLE_VERSION_CODE" -gt "${SERVER_VERSION_CODE:-0}" ]]; then
+    SHOULD_BUILD_APK=1
+    log "Step 9: versionCode local ($GRADLE_VERSION_CODE) > servidor ($SERVER_VERSION_CODE) — buildando APK..."
   else
     log "Step 9: Sem mudanças no mobile — APK não rebuildado"
   fi
