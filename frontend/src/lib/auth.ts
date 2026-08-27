@@ -9,6 +9,7 @@ export interface User {
   is_active: boolean;
   has_youtube: boolean;
   channel_title: string | null;
+  onboarding_completed: boolean;
   created_at: string;
 }
 

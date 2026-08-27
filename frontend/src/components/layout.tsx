@@ -2,7 +2,7 @@ import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import {
   LayoutDashboard, FileText, Settings, Video, Shield, LogOut, ChevronDown,
-  Zap, ListChecks, Lightbulb, Baby, Film,
+  Zap, ListChecks, Lightbulb, Baby, Film, HelpCircle,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import { ssoLogout } from "@/lib/api";
 import { useDomain } from "@/lib/domain-config";
 import { Toaster } from "sonner";
 import { UploadIndicator } from "@/components/upload-indicator";
+import { OnboardingTour, useOnboardingTour } from "@/components/onboarding-tour";
 
 // Map icon names from domain config to lucide components
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -30,6 +31,7 @@ export function Layout() {
   const { user, logout } = useAuth();
   const { config } = useDomain();
   const [menuOpen, setMenuOpen] = useState(false);
+  const tour = useOnboardingTour();
 
   const navItems = config.navigation.map((n) => ({
     ...n,
@@ -86,6 +88,15 @@ export function Layout() {
 
           {/* Upload indicator (persistent across pages) */}
           <UploadIndicator />
+
+          {/* Help button — reopens onboarding tour */}
+          <button
+            onClick={tour.reopen}
+            title="Tutorial"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-text-muted hover:text-accent hover:border-accent/30 transition-all"
+          >
+            <HelpCircle className="h-4 w-4" />
+          </button>
 
           {/* User menu */}
           <div className="relative">
@@ -155,6 +166,9 @@ export function Layout() {
       </main>
 
       <Toaster theme="dark" position="bottom-right" />
+
+      {/* Onboarding tour overlay */}
+      <OnboardingTour open={tour.open} onClose={tour.close} />
     </div>
   );
 }

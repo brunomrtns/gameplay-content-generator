@@ -227,6 +227,7 @@ class User(Base):
     # Assigned when user connects their YouTube channel.
     google_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 

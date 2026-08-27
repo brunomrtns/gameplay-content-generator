@@ -1,5 +1,5 @@
-import React from 'react';
-import { NavigationContainer, DarkTheme } from '@react-navigation/native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { NavigationContainer, DarkTheme, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -20,8 +20,10 @@ import { LoadingScreen } from '../screens/LoadingScreen';
 import { MoreScreen } from '../screens/MoreScreen';
 import { useAppUpdate } from '../hooks/useAppUpdate';
 import { UpdateBanner } from '../components/UpdateBanner';
-import { View } from 'react-native';
+import { OnboardingModal } from '../components/OnboardingModal';
+import { View, TouchableOpacity, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { authApi } from '../api/endpoints';
 
 export type RootStackParamList = {
   Landing: undefined;
@@ -170,6 +172,30 @@ function MoreStackScreen() {
 export function AppNavigator() {
   const { user, loading, isAuthenticated } = useAuth();
   const { updateInfo, dismissed, openDownloadPage, dismiss } = useAppUpdate();
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const navRef = useRef<NavigationContainerRef<any>>(null);
+
+  // Auto-open onboarding for new users
+  useEffect(() => {
+    if (isAuthenticated && user && !user.onboarding_completed) {
+      const timer = setTimeout(() => setOnboardingOpen(true), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthenticated, user]);
+
+  const handleNavigateToTab = useCallback((tab: string) => {
+    if (navRef.current) {
+      // Navigate to the Main stack first, then to the specific tab
+      navRef.current.navigate('Main', { screen: tab });
+    }
+  }, []);
+
+  const handleReopenOnboarding = useCallback(async () => {
+    try {
+      await authApi.resetOnboarding();
+    } catch {}
+    setOnboardingOpen(true);
+  }, []);
 
   if (loading) return <LoadingScreen />;
 
@@ -186,7 +212,7 @@ export function AppNavigator() {
           />
         </SafeAreaView>
       )}
-      <NavigationContainer theme={navTheme}>
+      <NavigationContainer ref={navRef} theme={navTheme}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           {isAuthenticated ? (
             <Stack.Screen name="Main" component={MainTabs} />
@@ -198,6 +224,13 @@ export function AppNavigator() {
           )}
         </Stack.Navigator>
       </NavigationContainer>
+      {isAuthenticated && (
+        <OnboardingModal
+          visible={onboardingOpen}
+          onClose={() => setOnboardingOpen(false)}
+          onNavigate={handleNavigateToTab}
+        />
+      )}
     </View>
   );
 }

@@ -17,6 +17,8 @@ import { domainsApi } from '../api/endpoints';
 import { useAuth } from '../hooks/useAuth';
 import { useBackHandler } from '../hooks/useBackHandler';
 import Toast from 'react-native-toast-message';
+import { OnboardingModal } from '../components/OnboardingModal';
+import { authApi } from '../api/endpoints';
 
 const DOMAIN_LABELS: Record<string, string> = {
   games: 'Games',
@@ -38,6 +40,7 @@ export function MoreScreen({ navigation, user, onLogout }: MoreScreenProps) {
   const [domainModal, setDomainModal] = useState(false);
   const [confirmDomain, setConfirmDomain] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
 
   const { data: domainData } = useQuery({
     queryKey: ['domains'],
@@ -99,6 +102,13 @@ export function MoreScreen({ navigation, user, onLogout }: MoreScreenProps) {
     { route: 'Automacao', icon: 'robot', label: 'Automação', desc: 'Configurar geração de vídeos' },
     { route: 'Jobs', icon: 'clipboard-list', label: 'Jobs', desc: 'Fila de processamento' },
   ];
+
+  const handleOpenTutorial = async () => {
+    try {
+      await authApi.resetOnboarding();
+    } catch {}
+    setTutorialOpen(true);
+  };
 
   // Only show Kids menu if the channel is in kids domain
   if (isKidsDomain) {
@@ -171,6 +181,21 @@ export function MoreScreen({ navigation, user, onLogout }: MoreScreenProps) {
             <Icon name="chevron-right" size={24} color={colors.textMuted} />
           </TouchableOpacity>
         )}
+
+        {/* Tutorial */}
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={handleOpenTutorial}
+        >
+          <View style={styles.menuIcon}>
+            <Icon name="help-circle" size={24} color={colors.accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.menuLabel}>Tutorial</Text>
+            <Text style={styles.menuDesc}>Aprenda a usar o app</Text>
+          </View>
+          <Icon name="chevron-right" size={24} color={colors.textMuted} />
+        </TouchableOpacity>
 
         {/* Logout */}
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -297,6 +322,17 @@ export function MoreScreen({ navigation, user, onLogout }: MoreScreenProps) {
           </View>
         </View>
       </Modal>
+
+      {/* Onboarding tutorial */}
+      <OnboardingModal
+        visible={tutorialOpen}
+        onClose={() => setTutorialOpen(false)}
+        onNavigate={(tab) => {
+          setTutorialOpen(false);
+          // Navigate from MoreStack to the tab — need to go up to parent
+          navigation.navigate(tab);
+        }}
+      />
     </SafeAreaView>
   );
 }

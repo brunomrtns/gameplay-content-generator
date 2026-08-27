@@ -11,6 +11,7 @@ interface AuthUser {
   has_youtube: boolean;
   channel_title?: string;
   channel_domain?: string;
+  onboarding_completed?: boolean;
 }
 
 interface AuthContextValue {

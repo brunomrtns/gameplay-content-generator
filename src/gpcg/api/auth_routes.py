@@ -46,6 +46,7 @@ class UserResponse(BaseModel):
     is_active: bool
     has_youtube: bool = False
     channel_title: Optional[str] = None
+    onboarding_completed: bool = False
     created_at: str
 
 
@@ -94,6 +95,7 @@ def _user_to_response(user: User, request: Request = None) -> dict:
         "is_active": user.is_active,
         "has_youtube": has_yt,
         "channel_title": channel_title,
+        "onboarding_completed": user.onboarding_completed,
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
@@ -315,3 +317,32 @@ def admin_update_user(
             u.is_active = req.is_active
         session.flush()
         return _user_to_response(u)
+
+
+# ── Onboarding ───────────────────────────────────────────────────────────────
+
+
+@router.get("/onboarding")
+def get_onboarding_status(user: User = Depends(get_current_user)):
+    """Get onboarding status for the current user."""
+    return {"completed": user.onboarding_completed}
+
+
+@router.post("/onboarding/complete")
+def complete_onboarding(user: User = Depends(get_current_user)):
+    """Mark onboarding as completed for the current user."""
+    with session_scope() as session:
+        u = session.get(User, user.id)
+        u.onboarding_completed = True
+        session.flush()
+    return {"completed": True}
+
+
+@router.post("/onboarding/reset")
+def reset_onboarding(user: User = Depends(get_current_user)):
+    """Reset onboarding status (user wants to see the tutorial again)."""
+    with session_scope() as session:
+        u = session.get(User, user.id)
+        u.onboarding_completed = False
+        session.flush()
+    return {"completed": False}

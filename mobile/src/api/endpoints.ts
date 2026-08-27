@@ -37,6 +37,22 @@ export const authApi = {
   async deleteUser(userId: number): Promise<void> {
     await client.delete(`/auth/users/${userId}`);
   },
+
+  // ── Onboarding ─────────────────────────────────────────────────────────
+  async getOnboarding(): Promise<{ completed: boolean }> {
+    const { data } = await client.get('/auth/onboarding');
+    return data;
+  },
+
+  async completeOnboarding(): Promise<{ completed: boolean }> {
+    const { data } = await client.post('/auth/onboarding/complete');
+    return data;
+  },
+
+  async resetOnboarding(): Promise<{ completed: boolean }> {
+    const { data } = await client.post('/auth/onboarding/reset');
+    return data;
+  },
 };
 
 // ── Dashboard ────────────────────────────────────────────────────────────────

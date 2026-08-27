@@ -297,6 +297,11 @@ export const api = {
   updateUser: (id: number, data: { name?: string; is_active?: boolean }) =>
     request<any>(`/auth/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
+  // ── Onboarding ─────────────────────────────────────────────────────────
+  getOnboarding: () => request<{ completed: boolean }>("/auth/onboarding"),
+  completeOnboarding: () => request<{ completed: boolean }>("/auth/onboarding/complete", { method: "POST" }),
+  resetOnboarding: () => request<{ completed: boolean }>("/auth/onboarding/reset", { method: "POST" }),
+
   // ── Automation ─────────────────────────────────────────────────────────
   getAutomation: () => request<any>("/automation"),
   updateAutomation: (data: { name?: string; config?: any; upload_config?: any; schedule?: string }) =>

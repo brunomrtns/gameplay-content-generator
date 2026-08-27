@@ -143,6 +143,7 @@ def init_db() -> None:
     _ensure_column(engine, "videos", "user_id", "INTEGER")
     # SSO migration: add bi_identity_id column, make password_hash nullable
     _ensure_column(engine, "users", "bi_identity_id", "VARCHAR(100)")
+    _ensure_column(engine, "users", "onboarding_completed", "BOOLEAN DEFAULT 0")
     # Control Plane + Compute Plane: worker orchestration columns
     # GameplaySource: storage abstraction + processing lifecycle
     _ensure_column(engine, "gameplay_sources", "storage_key", "VARCHAR(500)")
