@@ -145,28 +145,45 @@ def sso_redirect():
 @router.post("/token")
 def exchange_token(
     request: Request,
-    body: MobileTokenRequest,
     db: Session = Depends(get_db),
 ):
     """Exchange SSO cookie for a JWT token (mobile app auth).
 
     The mobile app opens a WebView to the BI Identity login flow.
     After login, the WebView has bi_auth/bi_refresh cookies. The mobile
-    app extracts those cookies and sends them to this endpoint, which
-    validates them via the BI Identity Service and returns a JWT token
-    that the mobile app uses as Bearer token in subsequent requests.
+    app either:
+    1. Sends the cookies in the request body: { "bi_auth": "...", "bi_refresh": "..." }
+    2. Or calls this endpoint from within the WebView (cookies are sent automatically)
 
-    Request body:
-      { "bi_auth": "...", "bi_refresh": "..." }
+    This endpoint validates the cookies via the BI Identity Service and
+    returns a JWT token that the mobile app uses as Bearer token.
 
     Returns:
       { "token": "<jwt>", "user": { id, email, name, is_admin, ... } }
     """
+    # Try to get cookies from the request first (WebView sends them automatically)
+    bi_auth = request.cookies.get("bi_auth")
+    bi_refresh = request.cookies.get("bi_refresh")
+
+    # If no cookies in request, try the body (mobile app sends them explicitly)
+    if not bi_auth:
+        try:
+            import json as _json
+            body = _json.loads(request._body.decode() if hasattr(request, "_body") and request._body else "")
+            bi_auth = body.get("bi_auth") if isinstance(body, dict) else None
+            bi_refresh = body.get("bi_refresh") if isinstance(body, dict) else None
+        except Exception:
+            bi_auth = None
+            bi_refresh = None
+
+    if not bi_auth:
+        raise HTTPException(status_code=401, detail="No SSO cookie provided")
+
     # Validate via BI Identity
     settings = get_settings()
-    cookies = {"bi_auth": body.bi_auth}
-    if body.bi_refresh:
-        cookies["bi_refresh"] = body.bi_refresh
+    cookies = {"bi_auth": bi_auth}
+    if bi_refresh:
+        cookies["bi_refresh"] = bi_refresh
 
     try:
         resp = httpx.get(
