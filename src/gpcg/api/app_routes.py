@@ -4,38 +4,37 @@ Enables self-hosted app distribution: the mobile app checks /api/app/version
 on startup and shows an update banner if a newer version is available.
 The APK is stored on the VPS and served via /api/app/download.
 
-The APK and version metadata are uploaded by deploy.sh after a successful
-deploy. The metadata file (data/app/release.json) contains:
-  {version, versionCode, download_url, released_at, changelog, size_bytes}
+Version info is read from the `app_releases` table (latest row by version_code).
+The APK file is stored at data/app/gpcg-latest.apk.
 """
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, HTTPException, Header
+from fastapi.responses import FileResponse
+from sqlalchemy import desc
 
 from gpcg.config import PROJECT_ROOT
+from gpcg.core.models import AppRelease
+from gpcg.infrastructure.database import session_scope
 
 router = APIRouter(tags=["app"])
 
-# Where the APK and metadata are stored
+# Where the APK is stored
 APP_RELEASE_DIR = PROJECT_ROOT / "data" / "app"
 APK_PATH = APP_RELEASE_DIR / "gpcg-latest.apk"
-METADATA_PATH = APP_RELEASE_DIR / "release.json"
 
 
-def _read_metadata() -> dict | None:
-    """Read release metadata from disk, or None if not present."""
-    if not METADATA_PATH.exists():
-        return None
-    try:
-        return json.loads(METADATA_PATH.read_text())
-    except (json.JSONDecodeError, OSError):
-        return None
+def _get_latest_release() -> AppRelease | None:
+    """Get the latest app release from the database."""
+    with session_scope() as session:
+        return (
+            session.query(AppRelease)
+            .order_by(desc(AppRelease.version_code))
+            .first()
+        )
 
 
 @router.get("/app/version")
@@ -43,9 +42,10 @@ async def get_app_version():
     """Public endpoint — returns latest mobile app version info.
 
     No auth required so the app can check for updates before login.
+    Reads from the app_releases table (latest row by version_code).
     """
-    meta = _read_metadata()
-    if meta is None:
+    release = _get_latest_release()
+    if release is None:
         return {
             "available": False,
             "version": None,
@@ -58,12 +58,12 @@ async def get_app_version():
 
     return {
         "available": True,
-        "version": meta.get("version"),
-        "versionCode": meta.get("versionCode"),
+        "version": release.version,
+        "versionCode": release.version_code,
         "download_url": "/api/app/download",
-        "released_at": meta.get("released_at"),
-        "changelog": meta.get("changelog"),
-        "size_bytes": meta.get("size_bytes"),
+        "released_at": release.released_at.isoformat() if release.released_at else None,
+        "changelog": release.changelog,
+        "size_bytes": release.size_bytes,
     }
 
 
@@ -77,8 +77,8 @@ async def download_app():
     if not APK_PATH.exists():
         raise HTTPException(status_code=404, detail="Nenhum APK disponível")
 
-    meta = _read_metadata() or {}
-    version = meta.get("version", "unknown")
+    release = _get_latest_release()
+    version = release.version if release else "unknown"
 
     return FileResponse(
         path=str(APK_PATH),
@@ -89,3 +89,50 @@ async def download_app():
             "X-App-Version": str(version),
         },
     )
+
+
+@router.post("/app/release")
+async def register_release(
+    version: str,
+    version_code: int,
+    changelog: str | None = None,
+    size_bytes: int | None = None,
+    deployed_by: str | None = None,
+    x_worker_key: str | None = Header(default=None, alias="X-Worker-Key"),
+):
+    """Register a new app release in the database.
+
+    Called by deploy.sh after uploading a new APK. Uses the worker API key
+    for authentication (same as worker endpoints — not user auth).
+    """
+    from gpcg.config import get_settings
+
+    settings = get_settings()
+    expected_key = settings.gpcg_worker_api_key
+    if not expected_key or x_worker_key != expected_key:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    with session_scope() as session:
+        # Check if this version_code already exists (idempotent)
+        existing = (
+            session.query(AppRelease)
+            .filter(AppRelease.version_code == version_code)
+            .first()
+        )
+        if existing:
+            # Update existing row (e.g. re-deploy of same version)
+            existing.version = version
+            existing.changelog = changelog
+            existing.size_bytes = size_bytes
+            existing.deployed_by = deployed_by
+        else:
+            release = AppRelease(
+                version=version,
+                version_code=version_code,
+                changelog=changelog,
+                size_bytes=size_bytes,
+                deployed_by=deployed_by,
+            )
+            session.add(release)
+
+    return {"status": "ok", "version": version, "version_code": version_code}

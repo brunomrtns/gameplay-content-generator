@@ -965,3 +965,27 @@ class EditorialSignal(Base):
 
     def __repr__(self) -> str:
         return f"<EditorialSignal #{self.id} type={self.signal_type} value={self.signal_value}>"
+
+
+class AppRelease(Base):
+    """Mobile app release — tracks the latest APK version for self-hosted distribution.
+
+    The deploy script uploads a new APK and inserts a row here. The mobile app
+    checks /api/app/version (which reads the latest row) and shows an update
+    banner if the server's version_code is greater than the installed one.
+
+    Only the most recent row (highest version_code) is served. Previous rows
+    are kept for history but not exposed to clients.
+    """
+    __tablename__ = "app_releases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version: Mapped[str] = mapped_column(String(20))  # e.g. "0.9.3"
+    version_code: Mapped[int] = mapped_column(Integer, index=True)  # e.g. 15
+    released_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    changelog: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    deployed_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<AppRelease v{self.version} code={self.version_code}>"

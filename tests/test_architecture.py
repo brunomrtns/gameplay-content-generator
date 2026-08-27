@@ -173,7 +173,7 @@ def test_all_tables_registered_when_all_imported():
         "scripts", "workers", "jobs", "videos", "channel_profiles",
         "knowledge_chunks", "knowledge_items", "knowledge_item_embeddings",
         "knowledge_item_usages", "channel_profile_embeddings",
-        "editorial_signals",
+        "editorial_signals", "app_releases",
         # Games
         "games", "game_aliases", "gameplay_sources", "gameplay_downloads",
         "gameplay_assets", "gameplay_clip_usage", "gameplay_events",
@@ -186,7 +186,7 @@ def test_all_tables_registered_when_all_imported():
     actual_tables = set(Base.metadata.tables.keys())
     missing = expected_tables - actual_tables
     assert not missing, f"Missing tables: {missing}"
-    assert len(actual_tables) == 29, f"Expected 29 tables, got {len(actual_tables)}"
+    assert len(actual_tables) == 30, f"Expected 30 tables, got {len(actual_tables)}"
 
 
 def test_core_models_owns_core_entities():

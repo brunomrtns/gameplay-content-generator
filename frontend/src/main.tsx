@@ -22,6 +22,14 @@ import "./index.css";
 
 const SSO_LOGIN_URL = "/id/login?redirect=/gpcg/dashboard";
 
+/** Landing page redirect — if user is logged in, go to dashboard.
+ * Otherwise show the public landing page. */
+function LandingRedirect() {
+  const user = useAuth((s) => s.user);
+  if (user) return <Navigate to="/dashboard" replace />;
+  return <LandingPage />;
+}
+
 /** Protected route wrapper — validates session on every mount/refresh.
  * Calls /api/auth/me to verify the SSO cookie is still valid, even if
  * the user is in localStorage. This prevents stale sessions after refresh
@@ -100,7 +108,7 @@ const router = createBrowserRouter(
         },
       ],
     },
-    { path: "/", element: <LandingPage /> },
+    { path: "/", element: <LandingRedirect /> },
     { path: "*", element: <Navigate to="/" replace /> },
   ],
   { basename },

@@ -47,12 +47,25 @@ MOBILE_ROOT="$(cd "$PROJECT_ROOT/../GpcgMobile" 2>/dev/null && pwd || echo "")"
 
 # Estado: hashes da última verificação bem-sucedida
 STATE_FILE="$PROJECT_ROOT/.cross-platform-state"
+# Resultado da verificação atual (lido pelo deploy.sh)
+RESULT_FILE="$PROJECT_ROOT/.cross-platform-result"
 
 # Cores
 log()  { echo -e "\033[1;34m[xplat]\033[0m $*"; }
 ok()   { echo -e "\033[1;32m  ✓\033[0m $*"; }
 warn() { echo -e "\033[1;33m  ⚠\033[0m $*"; }
 err()  { echo -e "\033[1;31m  ✗\033[0m $*" >&2; }
+
+# Write result file for deploy.sh to read
+# Format: MOBILE_CHANGED=<0|1> WEB_CHANGED=<0|1> CONSENTED=<0|1>
+write_result() {
+  local mobile_changed=0 web_changed=0 consented=0
+  [[ ${#WEB_ONLY_CHANGES[@]:-0} -gt 0 ]] && web_changed=1
+  [[ ${#MOBILE_ONLY_CHANGES[@]:-0} -gt 0 ]] && mobile_changed=1
+  [[ ${#BOTH_CHANGED[@]:-0} -gt 0 ]] && { web_changed=1; mobile_changed=1; }
+  [[ "$1" == "consented" ]] && consented=1
+  echo "MOBILE_CHANGED=$mobile_changed WEB_CHANGED=$web_changed CONSENTED=$consented" > "$RESULT_FILE"
+}
 
 # ── Argumentos ────────────────────────────────────────────────────────────────
 INTERACTIVE=1
@@ -325,6 +338,7 @@ fi
 if [[ $BLOCK -eq 0 ]]; then
   echo ""
   ok "Paridade web ↔ mobile verificada. Tudo sincronizado."
+  write_result
   save_state
   exit 0
 fi
@@ -413,6 +427,7 @@ done
 echo ""
 if [[ $ALL_CONFIRMED -eq 1 ]]; then
   ok "Todas as divergências foram consentidas. Continuando deploy..."
+  write_result "consented"
   save_state
   exit 0
 else

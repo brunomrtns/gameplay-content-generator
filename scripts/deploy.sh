@@ -637,16 +637,39 @@ fi
 # O mobile app checa /api/app/version na inicialização e mostra banner
 # de atualização se houver uma versão mais nova.
 #
-# Versionamento: a cada deploy, o versionCode é incrementado automaticamente
+# OTIMIZAÇÃO: só builda o APK se houver mudanças no mobile (ou se o web
+# mudou e passou pela tela de consentimento cross-platform). Se nada mudou
+# em nenhuma das mídias, a etapa é pulada.
+#
+# Versionamento: a cada build, o versionCode é incrementado automaticamente
 # e o versionName segue o padrão X.Y.Z (alinhado com o backend quando possível).
-# O nome do arquivo APK inclui a versão: gpcg-v1.0.3.apk
 
 MOBILE_ROOT="$(cd "$PROJECT_ROOT/../GpcgMobile" 2>/dev/null && pwd || echo "")"
-BUILD_APK=${BUILD_APK:-1}  # default: build APK
+XPLAT_RESULT="$PROJECT_ROOT/.cross-platform-result"
 
-if [[ -n "$MOBILE_ROOT" && -d "$MOBILE_ROOT" && "$BUILD_APK" -eq 1 && "${API_OK:-0}" -eq 1 ]]; then
-  log "Step 9: Build e upload do APK mobile..."
+# Ler resultado da verificação cross-platform
+MOBILE_CHANGED=0
+WEB_CHANGED=0
+CONSENTED=0
+if [[ -f "$XPLAT_RESULT" ]]; then
+  source "$XPLAT_RESULT"
+fi
 
+# Decidir se precisa buildar APK
+SHOULD_BUILD_APK=0
+if [[ "${API_OK:-0}" -eq 1 && -n "$MOBILE_ROOT" && -d "$MOBILE_ROOT" ]]; then
+  if [[ "$MOBILE_CHANGED" -eq 1 ]]; then
+    SHOULD_BUILD_APK=1
+    log "Step 9: Mobile mudou — buildando APK..."
+  elif [[ "$WEB_CHANGED" -eq 1 && "$CONSENTED" -eq 1 ]]; then
+    SHOULD_BUILD_APK=1
+    log "Step 9: Web mudou com consentimento — buildando APK para alinhar..."
+  else
+    log "Step 9: Sem mudanças no mobile — APK não rebuildado"
+  fi
+fi
+
+if [[ "$SHOULD_BUILD_APK" -eq 1 ]]; then
   # ── Versionamento: bump versionCode + alinhar versionName ────────────────
   BUILD_GRADLE="$MOBILE_ROOT/android/app/build.gradle"
   CUR_MOBILE_VERSION=$(grep 'versionName' "$BUILD_GRADLE" | head -1 | sed 's/.*"\(.*\)".*/\1/')
@@ -687,20 +710,7 @@ if [[ -n "$MOBILE_ROOT" && -d "$MOBILE_ROOT" && "$BUILD_APK" -eq 1 && "${API_OK:
       # Nome do arquivo com versão
       APK_NAMED="gpcg-v${MOBILE_VERSION}.apk"
 
-      # Criar metadata JSON
-      RELEASE_JSON=$(cat <<JSONEOF
-{
-  "version": "$MOBILE_VERSION",
-  "versionCode": $MOBILE_VERSION_CODE,
-  "download_url": "/api/app/download",
-  "released_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "changelog": "Deploy v${DEPLOY_VERSION}",
-  "size_bytes": $APK_SIZE
-}
-JSONEOF
-)
-
-      # Upload APK + metadata para VPS
+      # Upload APK para VPS
       log "  Enviando APK para VPS..."
       vps "mkdir -p $VPS_PATH/data/app"
 
@@ -711,9 +721,14 @@ JSONEOF
         err "Falha ao enviar APK para VPS"
       fi
 
-      # Enviar metadata
-      echo "$RELEASE_JSON" | vps "cat > $VPS_PATH/data/app/release.json"
-      ok "Metadata enviado: v$MOBILE_VERSION (code: $MOBILE_VERSION_CODE)"
+      # Registrar release no banco de dados via API
+      log "  Registrando release no banco..."
+      WORKER_KEY=$(grep -E 'GPCG_WORKER_API_KEY' "$PROJECT_ROOT/.env" 2>/dev/null | head -1 | sed 's/.*=//' | tr -d '"' || echo "")
+      if [[ -n "$WORKER_KEY" ]]; then
+        vps "curl -sf -X POST 'http://localhost:8787/api/app/release?version=${MOBILE_VERSION}&version_code=${MOBILE_VERSION_CODE}&changelog=Deploy+v${DEPLOY_VERSION}&size_bytes=${APK_SIZE}&deployed_by=deploy.sh' -H 'X-Worker-Key: ${WORKER_KEY}'" 2>&1 && ok "Release registrada no DB" || warn "Falha ao registrar release no DB (APK disponível via arquivo)"
+      else
+        warn "WORKER_API_KEY não encontrada — release não registrada no DB"
+      fi
 
       log "  Download público: https://brunointegrations.com/gpcg/api/app/download"
       log "  Version check:    https://brunointegrations.com/gpcg/api/app/version"
@@ -721,8 +736,6 @@ JSONEOF
   fi
 elif [[ -z "$MOBILE_ROOT" || ! -d "$MOBILE_ROOT" ]]; then
   log "Step 9: Mobile não encontrado — APK não buildado"
-else
-  log "Step 9: APK não buildado (deploy com warnings ou BUILD_APK=0)"
 fi
 
 # ── Resumo final ─────────────────────────────────────────────────────────────
