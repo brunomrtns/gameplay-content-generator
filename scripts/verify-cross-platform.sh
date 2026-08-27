@@ -58,11 +58,15 @@ err()  { echo -e "\033[1;31m  ✗\033[0m $*" >&2; }
 
 # Write result file for deploy.sh to read
 # Format: MOBILE_CHANGED=<0|1> WEB_CHANGED=<0|1> CONSENTED=<0|1>
+# Arrays declared early so write_result can safely access them with set -u
+declare -a WEB_ONLY_CHANGES=()
+declare -a MOBILE_ONLY_CHANGES=()
+declare -a BOTH_CHANGED=()
 write_result() {
   local mobile_changed=0 web_changed=0 consented=0
-  [[ ${#WEB_ONLY_CHANGES[@]:-0} -gt 0 ]] && web_changed=1
-  [[ ${#MOBILE_ONLY_CHANGES[@]:-0} -gt 0 ]] && mobile_changed=1
-  [[ ${#BOTH_CHANGED[@]:-0} -gt 0 ]] && { web_changed=1; mobile_changed=1; }
+  [[ ${#WEB_ONLY_CHANGES[@]} -gt 0 ]] && web_changed=1
+  [[ ${#MOBILE_ONLY_CHANGES[@]} -gt 0 ]] && mobile_changed=1
+  [[ ${#BOTH_CHANGED[@]} -gt 0 ]] && { web_changed=1; mobile_changed=1; }
   [[ "$1" == "consented" ]] && consented=1
   echo "MOBILE_CHANGED=$mobile_changed WEB_CHANGED=$web_changed CONSENTED=$consented" > "$RESULT_FILE"
 }
@@ -240,9 +244,7 @@ if [[ ! -f "$STATE_FILE" ]]; then
 fi
 
 # Arrays para追踪 divergências
-declare -a WEB_ONLY_CHANGES=()    # web mudou, mobile não
-declare -a MOBILE_ONLY_CHANGES=() # mobile mudou, web não
-declare -a BOTH_CHANGED=()        # ambos mudaram (OK)
+# Arrays already declared near write_result() for set -u safety
 declare -a NONE_CHANGED=()        # nenhum mudou (OK)
 declare -a MISSING_FILES=()       # arquivo não existe
 
