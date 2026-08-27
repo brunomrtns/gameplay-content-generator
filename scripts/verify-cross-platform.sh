@@ -418,14 +418,16 @@ for media in "${MEDIAS_TO_CONFIRM[@]}"; do
   fi
   echo ""
 
-  local_media="$media"
+  # O consentimento é sobre a mídia que NÃO mudou (a outra lado).
+  # Se mudou só no mobile → a funcionalidade não se aplica ao web (que não mudou).
+  # Se mudou só no web → a funcionalidade não se aplica ao mobile (que não mudou).
   if [[ "$media" == "web" ]]; then
-    local_media="web"
+    other_media="mobile"
   else
-    local_media="mobile"
+    other_media="web"
   fi
 
-  REQUIRED_PHRASE="eu tenho consentimento que essa funcionalidade nao se aplica a midia $local_media"
+  REQUIRED_PHRASE="eu tenho consentimento que essa funcionalidade nao se aplica a midia $other_media"
 
   echo "  Digite exatamente:"
   echo ""
