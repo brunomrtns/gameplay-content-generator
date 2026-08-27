@@ -114,12 +114,13 @@ export const DEV_IDENTITY_LOGIN = 'http://10.0.2.2:3000/id/api/auth/login';
 export const PROD_IDENTITY_GOOGLE = 'https://brunointegrations.com/id/api/auth/google';
 export const DEV_IDENTITY_GOOGLE = 'http://10.0.2.2:3000/id/api/auth/google';
 
-// Google OAuth Web Client ID — must be type "Web application" (NOT Android)
-// The Android OAuth client is used by Play Services for app verification,
-// but the webClientId passed to GoogleSignin.configure() must be a Web client.
+// Google OAuth Web Client ID — must match what BI Identity expects as audience.
+// BI Identity uses this clientId to verify the id_token from Google.
 // See: https://react-native-google-signin.github.io/docs/troubleshooting
-export const PROD_GOOGLE_CLIENT_ID = '364332376664-jlmjial67jfdu1ogrmvrhlv659j7pd4r.apps.googleusercontent.com';
-export const DEV_GOOGLE_CLIENT_ID = '364332376664-jlmjial67jfdu1ogrmvrhlv659j7pd4r.apps.googleusercontent.com';
+// The Android OAuth client (with SHA-1) is used by Play Services for app
+// verification, but the webClientId here must match the BI Identity config.
+export const PROD_GOOGLE_CLIENT_ID = '364332376664-d7dp6jhe7gclqjqk3dt92gtl400q7bk3.apps.googleusercontent.com';
+export const DEV_GOOGLE_CLIENT_ID = '364332376664-d7dp6jhe7gclqjqk3dt92gtl400q7bk3.apps.googleusercontent.com';
 
 // Identity service URL (for cookie domain matching)
 export const IDENTITY_DOMAIN = __DEV__ ? '10.0.2.2' : 'brunointegrations.com';
