@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   X, ChevronRight, ChevronLeft, HelpCircle,
@@ -73,6 +73,13 @@ export function OnboardingTour({ open, onClose }: OnboardingTourProps) {
   const current = STEPS[step];
   const isLast = step === STEPS.length - 1;
 
+  // Reset step to 0 whenever the tour opens
+  useEffect(() => {
+    if (open) {
+      setStep(0);
+    }
+  }, [open]);
+
   // Navigate to the step's route when step changes
   useEffect(() => {
     if (open && current) {
@@ -92,6 +99,7 @@ export function OnboardingTour({ open, onClose }: OnboardingTourProps) {
     }
     setTimeout(() => {
       setClosing(false);
+      setStep(0);
       onClose();
     }, 200);
   }, [onClose, updateUser]);
@@ -233,20 +241,33 @@ export function OnboardingTour({ open, onClose }: OnboardingTourProps) {
 export function useOnboardingTour() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
+  // Prevents auto-reopen after user dismisses — survives user re-fetches
+  // that still show onboarding_completed=false (race with backend update)
+  const userDismissed = useRef(false);
 
   // Auto-open on first login (onboarding_completed = false)
   useEffect(() => {
-    if (user && !user.onboarding_completed) {
+    if (user && !user.onboarding_completed && !userDismissed.current) {
       // Small delay to let the dashboard render first
       const timer = setTimeout(() => setOpen(true), 800);
       return () => clearTimeout(timer);
     }
+    // If onboarding is now completed, clear the dismissed flag
+    // so it can auto-open again on a future session if reset
+    if (user?.onboarding_completed) {
+      userDismissed.current = false;
+    }
   }, [user]);
 
-  const close = useCallback(() => setOpen(false), []);
+  const close = useCallback(() => {
+    userDismissed.current = true;
+    setOpen(false);
+  }, []);
+
   const reopen = useCallback(() => {
     // Reset onboarding on the server so it shows again next time too
     api.resetOnboarding().catch(() => {});
+    userDismissed.current = false;
     setOpen(true);
   }, []);
 
