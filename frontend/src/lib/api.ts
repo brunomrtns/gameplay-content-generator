@@ -4,6 +4,18 @@ import { useAuth } from "./auth";
 // In dev, the app is at / and API calls go to /api/ (proxied by Vite)
 const API_BASE = import.meta.env.PROD ? "/gpcg/api" : "/api";
 
+// ── Catalog types (IGDB) ───────────────────────────────────────────────────
+export interface CatalogGameResult {
+  id: number;
+  name: string;
+  slug: string;
+  cover_url: string | null;
+  total_rating: number | null;
+  total_rating_count: number | null;
+  release_year: number | null;
+  genres: string[];
+}
+
 // SSO redirect target for BI Identity login
 const SSO_LOGIN_URL = "/id/login?redirect=/gpcg/dashboard";
 
@@ -556,7 +568,7 @@ export const api = {
       credentials: "include",
     });
     if (!res.ok) throw new Error(res.statusText);
-    return res.json() as Promise<{ results: any[]; count: number }>;
+    return res.json() as Promise<{ results: CatalogGameResult[]; count: number }>;
   },
   autocompleteCatalog: async (q: string, limit = 8) => {
     const base = import.meta.env.PROD ? "/gpcg/api/catalog" : "/catalog-api";
@@ -564,7 +576,7 @@ export const api = {
       credentials: "include",
     });
     if (!res.ok) throw new Error(res.statusText);
-    return res.json() as Promise<{ results: any[]; count: number }>;
+    return res.json() as Promise<{ results: CatalogGameResult[]; count: number }>;
   },
 
   // ── Collection Focus (campaign direction) ──────────────────────────────

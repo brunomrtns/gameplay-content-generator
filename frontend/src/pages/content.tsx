@@ -354,6 +354,17 @@ function MediaTab() {
     }
   };
 
+  const handleClearGame = async () => {
+    if (gameModalSourceId === null) return;
+    try {
+      await api.assignGameByName(gameModalSourceId, "", "");
+      toast.success("Associação de jogo removida");
+      refetch();
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao remover jogo");
+    }
+  };
+
   const processing = sources?.filter((s: any) =>
     ["discovered", "probing"].includes(s.ingestion_status)
   ).length || 0;
@@ -632,6 +643,8 @@ function MediaTab() {
         onSelect={handleAssignGame}
         title="Definir Jogo da Gravação"
         subtitle="Busque pelo nome ou nome alternativo (GTA, Witcher, etc.)"
+        allowClear
+        onClear={handleClearGame}
       />
     </div>
   );
