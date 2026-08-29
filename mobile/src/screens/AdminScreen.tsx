@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, FlatList, RefreshControl, Alert } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLiveData } from '../hooks/useLiveData';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { authApi } from '../api/endpoints';
 import { Card, Badge, Button, EmptyState } from '../components/ui';
@@ -14,10 +15,11 @@ import Toast from 'react-native-toast-message';
 export function AdminScreen() {
   const queryClient = useQueryClient();
   const { user: currentUser } = useAuth();
-  const { data: users, refetch, isRefetching } = useQuery({
-    queryKey: ['users'],
-    queryFn: authApi.listUsers,
-  });
+  const { data: users, refetch, isRefetching } = useLiveData(
+    ['users'],
+    authApi.listUsers,
+    []
+  );
 
   const handleToggleActive = (user: any) => {
     const isSelf = currentUser?.id === user.id;
