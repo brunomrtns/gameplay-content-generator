@@ -190,7 +190,7 @@ export const catalogApi = {
     return data;
   },
 
-  async autocomplete(q: string): Promise<any[]> {
+  async autocomplete(q: string): Promise<any> {
     const { data } = await client.get('/catalog/autocomplete', { params: { q } });
     return data;
   },

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Alert,
   TextInput,
   Modal,
+  Image,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLiveData } from '../hooks/useLiveData';
@@ -361,24 +362,68 @@ function MediaTab() {
 
 function GameSearchModal({ visible, onClose, onSelect }: { visible: boolean; onClose: () => void; onSelect: (game: any) => void }) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<any[]>([]);
-  const [searching, setSearching] = useState(false);
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useBackHandler(() => onClose(), visible);
 
-  const search = async (q: string) => {
-    setQuery(q);
-    if (q.length < 2) { setResults([]); return; }
-    setSearching(true);
-    try {
-      const r = await catalogApi.search(q);
-      setResults(r);
-    } catch {
-      setResults([]);
-    } finally {
-      setSearching(false);
-    }
-  };
+  // Debounce — 250ms após parar de digitar
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedQuery(query), 250);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [query]);
+
+  // Reset ao fechar
+  useEffect(() => {
+    if (!visible) { setQuery(''); setDebouncedQuery(''); }
+  }, [visible]);
+
+  // React Query — cache de resultados (staleTime 60s, catálogo raramente muda)
+  const { data: results, isLoading: searching } = useQuery({
+    queryKey: ['catalog-search', debouncedQuery],
+    queryFn: async () => {
+      const r = await catalogApi.autocomplete(debouncedQuery.trim());
+      const arr = Array.isArray(r) ? r : (r?.results || []);
+      return arr.filter(Boolean);
+    },
+    enabled: visible && debouncedQuery.trim().length >= 2,
+    staleTime: 60_000,
+    placeholderData: (prev: any) => prev,
+  });
+
+  const games = results || [];
+
+  const renderGame = ({ item: g }: { item: any }) => (
+    <TouchableOpacity
+      style={styles.searchResult}
+      onPress={() => onSelect(g)}
+    >
+      {g.cover_url ? (
+        <Image source={{ uri: g.cover_url }} style={styles.searchCover} />
+      ) : (
+        <View style={[styles.searchCover, { alignItems: 'center', justifyContent: 'center' }]}>
+          <Icon name="gamepad-variant" size={18} color={colors.textMuted} />
+        </View>
+      )}
+      <View style={{ flex: 1 }}>
+        <Text style={styles.searchResultText}>{g.name}</Text>
+        <View style={{ flexDirection: 'row', gap: 6, marginTop: 2 }}>
+          {g.release_year ? <Text style={styles.searchMeta}>{g.release_year}</Text> : null}
+          {g.genres && g.genres.length > 0 && (
+            <Text style={styles.searchMeta} numberOfLines={1}>
+              {g.genres.slice(0, 2).join(', ')}
+            </Text>
+          )}
+          {g.total_rating ? (
+            <Text style={[styles.searchMeta, { color: colors.accent }]}>
+              ★ {Math.round(g.total_rating)}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -396,23 +441,27 @@ function GameSearchModal({ visible, onClose, onSelect }: { visible: boolean; onC
             placeholder="Buscar jogo..."
             placeholderTextColor={colors.textMuted}
             value={query}
-            onChangeText={search}
+            onChangeText={setQuery}
             autoFocus
           />
+          <Text style={styles.searchHint}>Busque pelo nome ou nome alternativo (GTA, Witcher, etc.)</Text>
         </View>
-        {searching ? (
+        {query.trim().length < 2 ? (
+          <View style={{ padding: spacing.xxl, alignItems: 'center' }}>
+            <Text style={styles.muted}>Digite pelo menos 2 caracteres para buscar</Text>
+          </View>
+        ) : searching && games.length === 0 ? (
           <Spinner />
+        ) : games.length === 0 ? (
+          <View style={{ padding: spacing.xxl, alignItems: 'center' }}>
+            <Text style={styles.muted}>Nenhum jogo encontrado para "{query}"</Text>
+          </View>
         ) : (
           <FlatList
-            data={results}
+            data={games}
             keyExtractor={(g, i) => String(g.id || i)}
-            contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: spacing.sm }}
-            renderItem={({ item: g }) => (
-              <TouchableOpacity style={styles.searchResult} onPress={() => onSelect(g)}>
-                <Text style={styles.searchResultText}>{g.name}</Text>
-                {g.slug && <Text style={styles.muted}>{g.slug}</Text>}
-              </TouchableOpacity>
-            )}
+            contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: spacing.sm, paddingBottom: spacing.xl }}
+            renderItem={renderGame}
           />
         )}
       </SafeAreaView>
@@ -631,8 +680,11 @@ const styles = StyleSheet.create({
   closeButton: { fontSize: fontSize.base, color: colors.accent },
   modalTitle: { fontSize: fontSize.md, fontWeight: fontWeight.semibold, color: colors.text },
   searchInput: { height: 44, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, borderRadius: radius.md, paddingHorizontal: spacing.md, fontSize: fontSize.base, color: colors.text },
-  searchResult: { paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
+  searchHint: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 6 },
+  searchResult: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
   searchResultText: { fontSize: fontSize.base, color: colors.text, fontWeight: fontWeight.medium },
+  searchCover: { width: 40, height: 40, borderRadius: radius.sm, backgroundColor: colors.surfaceElevated },
+  searchMeta: { fontSize: fontSize.xs, color: colors.textMuted },
   label: { fontSize: fontSize.sm, fontWeight: fontWeight.medium, color: colors.textSecondary, marginBottom: spacing.xs },
   input: { height: 44, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg, borderRadius: radius.md, paddingHorizontal: spacing.md, fontSize: fontSize.base, color: colors.text },
   textArea: { minHeight: 80, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, fontSize: fontSize.base, color: colors.text, textAlignVertical: 'top' },

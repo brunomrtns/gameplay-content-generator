@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Search, X, Gamepad2, Loader2 } from "lucide-react";
 
@@ -34,8 +35,7 @@ export function GameSearchModal({
   onClear,
 }: GameSearchModalProps) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<CatalogGame[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [highlightIndex, setHighlightIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -44,37 +44,39 @@ export function GameSearchModal({
   useEffect(() => {
     if (open) {
       setQuery("");
-      setResults([]);
+      setDebouncedQuery("");
       setHighlightIndex(0);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open]);
 
-  // Debounced autocomplete search
-  const doSearch = useCallback(async (q: string) => {
-    if (q.trim().length < 2) {
-      setResults([]);
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await api.autocompleteCatalog(q.trim(), 10);
-      setResults(res.results || []);
-      setHighlightIndex(0);
-    } catch {
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  // Debounce query — update debouncedQuery 250ms after user stops typing
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => doSearch(query), 250);
+    debounceRef.current = setTimeout(() => setDebouncedQuery(query), 250);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query, doSearch]);
+  }, [query]);
+
+  // React Query — cached search results with staleTime so repeated searches are instant
+  const { data, isLoading } = useQuery({
+    queryKey: ["catalog-search", debouncedQuery],
+    queryFn: async () => {
+      const res = await api.autocompleteCatalog(debouncedQuery.trim(), 10);
+      return (res.results || []) as CatalogGame[];
+    },
+    enabled: open && debouncedQuery.trim().length >= 2,
+    staleTime: 60_000, // cache results for 1 minute (catalog data rarely changes)
+    placeholderData: (prev) => prev, // keep previous results while loading new ones
+  });
+
+  const results = data || [];
+
+  // Reset highlight when results change
+  useEffect(() => {
+    setHighlightIndex(0);
+  }, [debouncedQuery]);
 
   // Reset on close
   if (!open) return null;
@@ -135,7 +137,7 @@ export function GameSearchModal({
               placeholder="Digite o nome do jogo..."
               className="w-full rounded-lg border border-border bg-surface pl-9 pr-3 py-2.5 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
             />
-            {loading && (
+            {isLoading && (
               <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-accent animate-spin" />
             )}
           </div>
@@ -148,7 +150,7 @@ export function GameSearchModal({
             <div className="py-8 text-center text-sm text-text-muted">
               Digite pelo menos 2 caracteres para buscar
             </div>
-          ) : results.length === 0 && !loading ? (
+          ) : results.length === 0 && !isLoading ? (
             <div className="py-8 text-center text-sm text-text-muted">
               Nenhum jogo encontrado para "{query}"
             </div>
