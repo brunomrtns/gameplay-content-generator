@@ -36,9 +36,15 @@ def _requeue_stale_jobs_in_claim(db: Session) -> int:
 
     A job is stale if:
     - status='running' AND worker_id is set but worker heartbeat is older
-      than gpcg_job_lease_timeout
+      than gpcg_worker_heartbeat_timeout (worker is dead/offline)
     - status='running' AND worker_id IS NULL AND updated_at older than
-      gpcg_job_lease_timeout (VPS worker jobs)
+      gpcg_job_lease_timeout (orphaned VPS worker jobs)
+    - status='running' AND worker is online but not processing this job
+      AND updated_at is old (orphaned after deploy/restart)
+
+    Uses heartbeat_timeout (30s) for worker-based detection — much faster
+    than the old 300s lease_timeout. This means a dead worker's jobs get
+    requeued within ~40s instead of ~300s.
 
     If attempts >= max_attempts, mark as 'failed' instead of requeuing.
     Does NOT increment attempts — the subsequent /jobs/claim does that.
@@ -46,9 +52,11 @@ def _requeue_stale_jobs_in_claim(db: Session) -> int:
     Returns the number of jobs requeued.
     """
     settings = get_settings()
+    heartbeat_timeout = timedelta(seconds=settings.gpcg_worker_heartbeat_timeout)
     lease_timeout = timedelta(seconds=settings.gpcg_job_lease_timeout)
     now = _utcnow().replace(tzinfo=None)
-    cutoff = now - lease_timeout
+    heartbeat_cutoff = now - heartbeat_timeout
+    lease_cutoff = now - lease_timeout
 
     # Find running jobs with offline workers
     stale_jobs = (
@@ -59,15 +67,16 @@ def _requeue_stale_jobs_in_claim(db: Session) -> int:
             (
                 # worker_id is NULL (VPS worker) and updated_at is old
                 (Job.worker_id.is_(None))
-                & (Job.updated_at < cutoff)
+                & (Job.updated_at < lease_cutoff)
             )
             |
             (
-                # worker heartbeat is old or NULL
+                # worker heartbeat is old or NULL — worker is dead/offline
+                # Use heartbeat_timeout (30s) not lease_timeout (300s)
                 (Job.worker_id.isnot(None))
                 & (
                     (Worker.last_heartbeat.is_(None))
-                    | (Worker.last_heartbeat < cutoff)
+                    | (Worker.last_heartbeat < heartbeat_cutoff)
                 )
             )
             |
@@ -75,13 +84,15 @@ def _requeue_stale_jobs_in_claim(db: Session) -> int:
                 # worker is online but not processing this job (orphaned
                 # after a deploy/restart interrupted the API mid-job).
                 # The worker recovered but the job was left in 'running'.
+                # Use lease_cutoff here — the worker is alive so we give
+                # it more time before declaring the job orphaned.
                 (Job.worker_id.isnot(None))
                 & (Worker.status == "online")
                 & (
                     (Worker.current_job_id.is_(None))
                     | (Worker.current_job_id != Job.id)
                 )
-                & (Job.updated_at < cutoff)
+                & (Job.updated_at < lease_cutoff)
             )
         )
         .all()

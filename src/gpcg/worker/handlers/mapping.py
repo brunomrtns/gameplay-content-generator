@@ -276,12 +276,12 @@ class MappingMixin:
         else:
             log.debug(f"Source #{source_id} already resolved (game_id={game_id}, conf={resolution_confidence})")
 
-        # Stage 3: Run GameplayAnalyzer locally
+        # Stage 3: Run GameplayAnalyzer locally (or reuse existing analysis)
         self.update_job_status(job_id, status="running", stage="mapping", progress=0.15)
         self.send_status("busy", f"Mapeando {source['filename']}", job_id=job_id)
 
         from gpcg.application.gameplay_analyzer import GameplayAnalyzer
-        from gpcg.domain.gameplay_events import AnalysisConfig
+        from gpcg.domain.gameplay_events import AnalysisConfig, EventTimeline
         from gpcg.config import get_settings
 
         settings = get_settings()
@@ -318,31 +318,61 @@ class MappingMixin:
             enable_interesting_score=True,
         )
 
-        analyzer = GameplayAnalyzer(camera_type=camera_type, config=config)
-
-        # Progress callback: update VPS with mapping progress
-        def _progress(stage: str, pct: float) -> None:
-            # Map analyzer stage to 0.15-0.90 range
-            mapped = 0.15 + pct * 0.75
-            self.update_job_status(job_id, status="running", stage="mapping", progress=mapped)
-
-        log.info(f"Starting GameplayAnalyzer on {local_path.name} (camera_type={camera_type})")
-        timeline = analyzer.analyze(
-            local_path,
-            source_id=source["id"],
-            progress_callback=_progress,
-        )
-
-        log.info(
-            f"Analysis complete: {timeline.event_count} events "
-            f"(confident={len(timeline.confident_events)}, "
-            f"interesting={len(timeline.interesting_events)})"
-        )
-
-        # Save analysis JSON locally (for debugging/reference)
+        # ── Checkpoint: reuse existing analysis if valid ──────────────────
+        # If a previous analysis JSON exists for this source and was produced
+        # with the same config_hash and analysis_version, skip re-analysis.
+        # This saves hours of VLM/ASR work when a job is requeued after a
+        # worker shutdown.
         analysis_json_path = self.storage_root / "mapped" / f"source_{source['id']}_analysis.json"
-        analysis_json_path.parent.mkdir(parents=True, exist_ok=True)
-        analysis_json_path.write_text(timeline.to_json(indent=2))
+        timeline = None
+
+        if analysis_json_path.exists():
+            try:
+                cached = EventTimeline.from_json(analysis_json_path.read_text())
+                current_hash = config.to_hash()
+                if (cached.analysis_version == config.analysis_version
+                        and cached.config_hash == current_hash
+                        and cached.event_count > 0):
+                    log.info(
+                        f"Reusing cached analysis for source #{source['id']} "
+                        f"({cached.event_count} events, version={cached.analysis_version}) "
+                        f"— skipping VLM/ASR"
+                    )
+                    timeline = cached
+                else:
+                    log.info(
+                        f"Cached analysis for source #{source['id']} is outdated "
+                        f"(version/hash changed) — will re-analyze"
+                    )
+            except Exception as e:
+                log.warning(f"Cached analysis JSON invalid, will re-analyze: {e}")
+                timeline = None
+
+        if timeline is None:
+            analyzer = GameplayAnalyzer(camera_type=camera_type, config=config)
+
+            # Progress callback: update VPS with mapping progress
+            def _progress(stage: str, pct: float) -> None:
+                # Map analyzer stage to 0.15-0.90 range
+                mapped = 0.15 + pct * 0.75
+                self.update_job_status(job_id, status="running", stage="mapping", progress=mapped)
+
+            log.info(f"Starting GameplayAnalyzer on {local_path.name} (camera_type={camera_type})")
+            timeline = analyzer.analyze(
+                local_path,
+                source_id=source["id"],
+                progress_callback=_progress,
+            )
+
+            log.info(
+                f"Analysis complete: {timeline.event_count} events "
+                f"(confident={len(timeline.confident_events)}, "
+                f"interesting={len(timeline.interesting_events)})"
+            )
+
+            # Save analysis JSON locally (for debugging/reference + checkpoint)
+            analysis_json_path.parent.mkdir(parents=True, exist_ok=True)
+            analysis_json_path.write_text(timeline.to_json(indent=2))
 
         # Stage 4: Submit mapping result (events + media metadata)
         self.update_job_status(job_id, status="running", stage="mapping", progress=0.90)

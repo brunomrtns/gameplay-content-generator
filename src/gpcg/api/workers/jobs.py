@@ -203,6 +203,119 @@ def claim_job_by_id(
     }
 
 
+@router.post("/jobs/recover-my-stale")
+def recover_my_stale_jobs(
+    req: JobClaimRequest,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Requeue all 'running' jobs assigned to this worker_id.
+
+    Called by the worker on startup to recover jobs that were interrupted
+    when the worker was shut down (e.g., PC turned off for the night).
+
+    This is faster than waiting for the reconciler — the worker proactively
+    releases its own stale jobs as soon as it starts.
+    """
+    stale_jobs = db.query(Job).filter(
+        Job.status == JobStatus.running.value,
+        Job.worker_id == req.worker_id,
+    ).all()
+
+    requeued = 0
+    for job in stale_jobs:
+        if job.status == JobStatus.cancelled.value:
+            continue
+        if job.attempts >= job.max_attempts:
+            job.status = JobStatus.failed.value
+            job.error = f"Max attempts reached (recovered on worker restart)"
+            log.warning(f"Job #{job.id} marked failed on recovery by '{req.worker_id}'")
+        else:
+            job.status = JobStatus.queued.value
+            job.worker_id = None
+            job.started_at = None
+            requeued += 1
+            log.info(f"Job #{job.id} requeued by worker '{req.worker_id}' on startup recovery")
+
+            # Re-publish to Redis Streams if available
+            try:
+                from gpcg.infrastructure.job_queue import enqueue_job
+                enqueue_job(job)
+            except Exception:
+                pass  # Redis down — job stays in SQLite as queued
+
+    if stale_jobs:
+        db.flush()
+        db.commit()
+
+    return {"requeued": requeued, "checked": len(stale_jobs)}
+
+
+@router.post("/jobs/{job_id}/release")
+def release_job(
+    job_id: int,
+    req: JobClaimRequest,
+    _: None = Depends(worker_auth),
+    db: Session = Depends(get_db),
+):
+    """Release a job back to the queue (graceful shutdown / interruption).
+
+    Called by the worker when it's shutting down with a job in progress.
+    Puts the job back in 'queued' so another worker (or the same worker
+    on next startup) can pick it up.
+
+    Only works if:
+    - The job belongs to the requesting worker
+    - The job is currently 'running'
+    - The job is not cancelled
+    - attempts < max_attempts (otherwise marks as failed)
+    """
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status == JobStatus.cancelled.value:
+        return {"ok": True, "status": "cancelled", "message": "Job was cancelled"}
+
+    if job.status == JobStatus.completed.value:
+        return {"ok": True, "status": "completed", "message": "Job already completed"}
+
+    if job.worker_id != req.worker_id:
+        log.warning(
+            f"Job #{job.id} release rejected: belongs to '{job.worker_id}' "
+            f"but requested by '{req.worker_id}'"
+        )
+        raise HTTPException(status_code=409, detail="Job belongs to another worker")
+
+    if job.status != JobStatus.running.value:
+        # Already queued or in another state — nothing to do
+        return {"ok": True, "status": job.status, "message": "Job not running"}
+
+    if job.attempts >= job.max_attempts:
+        job.status = JobStatus.failed.value
+        job.error = f"Max attempts reached (released on worker shutdown)"
+        job.completed_at = _utcnow()
+        db.commit()
+        log.warning(f"Job #{job.id} marked failed (max attempts on release by '{req.worker_id}')")
+        return {"ok": True, "status": "failed", "message": "Max attempts reached"}
+
+    job.status = JobStatus.queued.value
+    job.worker_id = None
+    job.started_at = None
+    job.error = f"Released by worker '{req.worker_id}' on shutdown"
+    db.commit()
+
+    # Re-publish to Redis Streams if available
+    try:
+        from gpcg.infrastructure.job_queue import enqueue_job
+        enqueue_job(job)
+    except Exception:
+        pass  # Redis down — job stays in SQLite as queued
+
+    log.info(f"Job #{job.id} released back to queue by '{req.worker_id}'")
+    return {"ok": True, "status": "queued", "message": "Job released back to queue"}
+
+
 def _serialize_job(job: Job) -> dict:
     """Serialize a Job for the worker API response."""
     return {

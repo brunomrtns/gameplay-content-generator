@@ -544,32 +544,58 @@ class KidsMixin:
         self.update_job_status(job_id, status="running", stage="mapping", progress=0.6)
         self.send_status("busy", f"Mapeando mídia Kids: {filename}", job_id=job_id)
 
+        # Checkpoint: reuse cached analysis if available
+        analysis_cache_path = self.storage_root / "mapped" / f"kids_asset_{asset_id}_analysis.json"
+        timeline = None
+        if analysis_cache_path.exists():
+            try:
+                from gpcg.domain.gameplay_events import EventTimeline
+                cached = EventTimeline.from_json(analysis_cache_path.read_text())
+                if cached.event_count > 0:
+                    log.info(
+                        f"Reusing cached Kids analysis for asset #{asset_id} "
+                        f"({cached.event_count} events) — skipping VLM/ASR"
+                    )
+                    timeline = cached
+            except Exception as e:
+                log.warning(f"Cached Kids analysis JSON invalid, will re-analyze: {e}")
+                timeline = None
+
         events_data: list[dict] = []
-        try:
-            from gpcg.application.kids_media_analyzer import (
-                KidsMediaAnalyzer,
-                kids_media_events_from_timeline,
-            )
-            analyzer = KidsMediaAnalyzer()
-            timeline = analyzer.analyze(
-                local_path,
-                asset_id=asset_id,
-                progress_callback=lambda stage, pct: self.update_job_status(
-                    job_id, status="running", stage="mapping",
-                    progress=0.6 + pct * 0.3,
-                ),
-            )
+        if timeline is not None:
+            from gpcg.application.kids_media_analyzer import kids_media_events_from_timeline
             events_data = kids_media_events_from_timeline(timeline, asset_id)
-            log.info(
-                f"Kids media mapping: asset #{asset_id} → {len(events_data)} events "
-                f"(version={timeline.analysis_version}, model={timeline.vision_model})"
-            )
-        except Exception as e:
-            log.warning(
-                f"Kids media mapping failed for asset #{asset_id}: {e} — "
-                f"continuing with metadata only (no semantic events). "
-                f"The asset will be ready but without semantic indexing."
-            )
+        else:
+            try:
+                from gpcg.application.kids_media_analyzer import (
+                    KidsMediaAnalyzer,
+                    kids_media_events_from_timeline,
+                )
+                analyzer = KidsMediaAnalyzer()
+                timeline = analyzer.analyze(
+                    local_path,
+                    asset_id=asset_id,
+                    progress_callback=lambda stage, pct: self.update_job_status(
+                        job_id, status="running", stage="mapping",
+                        progress=0.6 + pct * 0.3,
+                    ),
+                )
+                events_data = kids_media_events_from_timeline(timeline, asset_id)
+
+                # Save analysis JSON locally for checkpoint/resume
+                analysis_cache_path.parent.mkdir(parents=True, exist_ok=True)
+                analysis_cache_path.write_text(timeline.to_json(indent=2))
+
+                log.info(
+                    f"Kids media mapping: asset #{asset_id} → {len(events_data)} events "
+                    f"(version={timeline.analysis_version}, model={timeline.vision_model})"
+                )
+            except Exception as e:
+                log.warning(
+                    f"Kids media mapping failed for asset #{asset_id}: {e} — "
+                    f"continuing with metadata only (no semantic events). "
+                    f"The asset will be ready but without semantic indexing."
+                )
 
         # Sync mapping events to VPS
         self.update_job_status(job_id, status="running", stage="sync", progress=0.9)

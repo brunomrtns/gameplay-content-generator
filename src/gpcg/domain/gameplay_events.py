@@ -210,6 +210,25 @@ class EventTimeline:
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
 
+    @classmethod
+    def from_dict(cls, d: dict) -> EventTimeline:
+        return cls(
+            source_id=d.get("source_id", 0),
+            source_path=d.get("source_path", ""),
+            duration=d.get("duration", 0.0),
+            events=[GameplayEventRecord.from_dict(e) for e in d.get("events", [])],
+            analysis_version=d.get("analysis_version", "v1"),
+            vision_model=d.get("vision_model", ""),
+            asr_model=d.get("asr_model", ""),
+            config_hash=d.get("config_hash", ""),
+            has_audio=d.get("has_audio", False),
+            has_transcript=d.get("has_transcript", False),
+        )
+
+    @classmethod
+    def from_json(cls, json_str: str) -> EventTimeline:
+        return cls.from_dict(json.loads(json_str))
+
 
 @dataclass
 class AnalysisConfig:

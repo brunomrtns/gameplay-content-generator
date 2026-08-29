@@ -162,6 +162,33 @@ class RemoteWorker(
             time.sleep(5)
         log.error("register: failed after all retries, continuing anyway")
 
+    def recover_stale_jobs(self) -> None:
+        """Requeue any 'running' jobs assigned to this worker from a previous session.
+
+        Called on startup right after register(). This handles the case where
+        the worker was shut down (e.g., PC turned off for the night) while
+        processing jobs — those jobs are stuck in 'running' and need to be
+        released back to the queue.
+        """
+        try:
+            resp = self.client.post("/api/jobs/recover-my-stale", json={
+                "worker_id": self.config.worker_id,
+                "capabilities": self.config.capabilities,
+            })
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("requeued", 0) > 0:
+                    log.info(
+                        f"Startup recovery: requeued {data['requeued']} stale job(s) "
+                        f"(checked {data.get('checked', 0)})"
+                    )
+                else:
+                    log.debug(f"Startup recovery: no stale jobs found (checked {data.get('checked', 0)})")
+            else:
+                log.warning(f"Startup recovery: endpoint returned {resp.status_code}")
+        except Exception as e:
+            log.warning(f"Startup recovery: failed (non-critical): {e}")
+
     # ── Heartbeat (background thread) ────────────────────────────────────────
 
     def start_heartbeat(self) -> None:
@@ -255,10 +282,16 @@ class RemoteWorker(
                                     job["document"] = data["document"]
                                 if data.get("game"):
                                     job["game"] = data["game"]
+                                # Carry Redis stream/msg_id for later XACK
+                                job["_redis_stream"] = job_fields.get("_stream")
+                                job["_redis_msg_id"] = job_fields.get("_msg_id")
                                 return job
                         elif resp.status_code == 409:
-                            # Job already claimed by another worker — ack and continue
-                            log.debug(f"claim_job: job {job_fields['job_id']} already claimed")
+                            # Job already claimed by another worker — ack the stale
+                            # Redis message so XAUTOCLAIM doesn't keep re-delivering it
+                            from gpcg.infrastructure.job_queue import ack_job_data
+                            ack_job_data(job_fields)
+                            log.debug(f"claim_job: job {job_fields['job_id']} already claimed (acked stale msg)")
                             return None
                         else:
                             log.warning(f"claim_job: claim-by-id returned {resp.status_code}")
@@ -435,6 +468,7 @@ class RemoteWorker(
         """Main worker loop: poll for jobs and process them."""
         self._running = True
         self.register()
+        self.recover_stale_jobs()
         self.start_heartbeat()
         self.send_status("online", "Idle")
 
@@ -475,11 +509,23 @@ class RemoteWorker(
                     self.submit_job_result(job["id"], status="failed", error=str(e))
                     self.send_status("error", f"Erro: {e}")
 
+                # Ack the Redis Streams message so XAUTOCLAIM doesn't
+                # re-deliver it to another worker
+                redis_stream = job.pop("_redis_stream", None)
+                redis_msg_id = job.pop("_redis_msg_id", None)
+                if redis_stream and redis_msg_id:
+                    try:
+                        from gpcg.infrastructure.job_queue import ack_job
+                        ack_job(redis_stream, redis_msg_id)
+                    except Exception as e:
+                        log.debug(f"XACK failed for job #{job['id']}: {e}")
+
                 self._current_job = None
                 self.send_status("online", "Idle")
 
             except KeyboardInterrupt:
                 log.info("Worker stopping (KeyboardInterrupt)...")
+                self.stop()
                 break
             except Exception as e:
                 log.error(f"Main loop error: {e}", exc_info=True)
@@ -531,9 +577,41 @@ class RemoteWorker(
 
     # ── Shutdown ─────────────────────────────────────────────────────────────
 
+    def _release_current_job(self, reason: str = "worker shutting down") -> None:
+        """Release the current job back to the queue so another worker can pick it up.
+
+        Called during graceful shutdown. If the HTTP call fails (e.g., VPS
+        unreachable), the reconciler will eventually requeue the job based
+        on heartbeat timeout.
+        """
+        if not self._current_job:
+            return
+        job_id = self._current_job.get("id")
+        if not job_id:
+            return
+        try:
+            resp = self.client.post(
+                f"/api/jobs/{job_id}/release",
+                json={
+                    "worker_id": self.config.worker_id,
+                    "capabilities": self.config.capabilities,
+                },
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                log.info(f"Released job #{job_id} ({reason}) → {data.get('status', 'unknown')}")
+            else:
+                log.warning(f"Release job #{job_id} returned {resp.status_code} "
+                            f"(reconciler will requeue it)")
+        except Exception as e:
+            log.warning(f"Could not release job #{job_id} on shutdown: {e} "
+                        f"(reconciler will requeue it)")
+
     def stop(self) -> None:
-        """Graceful shutdown."""
+        """Graceful shutdown — release current job and notify VPS."""
         self._running = False
+        self._release_current_job("worker shutting down")
+        self._current_job = None
         self.send_status("offline", "Shutting down")
         self.client.close()
         log.info("Worker stopped")

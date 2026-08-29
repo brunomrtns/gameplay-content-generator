@@ -146,7 +146,11 @@ def claim_job_via_redis(
     1. XREADGROUP from streams matching worker capabilities
     2. Return the first available job's fields
 
-    Returns job fields dict or None if no job available.
+    Returns a dict with keys: 'job_id', 'type', 'user_id', 'priority',
+    'required_capabilities', '_stream', '_msg_id'.
+    The '_stream' and '_msg_id' keys are used by ack_job_after_completion()
+    to acknowledge the message after the job is done.
+    Returns None if no job available.
     The caller must then POST /api/jobs/claim-by-id to atomically claim in SQLite.
     """
     redis = get_redis()
@@ -169,7 +173,10 @@ def claim_job_via_redis(
             if claimed:
                 # Return the first claimed message
                 for msg_id, fields in claimed:
-                    return _parse_fields(fields)
+                    data = _parse_fields(fields)
+                    data["_stream"] = stream_name
+                    data["_msg_id"] = msg_id
+                    return data
         except Exception:
             pass  # Stream or group may not exist yet
 
@@ -180,7 +187,10 @@ def claim_job_via_redis(
 
     for stream_name, messages in result:
         for msg_id, fields in messages:
-            return _parse_fields(fields)
+            data = _parse_fields(fields)
+            data["_stream"] = stream_name
+            data["_msg_id"] = msg_id
+            return data
 
     return None
 
@@ -191,6 +201,19 @@ def ack_job(stream: str, msg_id: str) -> bool:
     if not redis.is_available():
         return False
     return redis.xack(stream, CONSUMER_GROUP, msg_id) > 0
+
+
+def ack_job_data(job_data: dict) -> bool:
+    """Acknowledge a job message using the _stream and _msg_id from claim_job_via_redis.
+
+    Convenience wrapper — call this after a job is completed or failed
+    to prevent XAUTOCLAIM from re-delivering the same message.
+    """
+    stream = job_data.get("_stream")
+    msg_id = job_data.get("_msg_id")
+    if not stream or not msg_id:
+        return False
+    return ack_job(stream, msg_id)
 
 
 def reconcile_streams() -> int:
@@ -229,22 +252,55 @@ def reconcile_streams() -> int:
             for stream in streams:
                 redis.xadd(stream, fields)
 
-        # Requeue stale running jobs
-        cutoff = time.time() - settings.gpcg_job_lease_timeout
+        # Requeue stale running jobs — use WORKER HEARTBEAT as primary signal
+        # A job is stale if:
+        #   1. Its worker's last_heartbeat is older than heartbeat_timeout (worker is dead)
+        #   2. OR the job has no worker_id AND updated_at is old (orphaned)
+        # This prevents false requeues of long-running stages (render, ASR) on live workers
+        from gpcg.core.models import Worker
         from datetime import datetime, timezone
-        cutoff_dt = datetime.fromtimestamp(cutoff, tz=timezone.utc)
+        import time as _time
 
-        stale_jobs = db.query(Job).filter(
+        heartbeat_cutoff = _time.time() - settings.gpcg_worker_heartbeat_timeout
+        heartbeat_cutoff_dt = datetime.fromtimestamp(heartbeat_cutoff, tz=timezone.utc)
+
+        # Find all running jobs
+        running_jobs = db.query(Job).filter(
             Job.status == JobStatus.running.value,
-            Job.updated_at < cutoff_dt,
         ).all()
 
-        for job in stale_jobs:
+        for job in running_jobs:
+            is_stale = False
+            reason = ""
+
+            if job.worker_id:
+                # Check if the worker's heartbeat is fresh
+                worker = db.query(Worker).filter(Worker.worker_id == job.worker_id).first()
+                if not worker:
+                    # Worker doesn't exist anymore — definitely stale
+                    is_stale = True
+                    reason = f"worker '{job.worker_id}' not found"
+                elif worker.last_heartbeat and worker.last_heartbeat < heartbeat_cutoff_dt:
+                    # Worker heartbeat is stale — worker is dead/offline
+                    is_stale = True
+                    reason = f"worker '{job.worker_id}' heartbeat stale ({worker.last_heartbeat})"
+                # else: worker is alive, don't requeue even if job.updated_at is old
+            else:
+                # No worker_id — orphaned job, use updated_at as fallback
+                lease_cutoff = _time.time() - settings.gpcg_job_lease_timeout
+                lease_cutoff_dt = datetime.fromtimestamp(lease_cutoff, tz=timezone.utc)
+                if job.updated_at and job.updated_at < lease_cutoff_dt:
+                    is_stale = True
+                    reason = "no worker_id and updated_at expired"
+
+            if not is_stale:
+                continue
+
             if job.attempts < job.max_attempts:
                 job.status = JobStatus.queued.value
                 job.worker_id = None
                 job.started_at = None
-                job.error = f"Requeued by reconciler (stale after {settings.gpcg_job_lease_timeout}s)"
+                job.error = f"Requeued by reconciler ({reason})"
                 flag_modified(job, "status")
                 priority = _priority_name(job.priority)
                 capabilities = job.required_capabilities or []
@@ -259,13 +315,13 @@ def reconcile_streams() -> int:
                 for stream in streams:
                     redis.xadd(stream, fields)
                 requeued += 1
-                log.info(f"reconciler: requeued stale job #{job.id}")
+                log.info(f"reconciler: requeued stale job #{job.id} ({reason})")
             else:
                 job.status = JobStatus.failed.value
-                job.error = f"Max attempts reached after stale timeout"
+                job.error = f"Max attempts reached ({reason})"
                 job.completed_at = datetime.now(timezone.utc)
                 flag_modified(job, "status")
-                log.warning(f"reconciler: marked job #{job.id} as failed (max attempts)")
+                log.warning(f"reconciler: marked job #{job.id} as failed (max attempts, {reason})")
 
     return requeued
 

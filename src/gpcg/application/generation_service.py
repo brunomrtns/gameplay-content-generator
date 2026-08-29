@@ -419,74 +419,77 @@ class GenerationService:
 
         # ── Stage: content_planning ─────────────────────────────────────────
         self._set_stage(job_id, JobStage.content_planning)
+        if self._has_checkpoint(job_id, "content_plan_id"):
+            log.info(f"job #{job_id}: content_planning checkpoint found — skipping")
         with self._session_scope() as session:
             job = session.get(Job, job_id)
-            planner = ContentPlanningService(llm=llm)
-            if is_curiosity:
-                bg_game = session.get(Game, bg_game_id)
-                if bg_game is None:
-                    raise GenerationError(
-                        f"background game #{bg_game_id} not found",
-                        JobStage.content_planning.value,
-                    )
-                # If the job came from the idea queue, force the KI
-                if queued_ki_id:
-                    plan = planner.plan_for_knowledge_item(
-                        session, queued_ki_id,
-                        background_game_id=bg_game_id,
-                        user_id=job.user_id,
-                        channel_context=cp_context_planning,
-                    )
+            if not job.content_plan_id:
+                planner = ContentPlanningService(llm=llm)
+                if is_curiosity:
+                    bg_game = session.get(Game, bg_game_id)
+                    if bg_game is None:
+                        raise GenerationError(
+                            f"background game #{bg_game_id} not found",
+                            JobStage.content_planning.value,
+                        )
+                    # If the job came from the idea queue, force the KI
+                    if queued_ki_id:
+                        plan = planner.plan_for_knowledge_item(
+                            session, queued_ki_id,
+                            background_game_id=bg_game_id,
+                            user_id=job.user_id,
+                            channel_context=cp_context_planning,
+                        )
+                    else:
+                        plan = planner.plan_for_general_curiosity(
+                            session, bg_game_id, fact_id=general_fact_id,
+                            user_id=job.user_id,
+                            channel_context=cp_context_planning,
+                        )
+                    if plan is None:
+                        raise GenerationError(
+                            f"no content plan could be created for curiosity short "
+                            "(need scored general facts — upload general documents and extract facts first)",
+                            JobStage.content_planning.value,
+                        )
                 else:
-                    plan = planner.plan_for_general_curiosity(
-                        session, bg_game_id, fact_id=general_fact_id,
-                        user_id=job.user_id,
-                        channel_context=cp_context_planning,
-                    )
-                if plan is None:
-                    raise GenerationError(
-                        f"no content plan could be created for curiosity short "
-                        "(need scored general facts — upload general documents and extract facts first)",
-                        JobStage.content_planning.value,
-                    )
-            else:
-                game = session.get(Game, job.game_id)
-                # If the job came from the idea queue with a game-specific KI,
-                # force the content planner to use that KI.
-                if queued_ki_id:
-                    plan = planner.plan_for_knowledge_item(
-                        session, queued_ki_id,
-                        background_game_id=None,
-                        user_id=job.user_id,
-                        channel_context=cp_context_planning,
-                    )
-                else:
-                    # Pass editorial fact_id if the editorial strategy picked one,
-                    # and recent topics to avoid repetition
-                    recent_topics = [
-                        r[0] for r in session.execute(
-                            select(ContentPlan.topic)
-                            .where(ContentPlan.user_id == job.user_id)
-                            .order_by(ContentPlan.created_at.desc())
-                            .limit(10)
-                        ).scalars().all() if r
-                    ]
-                    plan = planner.plan_for_game(
-                        session, job.game_id,
-                        fact_id=editorial_fact_id,
-                        avoid_topics=recent_topics,
-                        user_id=job.user_id,
-                        channel_context=cp_context_planning,
-                    )
-                if plan is None:
-                    raise GenerationError(
-                        f"no content plan could be created for '{game.canonical_name}' "
-                        "(need scored facts — upload documents and extract facts first)",
-                        JobStage.content_planning.value,
-                    )
-            job.content_plan_id = plan.id
-            job.artifacts = {**job.artifacts, "content_plan_id": plan.id}
-            session.flush()
+                    game = session.get(Game, job.game_id)
+                    # If the job came from the idea queue with a game-specific KI,
+                    # force the content planner to use that KI.
+                    if queued_ki_id:
+                        plan = planner.plan_for_knowledge_item(
+                            session, queued_ki_id,
+                            background_game_id=None,
+                            user_id=job.user_id,
+                            channel_context=cp_context_planning,
+                        )
+                    else:
+                        # Pass editorial fact_id if the editorial strategy picked one,
+                        # and recent topics to avoid repetition
+                        recent_topics = [
+                            r[0] for r in session.execute(
+                                select(ContentPlan.topic)
+                                .where(ContentPlan.user_id == job.user_id)
+                                .order_by(ContentPlan.created_at.desc())
+                                .limit(10)
+                            ).scalars().all() if r
+                        ]
+                        plan = planner.plan_for_game(
+                            session, job.game_id,
+                            fact_id=editorial_fact_id,
+                            avoid_topics=recent_topics,
+                            user_id=job.user_id,
+                            channel_context=cp_context_planning,
+                        )
+                    if plan is None:
+                        raise GenerationError(
+                            f"no content plan could be created for '{game.canonical_name}' "
+                            "(need scored facts — upload documents and extract facts first)",
+                            JobStage.content_planning.value,
+                        )
+                job.content_plan_id = plan.id
+                job.artifacts = {**job.artifacts, "content_plan_id": plan.id}
+                session.flush()
 
         # ── Stage: story_finding (V2 — transforms fact into story) ──────────
         story_concept: Optional[StoryConcept] = None
@@ -523,45 +526,48 @@ class GenerationService:
 
         # ── Stage: script ───────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.script)
-        with self._session_scope() as session:
-            job = session.get(Job, job_id)
+        if self._has_checkpoint(job_id, "script_id"):
+            log.info(f"job #{job_id}: script checkpoint found — skipping")
+        else:
+            with self._session_scope() as session:
+                job = session.get(Job, job_id)
 
-            # ── Channel context (per-channel personalization) ──
-            # The channel profile was loaded once at the start of the pipeline
-            # and its full prompt context is reused here (avoiding a second DB
-            # query). If the early load failed (e.g. profile created
-            # mid-pipeline), fall back to loading it now so the script stage
-            # still gets channel personalization.
-            # NOTE: File-upload knowledge base (RAG) retrieval has been removed.
-            # Channel knowledge is now managed via manual ideas (KnowledgeItem
-            # with source_type="manual"). Legacy Document/KnowledgeChunk data is
-            # preserved but no longer used.
-            user_id = job.artifacts.get("user_id") or job.user_id
-            if not channel_context and user_id:
-                try:
-                    from gpcg.core.models import ChannelProfile
-                    profile = session.query(ChannelProfile).filter(
-                        ChannelProfile.user_id == user_id
-                    ).first()
-                    if profile:
-                        channel_context = profile.to_prompt_context()
-                except Exception as e:
-                    log.warning(f"Failed to load channel profile for user {user_id}: {e}")
+                # ── Channel context (per-channel personalization) ──
+                # The channel profile was loaded once at the start of the pipeline
+                # and its full prompt context is reused here (avoiding a second DB
+                # query). If the early load failed (e.g. profile created
+                # mid-pipeline), fall back to loading it now so the script stage
+                # still gets channel personalization.
+                # NOTE: File-upload knowledge base (RAG) retrieval has been removed.
+                # Channel knowledge is now managed via manual ideas (KnowledgeItem
+                # with source_type="manual"). Legacy Document/KnowledgeChunk data is
+                # preserved but no longer used.
+                user_id = job.artifacts.get("user_id") or job.user_id
+                if not channel_context and user_id:
+                    try:
+                        from gpcg.core.models import ChannelProfile
+                        profile = session.query(ChannelProfile).filter(
+                            ChannelProfile.user_id == user_id
+                        ).first()
+                        if profile:
+                            channel_context = profile.to_prompt_context()
+                    except Exception as e:
+                        log.warning(f"Failed to load channel profile for user {user_id}: {e}")
 
-            svc = ScriptService(llm=llm)
-            script = svc.generate_script(
-                session, job.content_plan_id,
-                creative_material=creative_material,
-                creative_plan=creative_plan,
-                story_concept=story_concept,
-                channel_context=channel_context,
-                knowledge_context="",
-                user_id=job.user_id,
-            )
-            if script is None:
-                raise GenerationError("script generation failed", JobStage.script.value)
-            job.artifacts = {**job.artifacts, "script_id": script.id}
-            session.flush()
+                svc = ScriptService(llm=llm)
+                script = svc.generate_script(
+                    session, job.content_plan_id,
+                    creative_material=creative_material,
+                    creative_plan=creative_plan,
+                    story_concept=story_concept,
+                    channel_context=channel_context,
+                    knowledge_context="",
+                    user_id=job.user_id,
+                )
+                if script is None:
+                    raise GenerationError("script generation failed", JobStage.script.value)
+                job.artifacts = {**job.artifacts, "script_id": script.id}
+                session.flush()
 
         # ── Stage: humanization (V2 — break AI patterns, ensure orality) ────
         if self.settings.gpcg_humanization_enabled:
@@ -577,104 +583,110 @@ class GenerationService:
 
         # ── Stage: tts ──────────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.tts)
-        # Unload all Ollama models from VRAM before TTS — XTTS needs the full
-        # GPU memory. Ollama keeps models loaded for 5min after use by default,
-        # which would cause TTS to fail with OOM on GPUs with limited VRAM.
-        try:
-            get_llm().unload_all_models()
-        except Exception as e:
-            log.warning(f"could not unload Ollama models before TTS: {e}")
-        script_id = self._get_artifact(job_id, "script_id")
-        # Read voice override from job artifacts (absolute path to uploaded voice)
-        # NOTE: The voice_path sent by the VPS is an absolute path inside the
-        # VPS Docker container (e.g. /app/data/voices/user_2/bruno.wav). On the
-        # remote worker (local PC), that path does NOT exist. We resolve it
-        # locally by filename, checking the user's isolated dir first, then
-        # the shared dir, matching the VPS resolution logic.
-        voice_path = self._get_artifact(job_id, "voice_path")
-        if voice_path and not Path(voice_path).exists():
-            voice_filename = Path(voice_path).name
-            # Get user_id from job artifacts (fallback to job.user_id)
-            _job_user_id = self._get_artifact(job_id, "user_id")
-            if not _job_user_id:
-                with self._session_scope() as session:
-                    _job_user_id = session.get(Job, job_id).user_id
-            resolved = None
-            if _job_user_id:
-                user_voice = self.settings.voices_dir / f"user_{_job_user_id}" / voice_filename
-                if user_voice.exists():
-                    resolved = user_voice
-            if not resolved:
-                shared_voice = self.settings.voices_dir / voice_filename
-                if shared_voice.exists():
-                    resolved = shared_voice
-            if resolved:
-                log.info(f"voice_path resolved locally: {voice_path} → {resolved}")
-                voice_path = str(resolved)
-            else:
-                log.warning(
-                    f"voice_path {voice_path} not found locally "
-                    f"(checked user_{_job_user_id}/ and shared). "
-                    f"TTS will use video-generate default."
-                )
-                voice_path = ""  # let synthesize_tts use its own fallback
-        with self._session_scope() as session:
-            job = session.get(Job, job_id)
-            script = session.get(Script, script_id)
-            plan = session.get(ContentPlan, script.content_plan_id)
-
-            # REFACTORY_V2: diagnostic checks (warnings, not hard gates)
-            # 1. min_chars — log warning if script is very short
-            script_chars = len(script.final or "")
-            min_chars = self.settings.gpcg_script_min_chars
-            if script_chars < min_chars:
-                log.warning(
-                    f"job #{job_id}: script is {script_chars} chars "
-                    f"(below min_chars={min_chars}). This is a diagnostic "
-                    f"warning, not a gate — short scripts can be legitimate."
-                )
-            # 2. target_duration — estimate narration duration and warn if
-            # below target * (1 - tolerance). Average narration speed ~150 wpm.
-            target_dur = plan.target_duration or self.settings.gpcg_default_target_duration
-            tolerance = self.settings.gpcg_target_duration_tolerance
-            word_count = len((script.final or "").split())
-            estimated_dur = (word_count / 150.0) * 60.0  # 150 wpm → seconds
-            acceptable_dur = target_dur * (1.0 - tolerance)
-            if estimated_dur < acceptable_dur:
-                log.warning(
-                    f"job #{job_id}: estimated narration duration {estimated_dur:.1f}s "
-                    f"is below target {target_dur:.1f}s * (1 - {tolerance:.0%}) "
-                    f"= {acceptable_dur:.1f}s. Words={word_count}. "
-                    f"This is a diagnostic warning, not a gate."
-                )
-            # TTS output path
-            tts_dir = self.settings.jobs_dir / f"job_{job_id}"
-            tts_dir.mkdir(parents=True, exist_ok=True)
-            narration_wav = tts_dir / "narration.wav"
+        if self._has_checkpoint(job_id, "narration_wav", file_check=True):
+            log.info(f"job #{job_id}: tts checkpoint found (narration.wav exists) — skipping")
+        else:
+            # Unload all Ollama models from VRAM before TTS — XTTS needs the full
+            # GPU memory. Ollama keeps models loaded for 5min after use by default,
+            # which would cause TTS to fail with OOM on GPUs with limited VRAM.
             try:
-                tts_result = vg.synthesize_tts(
-                    script.final, narration_wav,
-                    voice_path=voice_path,
-                )
-            except VideoGenerateError as e:
-                raise GenerationError(f"TTS failed: {e}", JobStage.tts.value)
-            job.artifacts = {
-                **job.artifacts,
-                "narration_wav": str(narration_wav),
-                "narration_duration": tts_result.duration_sec,
-                "subtitle_mapping": tts_result.subtitle_mapping,
-            }
-            session.flush()
+                get_llm().unload_all_models()
+            except Exception as e:
+                log.warning(f"could not unload Ollama models before TTS: {e}")
+            script_id = self._get_artifact(job_id, "script_id")
+            # Read voice override from job artifacts (absolute path to uploaded voice)
+            # NOTE: The voice_path sent by the VPS is an absolute path inside the
+            # VPS Docker container (e.g. /app/data/voices/user_2/bruno.wav). On the
+            # remote worker (local PC), that path does NOT exist. We resolve it
+            # locally by filename, checking the user's isolated dir first, then
+            # the shared dir, matching the VPS resolution logic.
+            voice_path = self._get_artifact(job_id, "voice_path")
+            if voice_path and not Path(voice_path).exists():
+                voice_filename = Path(voice_path).name
+                # Get user_id from job artifacts (fallback to job.user_id)
+                _job_user_id = self._get_artifact(job_id, "user_id")
+                if not _job_user_id:
+                    with self._session_scope() as session:
+                        _job_user_id = session.get(Job, job_id).user_id
+                resolved = None
+                if _job_user_id:
+                    user_voice = self.settings.voices_dir / f"user_{_job_user_id}" / voice_filename
+                    if user_voice.exists():
+                        resolved = user_voice
+                if not resolved:
+                    shared_voice = self.settings.voices_dir / voice_filename
+                    if shared_voice.exists():
+                        resolved = shared_voice
+                if resolved:
+                    log.info(f"voice_path resolved locally: {voice_path} → {resolved}")
+                    voice_path = str(resolved)
+                else:
+                    log.warning(
+                        f"voice_path {voice_path} not found locally "
+                        f"(checked user_{_job_user_id}/ and shared). "
+                        f"TTS will use video-generate default."
+                    )
+                    voice_path = ""  # let synthesize_tts use its own fallback
+            with self._session_scope() as session:
+                job = session.get(Job, job_id)
+                script = session.get(Script, script_id)
+                plan = session.get(ContentPlan, script.content_plan_id)
+
+                # REFACTORY_V2: diagnostic checks (warnings, not hard gates)
+                # 1. min_chars — log warning if script is very short
+                script_chars = len(script.final or "")
+                min_chars = self.settings.gpcg_script_min_chars
+                if script_chars < min_chars:
+                    log.warning(
+                        f"job #{job_id}: script is {script_chars} chars "
+                        f"(below min_chars={min_chars}). This is a diagnostic "
+                        f"warning, not a gate — short scripts can be legitimate."
+                    )
+                # 2. target_duration — estimate narration duration and warn if
+                # below target * (1 - tolerance). Average narration speed ~150 wpm.
+                target_dur = plan.target_duration or self.settings.gpcg_default_target_duration
+                tolerance = self.settings.gpcg_target_duration_tolerance
+                word_count = len((script.final or "").split())
+                estimated_dur = (word_count / 150.0) * 60.0  # 150 wpm → seconds
+                acceptable_dur = target_dur * (1.0 - tolerance)
+                if estimated_dur < acceptable_dur:
+                    log.warning(
+                        f"job #{job_id}: estimated narration duration {estimated_dur:.1f}s "
+                        f"is below target {target_dur:.1f}s * (1 - {tolerance:.0%}) "
+                        f"= {acceptable_dur:.1f}s. Words={word_count}. "
+                        f"This is a diagnostic warning, not a gate."
+                    )
+                # TTS output path
+                tts_dir = self.settings.jobs_dir / f"job_{job_id}"
+                tts_dir.mkdir(parents=True, exist_ok=True)
+                narration_wav = tts_dir / "narration.wav"
+                try:
+                    tts_result = vg.synthesize_tts(
+                        script.final, narration_wav,
+                        voice_path=voice_path,
+                    )
+                except VideoGenerateError as e:
+                    raise GenerationError(f"TTS failed: {e}", JobStage.tts.value)
+                job.artifacts = {
+                    **job.artifacts,
+                    "narration_wav": str(narration_wav),
+                    "narration_duration": tts_result.duration_sec,
+                    "subtitle_mapping": tts_result.subtitle_mapping,
+                }
+                session.flush()
 
         # ── Stage: gameplay_selection / media_selection ───────────────────────
         self._set_stage(job_id, JobStage.gameplay_selection)
         narration_dur = self._get_artifact(job_id, "narration_duration")
         # Read scene_duration from job artifacts (or config default)
         scene_duration = self._get_artifact(job_id, "scene_duration") or self.settings.gpcg_scene_duration
+        _skip_selection = self._has_checkpoint(job_id, "selected_clips")
         with self._session_scope() as session:
             job = session.get(Job, job_id)
 
-            if job_domain == "kids":
+            if _skip_selection:
+                log.info(f"job #{job_id}: gameplay_selection checkpoint found — skipping")
+            elif job_domain == "kids":
                 # ── Kids: use KidsMediaRetriever (channel library) ───────────
                 from gpcg.application.kids_media_retriever import KidsMediaRetriever
                 kids_retriever = KidsMediaRetriever()
@@ -937,39 +949,42 @@ class GenerationService:
 
         # ── Stage: render ───────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.render)
-        with self._session_scope() as session:
-            job = session.get(Job, job_id)
-            plan = session.get(ContentPlan, job.content_plan_id)
-            script = session.get(Script, script_id)
-            # Use the request_data built by RenderPlanBuilder (contains
-            # _gpcg_custom_profile for custom formats + subtitle overrides)
-            request_data = rp.request_data
-            # Ensure narration path + music are up-to-date
-            request_data["audio_principal"] = str(self._get_artifact(job_id, "narration_wav"))
-            request_data["musica_fundo"] = music_path_str
-            # Pass transition overrides as top-level request_data fields
-            # (resolve_video_profile in video-generate applies these as overrides)
-            # REFACTORY_V2: fall back to config defaults if not in artifacts
-            # (previously video-generate applied its own internal defaults).
-            trans_type = self._get_artifact(job_id, "transition_type") or self.settings.gpcg_transition_type
-            trans_dur = self._get_artifact(job_id, "transition_duration") or self.settings.gpcg_transition_duration
-            if trans_type:
-                request_data["transition_type"] = trans_type
-            if trans_dur:
-                request_data["transition_duration"] = trans_dur
-            try:
-                render_result = vg.render_video(request_data)
-            except VideoGenerateError as e:
-                raise GenerationError(f"render failed: {e}", JobStage.render.value)
-            if not render_result.success:
-                raise GenerationError("render produced no output file", JobStage.render.value)
+        if self._has_checkpoint(job_id, "video_path", file_check=True):
+            log.info(f"job #{job_id}: render checkpoint found (video file exists) — skipping")
+        else:
+            with self._session_scope() as session:
+                job = session.get(Job, job_id)
+                plan = session.get(ContentPlan, job.content_plan_id)
+                script = session.get(Script, script_id)
+                # Use the request_data built by RenderPlanBuilder (contains
+                # _gpcg_custom_profile for custom formats + subtitle overrides)
+                request_data = rp.request_data
+                # Ensure narration path + music are up-to-date
+                request_data["audio_principal"] = str(self._get_artifact(job_id, "narration_wav"))
+                request_data["musica_fundo"] = music_path_str
+                # Pass transition overrides as top-level request_data fields
+                # (resolve_video_profile in video-generate applies these as overrides)
+                # REFACTORY_V2: fall back to config defaults if not in artifacts
+                # (previously video-generate applied its own internal defaults).
+                trans_type = self._get_artifact(job_id, "transition_type") or self.settings.gpcg_transition_type
+                trans_dur = self._get_artifact(job_id, "transition_duration") or self.settings.gpcg_transition_duration
+                if trans_type:
+                    request_data["transition_type"] = trans_type
+                if trans_dur:
+                    request_data["transition_duration"] = trans_dur
+                try:
+                    render_result = vg.render_video(request_data)
+                except VideoGenerateError as e:
+                    raise GenerationError(f"render failed: {e}", JobStage.render.value)
+                if not render_result.success:
+                    raise GenerationError("render produced no output file", JobStage.render.value)
 
-            # Copy to our videos dir
-            dest = self.settings.videos_dir / f"{render_result.batch_id}.mp4"
-            shutil.copy2(render_result.video_path, dest)
-            # Update artifacts using the SAME session (avoid nested session_scope → SQLite lock)
-            job.artifacts = {**job.artifacts, "video_path": str(dest)}
-            session.flush()
+                # Copy to our videos dir
+                dest = self.settings.videos_dir / f"{render_result.batch_id}.mp4"
+                shutil.copy2(render_result.video_path, dest)
+                # Update artifacts using the SAME session (avoid nested session_scope → SQLite lock)
+                job.artifacts = {**job.artifacts, "video_path": str(dest)}
+                session.flush()
 
         # ── Stage: qa ───────────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.qa)
@@ -1670,6 +1685,25 @@ class GenerationService:
         with self._session_scope() as session:
             job = session.get(Job, job_id)
             return job.artifacts.get(key)
+
+    def _has_checkpoint(self, job_id: int, key: str, file_check: bool = False) -> bool:
+        """Check if a stage's artifact already exists (checkpoint/resume).
+
+        If file_check=True, also verifies that the artifact value (a file path)
+        points to an existing file on disk. This is used for file-based
+        artifacts like narration_wav and video_path.
+        """
+        val = self._get_artifact(job_id, key)
+        if val is None:
+            return False
+        if file_check:
+            from pathlib import Path
+            p = Path(val)
+            if not p.exists():
+                log.info(f"checkpoint: {key}={val} but file missing — will re-run stage")
+                return False
+        log.info(f"checkpoint: {key} already present — skipping stage")
+        return True
 
     def _get_qa_score(self, job_id: int) -> float:
         with self._session_scope() as session:

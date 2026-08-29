@@ -7,6 +7,8 @@ by ``gpcg remote-worker``) and the standalone ``_heuristic_score`` helper.
 from __future__ import annotations
 
 import os
+import signal
+import sys
 
 
 def run_remote_worker(
@@ -28,6 +30,15 @@ def run_remote_worker(
         capabilities=(capabilities or os.environ.get("GPCG_WORKER_CAPABILITIES", "mapping,generation")).split(","),
     )
     worker = RemoteWorker(config)
+
+    # Graceful shutdown on SIGTERM (systemd) and SIGINT (Ctrl+C)
+    def _signal_handler(signum, frame):
+        worker.stop()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+
     worker.run()
 
 
