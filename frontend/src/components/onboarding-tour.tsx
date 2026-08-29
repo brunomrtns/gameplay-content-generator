@@ -4,10 +4,8 @@ import {
   X, ChevronRight, ChevronLeft, HelpCircle,
   Film, Settings, Lightbulb, Video, Check,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { toast } from "sonner";
 
 interface TourStep {
   route: string;
@@ -66,9 +64,7 @@ interface OnboardingTourProps {
 
 export function OnboardingTour({ open, onClose }: OnboardingTourProps) {
   const navigate = useNavigate();
-  const { updateUser } = useAuth();
   const [step, setStep] = useState(0);
-  const [closing, setClosing] = useState(false);
 
   const current = STEPS[step];
   const isLast = step === STEPS.length - 1;
@@ -87,22 +83,20 @@ export function OnboardingTour({ open, onClose }: OnboardingTourProps) {
     }
   }, [step, open, current, navigate]);
 
-  const handleClose = useCallback(async (completed: boolean) => {
-    setClosing(true);
-    try {
-      if (completed) {
-        await api.completeOnboarding();
-        updateUser({} as any); // trigger re-fetch via ProtectedRoute
-      }
-    } catch {
-      // non-critical
+  // Close immediately and fire the API call in the background.
+  // MUST call onClose() before any async work — onClose() sets
+  // userDismissed.current=true in the hook, which prevents the
+  // auto-reopen effect from re-triggering when user data refreshes.
+  // Previously, updateUser({}) replaced the user with an empty object
+  // (onboarding_completed=undefined → falsy), which triggered the
+  // auto-reopen race before userDismissed was set. That's why
+  // "Pular tutorial" and "Concluir" didn't close the modal.
+  const handleClose = useCallback((completed: boolean) => {
+    onClose();
+    if (completed) {
+      api.completeOnboarding().catch(() => {});
     }
-    setTimeout(() => {
-      setClosing(false);
-      setStep(0);
-      onClose();
-    }, 200);
-  }, [onClose, updateUser]);
+  }, [onClose]);
 
   const handleNext = () => {
     if (isLast) {
@@ -126,19 +120,13 @@ export function OnboardingTour({ open, onClose }: OnboardingTourProps) {
     <>
       {/* Overlay — semi-transparent, doesn't block clicks */}
       <div
-        className={cn(
-          "fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm transition-opacity duration-200",
-          closing ? "opacity-0" : "opacity-100"
-        )}
+        className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm"
         onClick={handleSkip}
       />
 
       {/* Tour card — centered, above overlay */}
       <div
-        className={cn(
-          "fixed left-1/2 top-1/2 z-[61] w-[min(520px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 transition-all duration-200",
-          closing ? "scale-95 opacity-0" : "scale-100 opacity-100"
-        )}
+        className="fixed left-1/2 top-1/2 z-[61] w-[min(520px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="glass-strong rounded-2xl border border-border shadow-2xl overflow-hidden">
