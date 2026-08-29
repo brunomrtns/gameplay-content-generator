@@ -1,10 +1,10 @@
-import { usePoll } from "@/hooks/usePoll";
+import { useLiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
 import { Card, Badge } from "@/components/ui";
 import { Cpu, HardDrive, Activity, Monitor, Server, CircleDot, AlertTriangle, Clock } from "lucide-react";
 
 export function WorkerStatusCard() {
-  const { data } = usePoll(() => api.listWorkers(), 5000);
+  const { data } = useLiveData(['workers'], () => api.listWorkers(), ['worker.status_changed']);
   const workers = data?.workers || [];
 
   // V3: Group workers by hostname to show machine/process distinction

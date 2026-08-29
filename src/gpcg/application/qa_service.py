@@ -221,4 +221,8 @@ def persist_qa_result(
         log.warning(f"thumbnail generation failed: {e}")
 
     session.flush()
+    from gpcg.infrastructure.events import publish_video_updated
+    publish_video_updated(
+        video.user_id, video.id, video.status, video.youtube_url or "",
+    )
     return video

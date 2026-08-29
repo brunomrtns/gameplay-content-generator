@@ -209,6 +209,7 @@ def trigger_enrichment(
         job_uuid=str(uuid.uuid4()),
         type=JobType.game_enrich.value,
         game_id=game_id,
+        user_id=game.user_id,
         status=JobStatus.queued.value,
         stage="enrichment",
         priority=JobPriority.normal.value,
@@ -217,7 +218,11 @@ def trigger_enrichment(
     db.add(job)
     db.commit()
     db.refresh(job)
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(job)
 
+    from gpcg.infrastructure.events import publish_game_enriched
+    publish_game_enriched(game.id, game.canonical_name)
     return {
         "message": f"Enrichment job created for game '{game.canonical_name}'",
         "job_id": job.id,

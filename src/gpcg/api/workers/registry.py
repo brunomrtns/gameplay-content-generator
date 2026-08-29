@@ -108,6 +108,11 @@ def heartbeat(
     if worker.status == WorkerStatus.offline.value:
         worker.status = WorkerStatus.online.value
     db.commit()
+    from gpcg.infrastructure.events import publish_worker_status_changed
+    publish_worker_status_changed(
+        worker.worker_id, worker.status, worker.current_activity or "",
+        worker.gpu_usage, worker.cpu_usage,
+    )
     return {"ok": True, "heartbeat_at": worker.last_heartbeat.isoformat()}
 
 
@@ -142,6 +147,11 @@ def update_status(
     if req.ram_usage is not None:
         worker.ram_usage = req.ram_usage
     db.commit()
+    from gpcg.infrastructure.events import publish_worker_status_changed
+    publish_worker_status_changed(
+        worker.worker_id, worker.status, worker.current_activity or "",
+        worker.gpu_usage, worker.cpu_usage,
+    )
     return {"ok": True}
 
 

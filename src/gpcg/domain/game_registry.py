@@ -243,6 +243,7 @@ def _maybe_trigger_enrichment(session: Session, game: Game) -> None:
             job_uuid=str(uuid.uuid4()),
             type=JobType.game_enrich.value,
             game_id=game.id,
+            user_id=game.user_id,
             status=JobStatus.queued.value,
             stage="enrichment",
             priority=JobPriority.normal.value,
@@ -250,6 +251,10 @@ def _maybe_trigger_enrichment(session: Session, game: Game) -> None:
         )
         session.add(job)
         session.flush()
+        from gpcg.infrastructure.job_queue import enqueue_job
+        enqueue_job(job)
+        from gpcg.infrastructure.events import publish_game_enriched
+        publish_game_enriched(game.id, game.canonical_name)
         log.info(f"Auto-triggered game_enrich job #{job.id} for '{game.canonical_name}'")
     except Exception as e:
         log.warning(f"Failed to auto-trigger enrichment for '{game.canonical_name}': {e}")

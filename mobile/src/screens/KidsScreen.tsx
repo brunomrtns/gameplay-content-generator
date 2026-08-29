@@ -13,6 +13,7 @@ import {
   Image,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLiveData } from '../hooks/useLiveData';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DocumentPicker from 'react-native-document-picker';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -105,11 +106,11 @@ function KidsMediaTab() {
   if (filterStatus) queryParams.status = filterStatus;
   queryParams.include_public = showPublic;
 
-  const { data: assets, refetch, isRefetching, isLoading } = useQuery({
-    queryKey: ['kids-assets', filterKind, filterStatus, showPublic],
-    queryFn: () => kidsApi.listLibraryAssets(queryParams),
-    refetchInterval: 10000,
-  });
+  const { data: assets, refetch, isRefetching, isLoading } = useLiveData(
+    ['kids-assets', filterKind, filterStatus, showPublic],
+    () => kidsApi.listLibraryAssets(queryParams),
+    ['gameplay.status_changed', 'job.status_changed']
+  );
 
   const ownAssets = (assets || []).filter((a: any) => a.is_own !== false);
   const publicAssets = (assets || []).filter((a: any) => a.is_own === false);

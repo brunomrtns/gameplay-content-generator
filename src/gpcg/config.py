@@ -332,6 +332,17 @@ class Settings(BaseSettings):
     # Stale jobs are requeued to `queued` (or `failed` if attempts >= max_attempts).
     # Must be longer than gpcg_worker_heartbeat_timeout to avoid false positives.
     gpcg_job_lease_timeout: int = 300
+
+    # ── Redis (events pub/sub, job queue streams, cache) ─────────────────────
+    # Redis URL. If empty or unreachable, all Redis features degrade gracefully:
+    #   - pub/sub becomes no-op (frontend falls back to staleTime polling)
+    #   - job queue falls back to SQLite polling (POST /api/jobs/claim)
+    #   - cache becomes no-op (computed on-demand)
+    redis_url: str = "redis://redis:6379/0"
+    # Stream max length for XADD (prevents unbounded growth).
+    redis_stream_maxlen: int = 10000
+    # Reconciler interval in seconds (re-hydrates streams from SQLite).
+    redis_reconciler_interval: int = 10
     # Colon-separated list of extra dirs to search for gameplay files locally.
     # Used by local_db_sync.py when resolving gameplay paths for generation jobs.
     # Example: "/data/gpcg/gameplays:/media/bruno/ToshibaHD/Captures"

@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useDomain } from "@/lib/domain-config";
-import { usePoll } from "@/hooks/usePoll";
+import { useLiveData } from "@/hooks/useLiveData";
 import { Badge, Button, Card, Spinner, EmptyState } from "@/components/ui";
 import { WorkerStatusCard } from "@/components/worker-status";
 import { fmtDate, fmtDuration } from "@/lib/utils";
@@ -43,7 +43,7 @@ const VIDEO_STATUS_CONFIG: Record<
 export function DashboardPage() {
   const navigate = useNavigate();
   const { config } = useDomain();
-  const { data: dash, loading, refetch } = usePoll(() => api.getDashboard(), 10000);
+  const { data: dash, isLoading, refetch } = useLiveData(['dashboard'], () => api.getDashboard(), ['job.status_changed', 'video.created', 'automation.status_changed']);
   const [toggling, setToggling] = useState(false);
   const [playing, setPlaying] = useState<any | null>(null);
   const [publishing, setPublishing] = useState<number | null>(null);
@@ -95,7 +95,7 @@ export function DashboardPage() {
     [refetch]
   );
 
-  if (loading && !dash) {
+  if (isLoading && !dash) {
     return (
       <div className="flex items-center justify-center py-32">
         <Spinner className="h-8 w-8" />

@@ -14,6 +14,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLiveData } from '../hooks/useLiveData';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Video from 'react-native-video';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -65,11 +66,11 @@ export function VideosScreen() {
     if (playing) { setPlaying(null); return; }
   }, !!playing || !!publishVideo || !!editVideo);
 
-  const { data: videos, refetch, isRefetching, isLoading } = useQuery({
-    queryKey: ['videos', search],
-    queryFn: () => videosApi.list(search || undefined),
-    refetchInterval: 10000,
-  });
+  const { data: videos, refetch, isRefetching, isLoading } = useLiveData(
+    ['videos', search],
+    () => videosApi.list(search || undefined),
+    ['video.created', 'video.updated']
+  );
 
   const handleDelete = useCallback((video: any) => {
     Alert.alert(

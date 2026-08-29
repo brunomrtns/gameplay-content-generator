@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
-import { usePoll } from "@/hooks/usePoll";
+import { useLiveData } from "@/hooks/useLiveData";
 import { Badge, Button, Card, Spinner, EmptyState } from "@/components/ui";
 import { toast } from "sonner";
 import { useUploadStore, type UploadItem } from "@/lib/upload-store";
@@ -90,7 +90,7 @@ function MediaLibrarySection() {
   const params: any = { include_public: true };
   if (filterKind) params.media_kind = filterKind;
   if (filterStatus) params.status = filterStatus;
-  const { data, loading, refetch } = usePoll(() => api.listKidsLibraryAssets(params), 5000);
+  const { data, isLoading, refetch } = useLiveData(['kids-assets', filterKind, filterStatus], () => api.listKidsLibraryAssets(params), ['gameplay.status_changed', 'job.status_changed']);
 
   // Separate own vs public (same pattern as content.tsx)
   const allAssets = data?.assets || [];
@@ -302,7 +302,7 @@ function MediaLibrarySection() {
         <h2 className="mb-4 text-lg font-semibold">
           Mídias {assets && `(${assets.length})`}
         </h2>
-        {loading && !data ? (
+        {isLoading && !data ? (
           <div className="flex justify-center py-12">
             <Spinner className="h-6 w-6" />
           </div>

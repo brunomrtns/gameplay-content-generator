@@ -24,6 +24,7 @@ from gpcg.core.models import (
     JobType,
     JobPriority,
     User,
+    WorkerCapability,
 )
 from gpcg.domains.kids.models import (
     KidsTopic,
@@ -366,6 +367,7 @@ async def upload_library_asset(
         domain=ContentDomain.kids.value,
         status=JobStatus.queued.value,
         priority=JobPriority.normal.value,
+        required_capabilities=[WorkerCapability.mapping.value],
         artifacts={
             "asset_id": asset.id,
             "topic_id": topic_id,
@@ -378,7 +380,11 @@ async def upload_library_asset(
     db.commit()
     db.refresh(asset)
     db.refresh(job)
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(job)
 
+    from gpcg.infrastructure.events import publish_job_created
+    publish_job_created(user.id, job.id, job.type, job.priority)
     log.info(
         f"Uploaded Kids video asset #{asset.id} to library: {filename} "
         f"→ processing job #{job.id} queued"
@@ -767,11 +773,16 @@ def create_kids_mapping_job(
         domain=ContentDomain.kids.value,
         user_id=user.id,
         priority=JobPriority.normal.value,
+        required_capabilities=[WorkerCapability.mapping.value],
         artifacts={"asset_id": asset.id, "remap": True},
     )
     db.add(job)
     db.flush()
     db.commit()
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(job)
+    from gpcg.infrastructure.events import publish_job_created
+    publish_job_created(user.id, job.id, job.type, job.priority)
     log.info(f"Created mapping job #{job.id} for kids asset #{asset_id}")
     return {
         "job_id": job.id,

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
-import { usePoll } from "@/hooks/usePoll";
+import { useLiveData } from "@/hooks/useLiveData";
 import { Badge, Card, Spinner, EmptyState } from "@/components/ui";
 import { fmtDate } from "@/lib/utils";
 import {
@@ -53,7 +53,7 @@ const STAGE_LABELS: Record<string, string> = {
 
 export function JobsPage() {
   const [filter, setFilter] = useState<string>("");
-  const { data: jobs, loading } = usePoll(() => api.listJobs(), 5000);
+  const { data: jobs, isLoading } = useLiveData(['jobs'], () => api.listJobs(), ['job.status_changed', 'job.created']);
 
   const filtered = filter
     ? (jobs || []).filter((j: any) => j.status === filter)
@@ -86,7 +86,7 @@ export function JobsPage() {
       </div>
 
       {/* Jobs list */}
-      {loading && !jobs ? (
+      {isLoading && !jobs ? (
         <div className="flex justify-center py-16"><Spinner className="h-8 w-8" /></div>
       ) : !filtered || filtered.length === 0 ? (
         <Card>

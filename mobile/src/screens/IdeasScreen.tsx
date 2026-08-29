@@ -13,6 +13,7 @@ import {
   Linking,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLiveData } from '../hooks/useLiveData';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { knowledgeApi, catalogApi } from '../api/endpoints';
@@ -142,22 +143,22 @@ export function IdeasScreen() {
     queryFn: knowledgeApi.stats,
   });
 
-  const { data: queueData, refetch: refetchQueue } = useQuery({
-    queryKey: ['idea-queue'],
-    queryFn: knowledgeApi.getQueue,
-    refetchInterval: 15000,
-  });
+  const { data: queueData, refetch: refetchQueue } = useLiveData(
+    ['idea-queue'],
+    knowledgeApi.getQueue,
+    ['idea_queue.updated']
+  );
 
   const { data: availabilityData } = useQuery({
     queryKey: ['gameplay-availability'],
     queryFn: knowledgeApi.getGameplayAvailability,
   });
 
-  const { data: currentJobData } = useQuery({
-    queryKey: ['current-job'],
-    queryFn: knowledgeApi.getCurrentJob,
-    refetchInterval: (data: any) => (data?.job ? 10000 : false),
-  });
+  const { data: currentJobData } = useLiveData(
+    ['current-job'],
+    knowledgeApi.getCurrentJob,
+    ['job.status_changed']
+  );
 
   const { data: focusData } = useQuery({
     queryKey: ['collection-focus'],

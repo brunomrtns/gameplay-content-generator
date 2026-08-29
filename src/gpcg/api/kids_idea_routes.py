@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from gpcg.core.models import ChannelProfile, ContentDomain, User
+from gpcg.core.models import ChannelProfile, ContentDomain, User, WorkerCapability
 from gpcg.domains.kids.models import (
     KidsIdea,
     KidsIdeaSource,
@@ -275,6 +275,7 @@ def discover_kids_ideas(
         domain=ContentDomain.kids.value,
         user_id=user.id,
         priority=JobPriority.normal.value,
+        required_capabilities=[WorkerCapability.content_intelligence.value],
         artifacts={
             "categories": req.categories,
             "ideas_per_category": min(req.ideas_per_category, 10),
@@ -285,7 +286,11 @@ def discover_kids_ideas(
     db.add(job)
     db.commit()
     db.refresh(job)
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(job)
 
+    from gpcg.infrastructure.events import publish_job_created
+    publish_job_created(user.id, job.id, job.type, job.priority)
     log.info(f"Created kids_idea_discovery job #{job.id} for user {user.id}")
     return {
         "job_id": job.id,
@@ -405,6 +410,7 @@ def score_kids_idea(
         domain=ContentDomain.kids.value,
         user_id=user.id,
         priority=JobPriority.normal.value,
+        required_capabilities=[WorkerCapability.content_intelligence.value],
         artifacts={
             "idea_id": idea_id,
         },
@@ -412,7 +418,11 @@ def score_kids_idea(
     db.add(job)
     db.commit()
     db.refresh(job)
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(job)
 
+    from gpcg.infrastructure.events import publish_job_created
+    publish_job_created(user.id, job.id, job.type, job.priority)
     log.info(f"Created kids_idea_score job #{job.id} for idea #{idea_id}")
     return {
         "job_id": job.id,
@@ -537,11 +547,17 @@ def produce_kids_idea(
         domain=ContentDomain.kids.value,
         status=JobStatus.queued.value,
         priority=JobPriority.normal.value,
+        required_capabilities=[WorkerCapability.generation.value],
         artifacts=artifacts,
     )
     db.add(job)
     db.commit()
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(job)
 
+    from gpcg.infrastructure.events import publish_job_created, publish_kids_idea_updated
+    publish_job_created(user.id, job.id, job.type, job.priority)
+    publish_kids_idea_updated(user.id, idea.id, idea.status)
     log.info(
         f"Kids produce: idea #{idea_id} → topic #{topic_id} → job #{job.id}"
     )

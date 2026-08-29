@@ -279,7 +279,7 @@ log "Step 1/7: Sincronizando código para VPS..."
 
 vps "mkdir -p $VPS_PATH"
 
-RSYNC_EXCLUDES="--exclude=node_modules --exclude=.venv --exclude=__pycache__ --exclude=.git --exclude=data --exclude=.env --exclude=*.pyc --exclude=.pytest_cache --exclude=.devin --exclude=.claude --exclude='*.log'"
+RSYNC_EXCLUDES="--exclude=node_modules --exclude=.venv --exclude=__pycache__ --exclude=.git --exclude=data --exclude=.env --exclude=*.pyc --exclude=.pytest_cache --exclude=.devin --exclude=.claude --exclude='*.log' --exclude=mobile/android/build --exclude=mobile/android/.gradle --exclude=mobile/android/app/build --exclude=mobile/.expo --exclude=mobile/ios/build --exclude=mobile/ios/Pods --exclude=frontend/dist"
 
 if command -v rsync &>/dev/null; then
   my-vps --no-lock --rsync "$PROJECT_ROOT/" "$VPS_PATH/" --rsync-args "$RSYNC_EXCLUDES" 2>&1 || {
@@ -490,6 +490,26 @@ location_block = """    # ── GPCG (Gameplay Content Generator) ────�
         proxy_buffering    on;
         proxy_cache_valid  200 24h;
     }
+    # SSE endpoint — needs special settings for long-lived connections
+    # send_timeout 0 is OBLIGATORY: global send_timeout is 10s and would kill SSE
+    location = /gpcg/api/events/stream {
+        limit_req zone=api_limit burst=50 nodelay;
+        rewrite ^/gpcg/(.*)$ /$1 break;
+        proxy_pass         http://gpcg_api;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        send_timeout       0;
+        proxy_connect_timeout 60s;
+        add_header X-Accel-Buffering no always;
+    }
     # All other GPCG API routes
     location /gpcg/ {
         limit_req zone=api_limit burst=30 nodelay;
@@ -634,6 +654,14 @@ if [[ "$CATALOG_HEALTH" == "healthy" || "$CATALOG_HEALTH" == "starting" ]]; then
   ok "Catalog container: $CATALOG_HEALTH"
 else
   err "Catalog container: $CATALOG_HEALTH"
+fi
+
+log "  Verificando Redis..."
+REDIS_HEALTH=$(vps "docker inspect --format='{{.State.Health.Status}}' gpcg-redis 2>/dev/null || echo 'starting'")
+if [[ "$REDIS_HEALTH" == "healthy" || "$REDIS_HEALTH" == "starting" ]]; then
+  ok "Redis container: $REDIS_HEALTH"
+else
+  warn "Redis container: $REDIS_HEALTH (API funcionará em modo fallback sem Redis)"
 fi
 
 # ── Step 8: Versionamento + commit + tag + push ──────────────────────────────

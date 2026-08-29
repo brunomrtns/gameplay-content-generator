@@ -241,7 +241,11 @@ def trigger_content_collection(
     db.add(job)
     db.commit()
     db.refresh(job)
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(job)
 
+    from gpcg.infrastructure.events import publish_job_created
+    publish_job_created(user.id, job.id, job.type, job.priority)
     return {
         "message": "Content collection job created",
         "job_id": job.id,

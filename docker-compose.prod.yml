@@ -7,6 +7,7 @@
 # Services:
 #   api     — GPCG API + frontend (port 8787) — Control Plane only
 #   catalog — Game Catalog Service (IGDB sync + query API, port 8788)
+#   redis   — Redis 7 (events pub/sub, job queue streams, cache)
 #
 # No worker on VPS — heavy processing (VLM, ASR, video-generate, Ollama)
 # runs on the local GPU PC via `gpcg remote-worker` (Compute Plane).
@@ -20,6 +21,36 @@
 # =============================================================================
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: gpcg-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - gpcg-redis-data:/data
+    networks:
+      - trivestia-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   api:
     build:
       context: .
@@ -33,6 +64,7 @@ services:
       GPCG_HOST: 0.0.0.0
       GPCG_PORT: 8787
       BI_IDENTITY_URL: http://bi-api:3300
+      REDIS_URL: redis://redis:6379/0
       # ── Editorial Intelligence V2 ────────────────────────────────────────
       GPCG_EDITORIAL_BRIEF_ENABLED: "true"
       GPCG_COMPOSITE_SCORING_ENABLED: "true"
@@ -46,6 +78,9 @@ services:
     networks:
       - trivestia-net
       - bi-net
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://127.0.0.1:8787/api/health').raise_for_status()"]
       interval: 30s
@@ -79,6 +114,9 @@ services:
     command: ["gpcg", "catalog"]
     expose:
       - "8788"
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://127.0.0.1:8788/health').raise_for_status()"]
       interval: 30s
@@ -106,3 +144,4 @@ volumes:
   gpcg-data:
     external: true
     name: gpcg_gpcg-data
+  gpcg-redis-data:

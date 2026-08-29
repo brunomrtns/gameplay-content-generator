@@ -55,6 +55,7 @@ from gpcg.core.models import (
     ChannelProfileEmbedding,
     EditorialSignal,
     Document,
+    WorkerCapability,
 )
 from gpcg.logging import get_logger
 
@@ -318,6 +319,8 @@ def reset_channel_domain(
     session.add(user_storage_cleanup)
     summary["cleanup_jobs_created"] += 1
     session.flush()
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(user_storage_cleanup)
 
     # ── 10. Pause automation ───────────────────────────────────────────────
     from gpcg.core.models import Automation
@@ -372,6 +375,7 @@ def _delete_games_domain_data(session: Session, user_id: int) -> dict[str, Any]:
     ).all()
 
     # Create cleanup jobs for each source so workers delete physical files
+    from gpcg.infrastructure.job_queue import enqueue_job
     for source in sources:
         cleanup_job = Job(
             job_uuid=str(_uuid.uuid4()),
@@ -380,11 +384,13 @@ def _delete_games_domain_data(session: Session, user_id: int) -> dict[str, Any]:
             gameplay_source_id=source.id,
             status=JobStatus.queued.value,
             priority=JobPriority.high.value,
+            required_capabilities=[WorkerCapability.mapping.value],
             artifacts={"source_id": source.id, "filename": source.filename},
         )
         session.add(cleanup_job)
         result["cleanup_jobs_created"] += 1
-    session.flush()
+        session.flush()
+        enqueue_job(cleanup_job)
 
     # Delete gameplay-related data (order matters for FK constraints)
     source_ids = [s.id for s in sources]

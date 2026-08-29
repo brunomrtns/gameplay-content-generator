@@ -42,13 +42,14 @@ def _validate_bi_user(request: Request) -> Optional[dict]:
 
     Returns the BI user object dict if valid, None otherwise.
     Caches the result on the request state to avoid duplicate calls.
+    Also caches in Redis (TTL 10s) to reduce calls to BI Identity.
 
     Sends BOTH bi_auth (access token, 15min) and bi_refresh (refresh token,
     7d) cookies so the Identity Service can transparently refresh expired
     access tokens server-side. Without bi_refresh, the backend gets 401
     every 15 minutes and forces a frontend roundtrip for refresh.
     """
-    # Return cached result if available
+    # Return cached result if available (request-scoped)
     cached = getattr(request.state, _BI_USER_KEY, None)
     if cached is not None:
         return cached
@@ -56,6 +57,16 @@ def _validate_bi_user(request: Request) -> Optional[dict]:
     bi_auth = request.cookies.get("bi_auth")
     if not bi_auth:
         return None
+
+    # Try Redis cache (TTL 10s — short window to limit revocation risk)
+    import hashlib
+    from gpcg.infrastructure.cache import cache_get, cache_set
+    cache_key_hash = hashlib.sha256(bi_auth.encode()).hexdigest()[:16]
+    cache_key = f"auth:{cache_key_hash}"
+    redis_cached = cache_get(cache_key)
+    if redis_cached is not None:
+        setattr(request.state, _BI_USER_KEY, redis_cached)
+        return redis_cached
 
     # Also forward bi_refresh so BI Identity can refresh expired access tokens
     bi_refresh = request.cookies.get("bi_refresh")
@@ -87,6 +98,8 @@ def _validate_bi_user(request: Request) -> Optional[dict]:
 
     # Cache on request state
     setattr(request.state, _BI_USER_KEY, bi_user)
+    # Cache in Redis (TTL 10s — short window for security)
+    cache_set(cache_key, bi_user, ttl=10)
     return bi_user
 
 

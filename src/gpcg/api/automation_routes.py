@@ -286,6 +286,8 @@ def start_automation(
         a.status = "running"
         session.flush()
 
+    from gpcg.infrastructure.events import publish_automation_status_changed
+    publish_automation_status_changed(user.id, auto.id, "running")
     return {"status": "running"}
 
 
@@ -306,6 +308,8 @@ def pause_automation(
         a.status = "paused"
         session.flush()
 
+    from gpcg.infrastructure.events import publish_automation_status_changed
+    publish_automation_status_changed(user.id, auto.id, "paused")
     return {"status": "paused"}
 
 
@@ -715,6 +719,8 @@ def trigger_content_collection_worker(
     db.add(job)
     db.commit()
     db.refresh(job)
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(job)
 
     log.info(f"Auto content collection: created job #{job.id} for user {auto.user_id}")
     return {"job_id": job.id, "message": "Content collection job created"}

@@ -266,6 +266,8 @@ class KidsAutomationStrategy:
             flag_modified(auto, "config")
 
             session.commit()
+            from gpcg.infrastructure.job_queue import enqueue_job
+            enqueue_job(job)
             log.info(
                 f"kids_automation: created job #{job_id} for user {user_id} "
                 f"from idea #{idea.id} → topic #{topic.id}"

@@ -111,6 +111,12 @@ class JobClaimRequest(BaseModel):
     )
 
 
+class ClaimByIdRequest(BaseModel):
+    """Request to claim a specific job by ID (used with Redis Streams)."""
+    job_id: int = Field(..., description="Job ID to claim")
+    worker_id: str = Field(..., description="Worker claiming the job")
+
+
 class JobStatusUpdateRequest(BaseModel):
     status: str = Field(..., description="running | completed | failed | retrying")
     stage: str = Field("", description="Current pipeline stage")

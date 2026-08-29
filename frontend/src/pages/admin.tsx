@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
-import { usePoll } from "@/hooks/usePoll";
+import { useLiveData } from "@/hooks/useLiveData";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 import { Badge, Button, Card, EmptyState, Spinner } from "@/components/ui";
 import { fmtDate } from "@/lib/utils";
@@ -14,7 +15,8 @@ import {
 
 export function AdminPage() {
   const { user: currentUser } = useAuth();
-  const { data: users, setData, loading } = usePoll(() => api.listUsers(), 10000);
+  const queryClient = useQueryClient();
+  const { data: users, isLoading } = useLiveData(['users'], () => api.listUsers(), []);
 
   if (!currentUser?.is_admin) {
     return (
@@ -33,7 +35,7 @@ export function AdminPage() {
       await api.updateUser(u.id, { is_active: !u.is_active });
       toast.success(u.is_active ? "Usuário desativado" : "Usuário ativado");
       const updated = await api.listUsers();
-      setData(updated);
+      queryClient.setQueryData(['users'], updated);
     } catch (err: any) {
       toast.error(err.message);
     }
@@ -49,7 +51,7 @@ export function AdminPage() {
       await api.deleteUser(u.id);
       toast.success("Usuário excluído");
       const updated = await api.listUsers();
-      setData(updated);
+      queryClient.setQueryData(['users'], updated);
     } catch (err: any) {
       toast.error(err.message);
     }
@@ -83,7 +85,7 @@ export function AdminPage() {
         <h2 className="mb-4 text-lg font-semibold">
           Usuários {users && `(${users.length})`}
         </h2>
-        {loading && !users ? (
+        {isLoading && !users ? (
           <div className="flex justify-center py-16"><Spinner className="h-8 w-8" /></div>
         ) : !users || users.length === 0 ? (
           <Card><EmptyState title="Nenhum usuário" /></Card>

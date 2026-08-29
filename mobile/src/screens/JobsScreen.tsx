@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
+import { useLiveData } from '../hooks/useLiveData';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { jobsApi } from '../api/endpoints';
@@ -72,11 +73,11 @@ const STATUS_VARIANT: Record<string, any> = {
 export function JobsScreen({ navigation }: { navigation?: any }) {
   const [filter, setFilter] = useState('');
 
-  const { data: jobs, refetch, isRefetching, isLoading } = useQuery({
-    queryKey: ['jobs', filter],
-    queryFn: () => jobsApi.list(filter || undefined),
-    refetchInterval: 5000,
-  });
+  const { data: jobs, refetch, isRefetching, isLoading } = useLiveData(
+    ['jobs', filter],
+    () => jobsApi.list(filter || undefined),
+    ['job.status_changed', 'job.created']
+  );
 
   const counts = {
     queued: (jobs || []).filter((j: any) => j.status === 'queued').length,

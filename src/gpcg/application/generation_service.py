@@ -63,6 +63,7 @@ from gpcg.core.models import (
     Script,
     Video,
     VideoStatus,
+    WorkerCapability,
 )
 from gpcg.domains.games.models import Game
 from gpcg.infrastructure.database import session_scope as _global_session_scope
@@ -231,12 +232,15 @@ class GenerationService:
                 stage=JobStage.content_planning.value,
                 progress=0.0,
                 max_attempts=self.settings.gpcg_max_repair_retries + 1,
+                required_capabilities=[WorkerCapability.generation.value],
                 artifacts=artifacts,
             )
             session.add(job)
             session.flush()
             log.info(f"created job #{job.id} (uuid={job.job_uuid}) for game '{game.canonical_name}'")
             session.refresh(job)
+            from gpcg.infrastructure.job_queue import enqueue_job
+            enqueue_job(job)
             return job
 
     def create_curiosity_job(
@@ -331,6 +335,7 @@ class GenerationService:
                 stage=JobStage.content_planning.value,
                 progress=0.0,
                 max_attempts=self.settings.gpcg_max_repair_retries + 1,
+                required_capabilities=[WorkerCapability.generation.value],
                 artifacts=artifacts,
             )
             session.add(job)
@@ -340,6 +345,8 @@ class GenerationService:
                 f"bg='{bg_game.canonical_name}' fact_id={fact_id}"
             )
             session.refresh(job)
+            from gpcg.infrastructure.job_queue import enqueue_job
+            enqueue_job(job)
             return job
 
     def run_job(self, job_id: int) -> bool:
@@ -1646,6 +1653,11 @@ class GenerationService:
             progress_pct = idx / len(stage_order)
             job.progress = progress_pct * 100
             session.flush()
+            _job = job
+        from gpcg.infrastructure.events import publish_job_status_changed
+        publish_job_status_changed(
+            _job.user_id, _job.id, _job.status, _job.stage, _job.progress, _job.type,
+        )
         log.info(f"job #{job_id} → stage={stage.value}")
         # Report progress to VPS (worker mode) so the UI updates in real-time
         if self._progress_callback:

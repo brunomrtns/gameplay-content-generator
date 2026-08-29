@@ -31,6 +31,7 @@ from gpcg.domains.games.models import (
 from gpcg.infrastructure.database import get_db, session_scope
 
 from gpcg.api.workers._common import (
+    ClaimByIdRequest,
     JobClaimRequest,
     JobResultRequest,
     JobStatusUpdateRequest,
@@ -154,6 +155,52 @@ def claim_job(
 
     db.commit()
     return {"job": None}
+
+
+@router.post("/jobs/claim-by-id")
+def claim_job_by_id(
+    req: ClaimByIdRequest,
+    db: Session = Depends(get_db),
+):
+    """Claim a specific job by ID (used with Redis Streams).
+
+    The worker gets a job_id from Redis XREADGROUP, then calls this endpoint
+    to atomically claim it in SQLite. If the job was already claimed by
+    another worker (race condition), returns 409.
+    """
+    job = db.query(Job).filter(Job.id == req.job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Atomic conditional claim: only if status is still 'queued'
+    result = db.execute(text(
+        "UPDATE jobs SET status = :running, worker_id = :wid, "
+        "started_at = :now, attempts = attempts + 1 "
+        "WHERE id = :jid AND status = :queued"
+    ), {
+        "running": JobStatus.running.value,
+        "wid": req.worker_id,
+        "now": _utcnow(),
+        "jid": req.job_id,
+        "queued": JobStatus.queued.value,
+    })
+    if result.rowcount == 0:
+        # Job was already claimed or is no longer queued
+        raise HTTPException(status_code=409, detail="Job already claimed")
+
+    db.flush()
+    db.refresh(job)
+    db.commit()
+    log.info(
+        f"Job #{job.id} claimed by-id by worker '{req.worker_id}' "
+        f"(type={job.type})"
+    )
+    return {
+        "job": _serialize_job(job),
+        "gameplay_source": _serialize_gameplay_source_for_job(job, db),
+        "document": _serialize_document_for_job(job, db),
+        "game": _serialize_game_for_job(job, db),
+    }
 
 
 def _serialize_job(job: Job) -> dict:
@@ -337,6 +384,27 @@ def update_job_status(
                 source.processing_status = GameplayProcessingStatus.failed.value
 
     db.commit()
+
+    # Publish event (Redis pub/sub — no-op if Redis is down)
+    from gpcg.infrastructure.events import publish_job_status_changed, publish_gameplay_status_changed
+    publish_job_status_changed(
+        user_id=job.user_id,
+        job_id=job.id,
+        status=job.status,
+        stage=job.stage or "",
+        progress=job.progress,
+        job_type=job.type,
+    )
+    if job.gameplay_source_id and job.type == JobType.mapping.value:
+        source = db.query(GameplaySource).filter(GameplaySource.id == job.gameplay_source_id).first()
+        if source:
+            publish_gameplay_status_changed(
+                user_id=source.user_id,
+                source_id=source.id,
+                processing_status=source.processing_status or "",
+                filename=source.filename or "",
+            )
+
     return {"ok": True}
 
 
@@ -376,6 +444,12 @@ def submit_job_result(
             status_code=409,
             detail="Job has been cancelled. Result rejected.",
         )
+
+    # ── Idempotency guard: ignore duplicate results for already-completed jobs ─
+    # (prevents duplication if XAUTOCLAIM reprocesses a job after worker crash)
+    if job.status == JobStatus.completed.value:
+        log.info(f"Job #{job.id} result ignored: already completed (duplicate)")
+        return {"ok": True, "job_id": job.id, "status": "completed", "message": "Already completed"}
 
     # ── Domain guard: reject results from jobs belonging to a previous domain ─
     if job.user_id:
@@ -461,8 +535,14 @@ def submit_job_result(
 
         # Remember to auto-publish after commit (outside the transaction)
         _pending_auto_publish = (vdata.get("storage_key") and not vdata.get("youtube_url"))
+        _pending_video = {
+            "id": video.id,
+            "title": video.title or "",
+            "status": video.status or "",
+        }
     else:
         _pending_auto_publish = False
+        _pending_video = None
 
     # Update gameplay source status for mapping jobs
     if job.gameplay_source_id and job.type == JobType.mapping.value:
@@ -522,6 +602,8 @@ def submit_job_result(
             f"{job.attempts}/{job.max_attempts}): {req.error}"
         )
         db.commit()
+        from gpcg.infrastructure.job_queue import enqueue_job
+        enqueue_job(job)
         return {
             "ok": True,
             "job_id": job.id,
@@ -531,6 +613,38 @@ def submit_job_result(
 
     db.commit()
     log.info(f"Job #{job.id} result: {req.status}")
+
+    # Publish events (Redis pub/sub — no-op if Redis is down)
+    from gpcg.infrastructure.events import (
+        publish_job_status_changed,
+        publish_video_created,
+        publish_video_updated,
+        publish_gameplay_status_changed,
+    )
+    publish_job_status_changed(
+        user_id=job.user_id,
+        job_id=job.id,
+        status=job.status,
+        stage=job.stage or "",
+        progress=job.progress,
+        job_type=job.type,
+    )
+    if _pending_video:
+        publish_video_created(
+            user_id=job.user_id,
+            video_id=_pending_video.get("id"),
+            title=_pending_video.get("title", ""),
+            status=_pending_video.get("status", ""),
+        )
+    if job.gameplay_source_id and job.type == JobType.mapping.value:
+        source = db.query(GameplaySource).filter(GameplaySource.id == job.gameplay_source_id).first()
+        if source:
+            publish_gameplay_status_changed(
+                user_id=source.user_id,
+                source_id=source.id,
+                processing_status=source.processing_status or "",
+                filename=source.filename or "",
+            )
 
     # Auto-publish OUTSIDE the request transaction to avoid DB lock.
     # Uses a fresh session so the (potentially slow) YouTube upload doesn't

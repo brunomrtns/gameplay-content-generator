@@ -12,6 +12,7 @@ import {
   Modal,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLiveData } from '../hooks/useLiveData';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DocumentPicker from 'react-native-document-picker';
 import { gameplaysApi, channelApi, catalogApi } from '../api/endpoints';
@@ -74,11 +75,11 @@ function MediaTab() {
   const [scanning, setScanning] = useState(false);
   const [searchModal, setSearchModal] = useState<number | null>(null);
 
-  const { data: allSources, refetch, isRefetching, isLoading, error } = useQuery({
-    queryKey: ['gameplays'],
-    queryFn: () => gameplaysApi.list(true),
-    refetchInterval: 5000,
-  });
+  const { data: allSources, refetch, isRefetching, isLoading, error } = useLiveData(
+    ['gameplays'],
+    () => gameplaysApi.list(true),
+    ['gameplay.status_changed', 'job.created']
+  );
 
   const sources = (allSources || []).filter((s: any) => s.is_own !== false);
   const publicSources = (allSources || []).filter((s: any) => s.is_own === false);

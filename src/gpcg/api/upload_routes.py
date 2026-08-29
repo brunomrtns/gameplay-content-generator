@@ -357,6 +357,20 @@ def complete_upload(
         session.add(job)
         session.flush()
         job_id = job.id
+        _source = source
+        _job = job
+
+    # Publish events after commit (session_scope commits on exit)
+    from gpcg.infrastructure.events import (
+        publish_gameplay_status_changed,
+        publish_job_created,
+    )
+    publish_gameplay_status_changed(
+        user.id, _source.id, _source.processing_status, _source.filename,
+    )
+    publish_job_created(user.id, _job.id, _job.type, _job.priority)
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(_job)
 
     # Clean up the chunked session
     _cleanup_session(upload_id)

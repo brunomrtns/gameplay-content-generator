@@ -17,6 +17,8 @@ import { KidsIdeasPage } from "@/pages/kids-ideas";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { DomainProvider } from "@/lib/domain-config";
+import { QueryProvider } from "@/lib/query-provider";
+import { EventsProvider } from "@/hooks/useEvents";
 import { Spinner } from "@/components/ui";
 import "./index.css";
 
@@ -117,7 +119,11 @@ const router = createBrowserRouter(
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>
-      <RouterProvider router={router} />
+      <QueryProvider>
+        <EventsProvider>
+          <RouterProvider router={router} />
+        </EventsProvider>
+      </QueryProvider>
     </ErrorBoundary>
   </StrictMode>
 );

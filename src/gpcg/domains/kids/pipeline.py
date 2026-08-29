@@ -626,11 +626,21 @@ Write a kid-friendly narration script in pt-BR. Target ~{target_chars} character
         subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
     def _set_stage(self, job_id: int, stage: JobStage) -> None:
+        _job = None
         with self._session_scope() as session:
             job = session.get(Job, job_id)
             if job:
                 job.stage = stage.value
                 session.flush()
+                _job = job
+        if _job is not None:
+            from gpcg.infrastructure.events import publish_job_status_changed
+            try:
+                publish_job_status_changed(
+                    _job.user_id, _job.id, _job.status, _job.stage, _job.progress, _job.type,
+                )
+            except Exception:
+                pass
         log.info(f"Kids job #{job_id} → stage={stage.value}")
         if self._progress_callback:
             try:

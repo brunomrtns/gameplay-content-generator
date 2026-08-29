@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { useDomain } from "@/lib/domain-config";
-import { usePoll } from "@/hooks/usePoll";
+import { useLiveData } from "@/hooks/useLiveData";
 import { Badge, Card, Spinner, EmptyState } from "@/components/ui";
 import { fmtDate, fmtDuration } from "@/lib/utils";
 import {
@@ -45,7 +45,7 @@ const canPublishModal = (v: any) =>
 
 export function VideosPage() {
   const { config } = useDomain();
-  const { data: videos, loading, refetch } = usePoll(() => api.listVideos(), 10000);
+  const { data: videos, isLoading, refetch } = useLiveData(['videos'], () => api.listVideos(), ['video.created', 'video.updated']);
   const isKidsDomain = config.id === "kids";
   const [search, setSearch] = useState("");
   const [playing, setPlaying] = useState<any | null>(null);
@@ -209,7 +209,7 @@ export function VideosPage() {
       )}
 
       {/* Grid */}
-      {loading && !videos ? (
+      {isLoading && !videos ? (
         <div className="flex justify-center py-32">
           <Spinner className="h-8 w-8" />
         </div>

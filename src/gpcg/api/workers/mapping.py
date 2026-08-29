@@ -146,6 +146,10 @@ def submit_mapping_result(
         existing_asset.duration = effective_duration
 
     db.commit()
+    from gpcg.infrastructure.events import publish_gameplay_status_changed
+    publish_gameplay_status_changed(
+        source.user_id, source.id, source.processing_status, source.filename,
+    )
     log.info(
         f"Mapping result for #{source_id}: {len(req.events)} events persisted "
         f"(version={req.analysis_version})"
@@ -280,6 +284,16 @@ def create_mapping_job(
     db.flush()
 
     db.commit()
+    from gpcg.infrastructure.events import (
+        publish_gameplay_status_changed,
+        publish_job_created,
+    )
+    publish_gameplay_status_changed(
+        source.user_id, source.id, source.processing_status, source.filename,
+    )
+    publish_job_created(user.id, job.id, job.type, job.priority)
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(job)
     log.info(f"Created mapping job #{job.id} for gameplay #{source_id}")
     return {
         "job_id": job.id,

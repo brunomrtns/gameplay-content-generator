@@ -13,7 +13,7 @@ import logging
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from gpcg.core.models import Job, JobPriority, JobStatus
+from gpcg.core.models import Job, JobPriority, JobStatus, JobType, WorkerCapability
 from gpcg.infrastructure.database import get_db
 
 from gpcg.api.workers._common import worker_auth
@@ -154,11 +154,14 @@ def panel_collect_ideas(
     # Create a content collection job
     job = Job(
         user_id=auto.user_id,
-        job_type="content_collection",
+        type=JobType.content_collect.value,
         status=JobStatus.queued.value,
         priority=JobPriority.high.value,
+        required_capabilities=[WorkerCapability.content_intelligence.value],
     )
     db.add(job)
     db.commit()
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(job)
     log.info(f"panel: content collection job #{job.id} created (by worker)")
     return {"ok": True, "job_id": job.id}

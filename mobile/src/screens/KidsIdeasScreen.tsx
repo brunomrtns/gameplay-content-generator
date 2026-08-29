@@ -11,6 +11,7 @@ import {
   FlatList,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLiveData } from '../hooks/useLiveData';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { kidsApi, jobsApi } from '../api/endpoints';
@@ -81,17 +82,17 @@ export function KidsIdeasScreen({ navigation }: { navigation?: any }) {
   const [scoring, setScoring] = useState<Record<number, number | null>>({});
   const [reconciling, setReconciling] = useState(false);
 
-  const { data: ideasData, isLoading, refetch, isRefetching } = useQuery({
-    queryKey: ['kids-ideas', filterStatus],
-    queryFn: () => kidsApi.listIdeas({ status: filterStatus || undefined, limit: 100 }),
-    refetchInterval: 15000,
-  });
+  const { data: ideasData, isLoading, refetch, isRefetching } = useLiveData(
+    ['kids-ideas', filterStatus],
+    () => kidsApi.listIdeas({ status: filterStatus || undefined, limit: 100 }),
+    ['kids_idea.updated']
+  );
 
-  const { data: queueData, refetch: refetchQueue } = useQuery({
-    queryKey: ['kids-idea-queue'],
-    queryFn: kidsApi.getIdeaQueue,
-    refetchInterval: 15000,
-  });
+  const { data: queueData, refetch: refetchQueue } = useLiveData(
+    ['kids-idea-queue'],
+    kidsApi.getIdeaQueue,
+    ['idea_queue.updated']
+  );
 
   const { data: stats } = useQuery({
     queryKey: ['kids-idea-stats'],

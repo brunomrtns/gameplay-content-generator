@@ -11,6 +11,7 @@ import {
   BackHandler,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLiveData } from '../hooks/useLiveData';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DocumentPicker from 'react-native-document-picker';
 import { automationApi, gamesApi, voicesApi, presentationApi, dashboardApi } from '../api/endpoints';
@@ -127,29 +128,29 @@ export function AutomationScreen() {
   const [loaded, setLoaded] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  const { data: automation } = useQuery({
-    queryKey: ['automation'],
-    queryFn: automationApi.get,
-    refetchInterval: 30000,
-  });
+  const { data: automation } = useLiveData(
+    ['automation'],
+    automationApi.get,
+    ['automation.status_changed', 'job.status_changed']
+  );
 
-  const { data: games } = useQuery({
-    queryKey: ['games-list'],
-    queryFn: gamesApi.list,
-    refetchInterval: 15000,
-  });
+  const { data: games } = useLiveData(
+    ['games-list'],
+    gamesApi.list,
+    ['game.enriched']
+  );
 
-  const { data: voices } = useQuery({
-    queryKey: ['voices'],
-    queryFn: voicesApi.list,
-    refetchInterval: 15000,
-  });
+  const { data: voices } = useLiveData(
+    ['voices'],
+    voicesApi.list,
+    []
+  );
 
-  const { data: dash } = useQuery({
-    queryKey: ['dashboard'],
-    queryFn: dashboardApi.get,
-    refetchInterval: 30000,
-  });
+  const { data: dash } = useLiveData(
+    ['dashboard'],
+    dashboardApi.get,
+    ['job.status_changed', 'video.created']
+  );
 
   useEffect(() => {
     if (automation && !loaded) {

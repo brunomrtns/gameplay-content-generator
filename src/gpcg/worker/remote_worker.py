@@ -222,7 +222,56 @@ class RemoteWorker(
 
         Returns None on transient errors (502, 503, connection refused) so
         the main loop can retry on the next poll cycle instead of crashing.
+
+        Tries Redis Streams first (XREADGROUP + claim-by-id), falls back to
+        HTTP polling (POST /api/jobs/claim) if Redis is unavailable.
         """
+        # ── Try Redis Streams first ────────────────────────────────────────
+        try:
+            from gpcg.infrastructure.job_queue import claim_job_via_redis
+            from gpcg.infrastructure.redis_adapter import get_redis
+
+            redis = get_redis()
+            if redis.is_available():
+                job_fields = claim_job_via_redis(
+                    self.config.worker_id,
+                    self.config.capabilities,
+                    block_ms=self.config.poll_interval * 1000,
+                )
+                if job_fields and "job_id" in job_fields:
+                    # Claim the job in SQLite via claim-by-id
+                    try:
+                        resp = self.client.post("/api/jobs/claim-by-id", json={
+                            "job_id": job_fields["job_id"],
+                            "worker_id": self.config.worker_id,
+                        })
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            job = data.get("job")
+                            if job:
+                                if data.get("gameplay_source"):
+                                    job["gameplay_source"] = data["gameplay_source"]
+                                if data.get("document"):
+                                    job["document"] = data["document"]
+                                if data.get("game"):
+                                    job["game"] = data["game"]
+                                return job
+                        elif resp.status_code == 409:
+                            # Job already claimed by another worker — ack and continue
+                            log.debug(f"claim_job: job {job_fields['job_id']} already claimed")
+                            return None
+                        else:
+                            log.warning(f"claim_job: claim-by-id returned {resp.status_code}")
+                            return None
+                    except Exception as e:
+                        log.warning(f"claim_job: claim-by-id error: {e}")
+                        return None
+                # No job in Redis Streams — fall through to HTTP polling
+                # (handles jobs created while Redis was down and not yet reconciled)
+        except Exception as e:
+            log.debug(f"claim_job: Redis Streams unavailable, falling back to HTTP: {e}")
+
+        # ── Fallback: HTTP polling ─────────────────────────────────────────
         try:
             resp = self.client.post("/api/jobs/claim", json={
                 "worker_id": self.config.worker_id,

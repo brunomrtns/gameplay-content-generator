@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
+import { useLiveData } from "@/hooks/useLiveData";
 import { Spinner } from "@/components/ui";
 import { toast } from "sonner";
 import {
@@ -79,7 +80,6 @@ export function KidsIdeasPage() {
   const [newIdeaDescription, setNewIdeaDescription] = useState("");
   const [newIdeaCategory, setNewIdeaCategory] = useState("general");
   const [creating, setCreating] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -100,70 +100,6 @@ export function KidsIdeasPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
-
-  // Poll for job completion (discovery + scoring)
-  useEffect(() => {
-    const activeJobs: number[] = [];
-    if (discoveryJobId) activeJobs.push(discoveryJobId);
-    Object.values(scoring).forEach((jid) => activeJobs.push(jid));
-    if (activeJobs.length === 0) {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-      return;
-    }
-
-    if (!pollRef.current) {
-      pollRef.current = setInterval(async () => {
-        // Poll discovery job
-        if (discoveryJobId) {
-          try {
-            const job = await api.getJob(discoveryJobId);
-            if (job.status === "completed") {
-              const created = job.artifacts?.created_count ?? 0;
-              const skipped = job.artifacts?.skipped_count ?? 0;
-              toast.success(`Descoberta concluída: ${created} criadas, ${skipped} duplicadas`);
-              setDiscoveryJobId(null);
-              setDiscovering(false);
-              await loadData();
-            } else if (job.status === "failed") {
-              toast.error(`Descoberta falhou: ${job.error || "erro desconhecido"}`);
-              setDiscoveryJobId(null);
-              setDiscovering(false);
-            }
-          } catch { /* ignore poll errors */ }
-        }
-        // Poll scoring jobs
-        const newScoring = { ...scoring };
-        let scoringChanged = false;
-        for (const [ideaIdStr, jobId] of Object.entries(newScoring)) {
-          const ideaId = Number(ideaIdStr);
-          try {
-            const job = await api.getJob(jobId);
-            if (job.status === "completed") {
-              toast.success(`Ideia #${ideaId} avaliada!`);
-              delete newScoring[ideaId];
-              scoringChanged = true;
-              await loadData();
-            } else if (job.status === "failed") {
-              toast.error(`Avaliação da ideia #${ideaId} falhou: ${job.error || ""}`);
-              delete newScoring[ideaId];
-              scoringChanged = true;
-            }
-          } catch { /* ignore poll errors */ }
-        }
-        if (scoringChanged) setScoring(newScoring);
-      }, 3000);
-    }
-
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
-  }, [discoveryJobId, scoring, loadData]);
 
   const handleDiscover = async () => {
     setDiscovering(true);
@@ -321,6 +257,48 @@ export function KidsIdeasPage() {
 
   return (
     <div className="space-y-6">
+      {/* Job watchers — useLiveData polls job status via SSE event invalidation */}
+      {discoveryJobId && (
+        <JobWatcher
+          jobId={discoveryJobId}
+          onCompleted={(job) => {
+            const created = job.artifacts?.created_count ?? 0;
+            const skipped = job.artifacts?.skipped_count ?? 0;
+            toast.success(`Descoberta concluída: ${created} criadas, ${skipped} duplicadas`);
+            setDiscoveryJobId(null);
+            setDiscovering(false);
+            loadData();
+          }}
+          onFailed={(job) => {
+            toast.error(`Descoberta falhou: ${job.error || "erro desconhecido"}`);
+            setDiscoveryJobId(null);
+            setDiscovering(false);
+          }}
+        />
+      )}
+      {Object.entries(scoring).map(([ideaIdStr, jobId]) => (
+        <JobWatcher
+          key={jobId}
+          jobId={jobId}
+          onCompleted={() => {
+            toast.success(`Ideia #${ideaIdStr} avaliada!`);
+            setScoring((prev) => {
+              const next = { ...prev };
+              delete next[Number(ideaIdStr)];
+              return next;
+            });
+            loadData();
+          }}
+          onFailed={(job) => {
+            toast.error(`Avaliação da ideia #${ideaIdStr} falhou: ${job.error || ""}`);
+            setScoring((prev) => {
+              const next = { ...prev };
+              delete next[Number(ideaIdStr)];
+              return next;
+            });
+          }}
+        />
+      ))}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -710,4 +688,42 @@ function StatCard({ label, value, accent }: { label: string; value: number; acce
       <div className={`text-2xl font-bold ${colorClass}`}>{value}</div>
     </div>
   );
+}
+
+// ── JobWatcher — polls a single job via SSE event invalidation ──────────────
+// Replaces the manual setInterval polling. Each active job gets its own
+// watcher; when the job completes or fails, the callback fires once.
+function JobWatcher({
+  jobId,
+  onCompleted,
+  onFailed,
+}: {
+  jobId: number;
+  onCompleted: (job: any) => void;
+  onFailed: (job: any) => void;
+}) {
+  const { data: job } = useLiveData<any>(
+    ["kids-job", jobId],
+    () => api.getJob(jobId),
+    ["job.status_changed", "kids_idea.updated"],
+  );
+
+  const completedRef = useCallbackRef(onCompleted);
+  const failedRef = useCallbackRef(onFailed);
+
+  useEffect(() => {
+    if (!job) return;
+    if (job.status === "completed") completedRef(job);
+    else if (job.status === "failed") failedRef(job);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.status]);
+
+  return null;
+}
+
+// Stable callback ref — keeps the latest callback without re-triggering the effect
+function useCallbackRef<T extends (...args: any[]) => void>(fn: T): T {
+  const ref = useRef(fn);
+  ref.current = fn;
+  return useCallback(((...args: any[]) => ref.current(...args)) as T, []);
 }

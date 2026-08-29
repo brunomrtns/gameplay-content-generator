@@ -34,6 +34,7 @@ dependencies = [
     "bcrypt>=4.0",
     "requests>=2.31",
     "feedparser>=6.0",
+    "redis[hiredis]>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +44,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "httpx>=0.28",
+    "fakeredis>=2.0",
 ]
 # GPU dependencies for the Compute Plane (remote worker).
 # Install with: pip install -e ".[gpu]"

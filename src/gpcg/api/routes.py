@@ -574,6 +574,8 @@ def delete_gameplay_source(
     db.add(cleanup_job)
     db.flush()
     db.commit()
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(cleanup_job)
 
     log.info(
         f"gameplay #{source_id} deleted by user #{user.id} — "
@@ -1568,6 +1570,8 @@ def publish_video(
         v.youtube_video_id = result.youtube_video_id
         v.status = VideoStatus.published.value
         db.commit()
+        from gpcg.infrastructure.events import publish_video_updated
+        publish_video_updated(user.id, v.id, v.status, v.youtube_url or "")
         return {
             "success": True,
             "youtube_url": result.youtube_url,
@@ -1577,6 +1581,8 @@ def publish_video(
     else:
         v.status = VideoStatus.publish_failed.value
         db.commit()
+        from gpcg.infrastructure.events import publish_video_updated
+        publish_video_updated(user.id, v.id, v.status, v.youtube_url or "")
         raise HTTPException(500, f"YouTube upload failed: {result.error}")
 
 

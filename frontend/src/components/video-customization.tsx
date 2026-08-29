@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Label } from "@/components/ui";
 import { api } from "@/lib/api";
-import { usePoll } from "@/hooks/usePoll";
+import { useLiveData } from "@/hooks/useLiveData";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SubtitlePreview } from "@/components/subtitle-preview";
 
@@ -105,7 +106,8 @@ export function VideoCustomizationControls({
   const [opts, setOpts] = useState<VideoCustomization>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [uploadingVoice, setUploadingVoice] = useState(false);
-  const { data: voices, setData: setVoices } = usePoll(() => api.listVoices(), 10000);
+  const queryClient = useQueryClient();
+  const { data: voices } = useLiveData(['voices'], () => api.listVoices(), []);
 
   const update = (key: keyof VideoCustomization, value: string | number | boolean) => {
     const newOpts = { ...opts, [key]: value };
@@ -127,7 +129,7 @@ export function VideoCustomizationControls({
       const r = await api.uploadVoice(file);
       toast.success(`Voz "${r.filename}" enviada (${r.file_size_kb} KB)`);
       const updated = await api.listVoices();
-      setVoices(updated);
+      queryClient.setQueryData(['voices'], updated);
     } catch (err: any) {
       toast.error(err.message);
     } finally {
@@ -142,7 +144,7 @@ export function VideoCustomizationControls({
       await api.deleteVoice(filename);
       toast.success(`Voz "${filename}" excluída`);
       const updated = await api.listVoices();
-      setVoices(updated);
+      queryClient.setQueryData(['voices'], updated);
       if (opts.voice === filename) update("voice", "");
     } catch (err: any) {
       toast.error(err.message);

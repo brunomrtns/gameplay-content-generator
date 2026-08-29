@@ -12,6 +12,7 @@ import {
   Linking,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLiveData } from '../hooks/useLiveData';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { dashboardApi, automationApi, videosApi, youtubeApi, workersApi } from '../api/endpoints';
 import { Card, Button, Badge, Spinner, EmptyState } from '../components/ui';
@@ -48,17 +49,17 @@ export function DashboardScreen() {
   const [sharing, setSharing] = useState(false);
   const [shareProgress, setShareProgress] = useState(0);
 
-  const { data: dash, refetch, isRefetching } = useQuery({
-    queryKey: ['dashboard'],
-    queryFn: dashboardApi.get,
-    refetchInterval: 10000,
-  });
+  const { data: dash, refetch, isRefetching } = useLiveData(
+    ['dashboard'],
+    dashboardApi.get,
+    ['job.status_changed', 'video.created', 'automation.status_changed']
+  );
 
-  const { data: workers } = useQuery({
-    queryKey: ['workers'],
-    queryFn: workersApi.list,
-    refetchInterval: 10000,
-  });
+  const { data: workers } = useLiveData(
+    ['workers'],
+    workersApi.list,
+    ['worker.status_changed']
+  );
 
   const handleToggleAutomation = async () => {
     setToggling(true);

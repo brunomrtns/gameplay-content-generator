@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
-import { usePoll } from "@/hooks/usePoll";
+import { useLiveData } from "@/hooks/useLiveData";
 import { Badge, Button, Card, Spinner, EmptyState } from "@/components/ui";
 import { fmtDuration, fmtBytes } from "@/lib/utils";
 import { useUploadStore, type UploadItem } from "@/lib/upload-store";
@@ -234,7 +234,7 @@ function MappingTimeline({ sourceId, filename }: { sourceId: number; filename: s
 // ── Media Tab (gameplay upload + list) ───────────────────────────────────────
 
 function MediaTab() {
-  const { data: allSources, loading, refetch } = usePoll(() => api.listSources(undefined, undefined, true), 5000);
+  const { data: allSources, isLoading, refetch } = useLiveData(['sources'], () => api.listSources(undefined, undefined, true), ['gameplay.status_changed', 'job.created']);
   const { uploads, addUpload, updateUpload, removeUpload } = useUploadStore();
   const [scanning, setScanning] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -428,7 +428,7 @@ function MediaTab() {
         <h2 className="mb-4 text-lg font-semibold">
           Gravações {sources && `(${sources.length})`}
         </h2>
-        {loading && !sources ? (
+        {isLoading && !sources ? (
           <div className="flex justify-center py-16"><Spinner className="h-8 w-8" /></div>
         ) : !sources || sources.length === 0 ? (
           <Card>

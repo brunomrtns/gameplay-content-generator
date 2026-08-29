@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { useLiveData } from "@/hooks/useLiveData";
 import { Spinner } from "@/components/ui";
 
 interface KnowledgeItem {
@@ -115,22 +116,39 @@ export function IdeasPage() {
   const [focusItemTypes, setFocusItemTypes] = useState<string[]>([]);
   const [focusSaving, setFocusSaving] = useState(false);
 
+  // Live data via SSE event invalidation (replaces polling)
+  const { data: currentJobData } = useLiveData<{ job: any }>(['current-job'], () => api.getCurrentJob(), ['job.status_changed']);
+  const { data: queueData, refetch: refetchIdeaQueue } = useLiveData(['idea-queue'], () => api.getIdeaQueue(), ['idea_queue.updated']);
+
+  // Sync live data to local state
+  useEffect(() => {
+    if (currentJobData) {
+      setCurrentJob(currentJobData.job);
+    }
+  }, [currentJobData]);
+
+  useEffect(() => {
+    if (queueData) {
+      setQueue(queueData.items || []);
+      const qIds = (queueData.queue || []).map((q: any) => (typeof q === "object" ? q.ki_id : q));
+      setQueueIds(new Set(qIds));
+    }
+  }, [queueData]);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       // "manual" is a source_type filter, not item_type — handle specially
       const isManualFilter = filterType === "manual";
-      const [itemsRes, statsRes, queueRes, availRes, jobRes, focusRes] = await Promise.all([
+      const [itemsRes, statsRes, availRes, focusRes] = await Promise.all([
         api.listKnowledgeItems({
           item_type: isManualFilter ? undefined : filterType || undefined,
           status: filterStatus || undefined,
           limit: 100,
         }),
         api.getKnowledgeItemStats(),
-        api.getIdeaQueue(),
         api.getGameplayAvailability(),
-        api.getCurrentJob(),
         api.getCollectionFocus(),
       ]);
       let allItems = itemsRes.items || [];
@@ -139,13 +157,7 @@ export function IdeasPage() {
       }
       setItems(allItems);
       setStats(statsRes);
-      setQueue(queueRes.items || []);
-      // V3: queue can be list[dict] or list[int] — extract IDs
-      const qData = queueRes.queue || [];
-      const qIds = qData.map((q: any) => (typeof q === "object" ? q.ki_id : q));
-      setQueueIds(new Set(qIds));
       setAvailability(availRes.games || []);
-      setCurrentJob(jobRes.job);
       setFocus(focusRes.collection_focus);
     } catch (e: any) {
       setError(e.message || "Failed to load content ideas");
@@ -158,20 +170,6 @@ export function IdeasPage() {
     loadData();
   }, [loadData]);
 
-  // V3: Poll current job every 10s when a job is running (stage updates)
-  useEffect(() => {
-    if (!currentJob) return;
-    const interval = setInterval(async () => {
-      try {
-        const res = await api.getCurrentJob();
-        setCurrentJob(res.job);
-      } catch {
-        // non-fatal
-      }
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [currentJob?.id]);
-
   const handleReject = async (id: number) => {
     try {
       await api.rejectKnowledgeItem(id);
@@ -182,6 +180,7 @@ export function IdeasPage() {
         return next;
       });
       setQueue((prev) => prev.filter((i) => i.id !== id));
+      refetchIdeaQueue();
     } catch (e: any) {
       setError(e.message);
     }
@@ -273,6 +272,7 @@ export function IdeasPage() {
       setSelectedReuseOverride(null);
       setAvailableSources([]);
       setSelectedSource(null);
+      refetchIdeaQueue();
     } catch (e: any) {
       setError(e.message);
     }
@@ -287,6 +287,7 @@ export function IdeasPage() {
         return next;
       });
       setQueue((prev) => prev.filter((i) => i.id !== id));
+      refetchIdeaQueue();
     } catch (e: any) {
       setError(e.message);
     }
@@ -314,6 +315,7 @@ export function IdeasPage() {
       setEditSelectedGameplay(null);
       setEditAvailableSources([]);
       setEditSelectedSource(null);
+      refetchIdeaQueue();
     } catch (e: any) {
       setError(e.message);
     }
@@ -363,7 +365,7 @@ export function IdeasPage() {
       await api.reorderIdeaQueue(newQueue.map((i) => i.id));
     } catch (e: any) {
       setError(e.message);
-      loadData(); // Revert on error
+      refetchIdeaQueue(); // Revert queue on error
     }
   };
 
@@ -395,7 +397,7 @@ export function IdeasPage() {
     setDragOverIndex(null);
     api.reorderIdeaQueue(newQueue.map((i) => i.id)).catch((e: any) => {
       setError(e.message);
-      loadData(); // Revert on error
+      refetchIdeaQueue(); // Revert queue on error
     });
   };
 

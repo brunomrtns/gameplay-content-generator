@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { useDomain } from "@/lib/domain-config";
-import { usePoll } from "@/hooks/usePoll";
+import { useLiveData } from "@/hooks/useLiveData";
+import { useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Card, Label, Select, Spinner } from "@/components/ui";
 import { SubtitlePreview } from "@/components/subtitle-preview";
 import { ThumbnailPreview } from "@/components/thumbnail-preview";
@@ -119,10 +120,11 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 
 export function AutomationPage() {
   const { config: domainConfig } = useDomain();
-  const { data: automation } = usePoll(() => api.getAutomation(), 30000);
-  const { data: games } = usePoll(() => api.listGames(), 15000);
-  const { data: voices, setData: setVoices } = usePoll(() => api.listVoices(), 15000);
-  const { data: dashData } = usePoll(() => api.getDashboard(), 30000);
+  const queryClient = useQueryClient();
+  const { data: automation } = useLiveData(['automation'], () => api.getAutomation(), ['automation.status_changed', 'job.status_changed']);
+  const { data: games } = useLiveData(['games'], () => api.listGames(), ['game.enriched']);
+  const { data: voices } = useLiveData(['voices'], () => api.listVoices(), []);
+  const { data: dashData } = useLiveData(['dashboard'], () => api.getDashboard(), ['job.status_changed', 'video.created']);
 
   const [config, setConfig] = useState<AutomationConfig>({});
   const [saving, setSaving] = useState(false);
@@ -190,7 +192,7 @@ export function AutomationPage() {
       const r = await api.uploadVoice(file);
       toast.success(`Voz "${r.filename}" enviada`);
       const updated = await api.listVoices();
-      setVoices(updated);
+      queryClient.setQueryData(['voices'], updated);
     } catch (err: any) {
       toast.error(err.message);
     } finally {
@@ -205,7 +207,7 @@ export function AutomationPage() {
       await api.deleteVoice(filename);
       toast.success(`Voz excluída`);
       const updated = await api.listVoices();
-      setVoices(updated);
+      queryClient.setQueryData(['voices'], updated);
       if (config.voice === filename) update("voice", "");
     } catch (err: any) {
       toast.error(err.message);

@@ -332,6 +332,10 @@ def confirm_download(
             )
 
     db.commit()
+    from gpcg.infrastructure.events import publish_gameplay_status_changed
+    publish_gameplay_status_changed(
+        source.user_id, source.id, source.processing_status, source.filename,
+    )
     log.info(f"Gameplay #{source_id} download confirmed by '{req.worker_id}'")
     return {"ok": True, "processing_status": source.processing_status}
 
