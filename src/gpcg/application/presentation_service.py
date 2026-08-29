@@ -65,7 +65,6 @@ class PresentationService:
         config: PresentationConfig,
         scene_dir: Path,
         video_format: str,
-        narration_wav: Optional[Path] = None,
     ) -> PresentationResult:
         """Apply the Presentation Layer.
 
@@ -81,7 +80,6 @@ class PresentationService:
             config: Presentation config.
             scene_dir: The temp scene directory (where scene_NNN.mp4 go).
             video_format: "9:16", "16:9", etc.
-            narration_wav: Path to the narration WAV (for opening TTS, if enabled).
 
         Returns:
             PresentationResult with thumbnail/opening paths.
@@ -141,19 +139,6 @@ class PresentationService:
                         script_first_line,
                     )
 
-                    # Resolve narration for opening
-                    opening_narration = None
-                    if config.opening_narration_enabled:
-                        narration_text = config.opening_narration_text or title
-                        if narration_wav:
-                            # Use the existing narration WAV's first N seconds
-                            # (simpler than generating new TTS for the title)
-                            # For now, use silence — TTS for title would require
-                            # a separate TTS call which adds complexity.
-                            # The narration_wav param is reserved for future use.
-                            pass
-                        # Generate silent audio for now (TTS title is a future enhancement)
-
                     scene_000 = scene_dir / "scene_000.mp4"
                     rendered = self.renderer.render_opening(
                         image_path=opening_image,
@@ -161,7 +146,6 @@ class PresentationService:
                         config=config,
                         output_path=scene_000,
                         video_format=video_format,
-                        narration_wav=opening_narration,
                     )
                     if rendered:
                         result.opening_scene_path = str(rendered)

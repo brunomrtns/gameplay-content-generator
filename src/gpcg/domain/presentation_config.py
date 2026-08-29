@@ -9,8 +9,7 @@ a visual presentation layer:
      by the user, or a fixed image per automation.
 
   2. OPENING / INTRO — a short visual intro (2-3s) at the start of the
-     video showing a strong image + the title in large text, optionally
-     with TTS narration of the title/hook.
+     video showing a strong image + the title in large text.
 
 The config is stored as a JSON blob inside ``Automation.config["presentation"]``
 and snapshotted into ``job.artifacts["config_snapshot"]["presentation"]``.
@@ -67,10 +66,6 @@ class PresentationConfig:
     opening_text_color: str = "white"
     opening_text_outline: str = "black"
     opening_text_size: str = "xlarge"
-    # TTS narration of the title/hook during the opening
-    opening_narration_enabled: bool = False
-    # Empty = use the video title; otherwise use this text for TTS
-    opening_narration_text: str = ""
 
     # ── Auto-selection parameters ──────────────────────────────────────────
     # How many candidate frames to extract and score

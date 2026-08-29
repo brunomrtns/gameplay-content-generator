@@ -29,8 +29,6 @@ export interface PresentationConfig {
   opening_text_color: string;
   opening_text_outline: string;
   opening_text_size: "medium" | "large" | "xlarge";
-  opening_narration_enabled: boolean;
-  opening_narration_text?: string;
   // Auto
   auto_candidate_count: number;
   auto_min_interesting: number;
@@ -56,7 +54,6 @@ const DEFAULT_CONFIG: PresentationConfig = {
   opening_text_color: "white",
   opening_text_outline: "black",
   opening_text_size: "xlarge",
-  opening_narration_enabled: false,
   auto_candidate_count: 5,
   auto_min_interesting: 0.4,
   auto_min_confidence: 0.5,
@@ -469,12 +466,6 @@ export function PresentationControls({
                     </div>
                   </div>
                 )}
-
-                <Toggle
-                  checked={cfg.opening_narration_enabled ?? false}
-                  onChange={(v) => updateP("opening_narration_enabled", v)}
-                  label="Narração na abertura (TTS do título)"
-                />
               </>
             )}
           </div>

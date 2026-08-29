@@ -1080,7 +1080,6 @@ class GenerationService:
 
         clips_info = self._get_artifact(job_id, "selected_clips") or []
         video_format = self._get_artifact(job_id, "video_format") or self.settings.gpcg_video_format
-        narration_wav = self._get_artifact(job_id, "narration_wav")
 
         # Determine the gameplay source for auto thumbnail selection
         gameplay_source_id = None
@@ -1124,7 +1123,6 @@ class GenerationService:
                 config=config,
                 scene_dir=work_dir,
                 video_format=video_format,
-                narration_wav=Path(narration_wav) if narration_wav else None,
             )
 
         if not result.success:

@@ -30,7 +30,6 @@ class TestPresentationConfigSerialization:
             thumbnail_mode="fixed",
             thumbnail_image_path="/data/presentation/my_image.jpg",
             opening_duration=4.0,
-            opening_narration_enabled=True,
         )
         d = cfg.to_dict()
         cfg2 = PresentationConfig.from_dict(d)
@@ -38,7 +37,6 @@ class TestPresentationConfigSerialization:
         assert cfg2.thumbnail_mode == "fixed"
         assert cfg2.thumbnail_image_path == "/data/presentation/my_image.jpg"
         assert cfg2.opening_duration == 4.0
-        assert cfg2.opening_narration_enabled is True
 
     def test_from_dict_ignores_unknown_keys(self):
         """Forward compat: unknown keys are silently ignored."""

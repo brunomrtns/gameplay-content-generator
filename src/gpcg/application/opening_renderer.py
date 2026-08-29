@@ -1,7 +1,7 @@
 """Opening renderer — pre-renders the visual opening (intro) with FFmpeg.
 
 Produces ``scene_000.mp4`` — a short clip (2-3s) showing a strong image
-with the video title in large text, optionally with TTS narration.
+with the video title in large text.
 
 This clip is injected into the ``scene_dir`` before ``RenderPlanBuilder``
 assembles the ``request_data``. The video-generate subprocess treats it
@@ -53,7 +53,6 @@ class OpeningRenderer:
         config: PresentationConfig,
         output_path: Path,
         video_format: str = "9:16",
-        narration_wav: Optional[Path] = None,
     ) -> Optional[Path]:
         """Render the opening clip (scene_000.mp4).
 
@@ -63,7 +62,6 @@ class OpeningRenderer:
             config: Presentation config.
             output_path: Where to save scene_000.mp4.
             video_format: "9:16", "16:9", "1:1", "4:5".
-            narration_wav: Optional TTS audio for the opening.
 
         Returns:
             Path to the rendered clip, or None on failure.
@@ -94,15 +92,9 @@ class OpeningRenderer:
             "-i", str(image_path),
         ]
 
-        # Audio input
-        has_audio = False
-        if narration_wav and Path(narration_wav).exists():
-            cmd.extend(["-i", str(narration_wav)])
-            has_audio = True
-        else:
-            # Generate silent audio of the right duration
-            cmd.extend(["-f", "lavfi", "-i", f"anullsrc=channel_layout=mono:sample_rate=22050"])
-            has_audio = True  # the silent stream
+        # Silent audio track (the opening is visual only — narration
+        # comes from the main narration_wav in the render stage)
+        cmd.extend(["-f", "lavfi", "-i", f"anullsrc=channel_layout=mono:sample_rate=22050"])
 
         cmd.extend([
             "-t", f"{duration:.3f}",
@@ -111,10 +103,8 @@ class OpeningRenderer:
             "-pix_fmt", "yuv420p",
             "-r", "30",
             "-video_track_timescale", "30000",  # match video-generate's timebase
+            "-c:a", "aac", "-b:a", "128k", "-shortest",
         ])
-
-        if has_audio:
-            cmd.extend(["-c:a", "aac", "-b:a", "128k", "-shortest"])
 
         cmd.append(str(output_path))
 
