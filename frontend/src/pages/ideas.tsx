@@ -97,6 +97,7 @@ export function IdeasPage() {
   const [filterStatus, setFilterStatus] = useState<string>("fresh");
   const [collecting, setCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Stage labels come from backend (stage_label field) — i18n is handled server-side
   const [queueIds, setQueueIds] = useState<Set<number>>(new Set());
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newIdeaTitle, setNewIdeaTitle] = useState("");

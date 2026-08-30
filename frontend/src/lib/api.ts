@@ -456,6 +456,8 @@ export const api = {
     request<any>(`/gameplays/${source_id}/create-mapping-job`, { method: "POST" }),
 
   // ── Channel Profile (channel identity + editorial direction) ───────────
+  // Includes multilingual fields: target_language (pt-BR, en-US, zh-CN, zh-TW, zh)
+  // and prompt_version (frozen per job for deterministic resume).
   getChannelProfile: () => request<any>("/channel/profile"),
   updateChannelProfile: (data: Record<string, any>) =>
     request<any>("/channel/profile", { method: "PUT", body: JSON.stringify(data) }),
