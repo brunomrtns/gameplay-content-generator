@@ -92,6 +92,10 @@ export function IdeasScreen() {
   const queryClient = useQueryClient();
   const [filterType, setFilterType] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<string>('fresh');
+  const [minScore, setMinScore] = useState<number>(0);
+  const [searchText, setSearchText] = useState<string>('');
+  const [onlyWithGameplay, setOnlyWithGameplay] = useState<boolean>(false);
+  const [filterGameId, setFilterGameId] = useState<number | null>(null);
   const [collecting, setCollecting] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [manualTitle, setManualTitle] = useState('');
@@ -123,16 +127,36 @@ export function IdeasScreen() {
   const isManualFilter = filterType === 'manual';
 
   const { data: itemsData, refetch: refetchItems, isRefetching: refetchingItems, isLoading: itemsLoading } = useQuery({
-    queryKey: ['knowledge-items', filterType, filterStatus],
+    queryKey: ['knowledge-items', filterType, filterStatus, minScore, filterGameId, onlyWithGameplay, searchText],
     queryFn: async () => {
       const res = await knowledgeApi.list({
         item_type: isManualFilter ? undefined : filterType || undefined,
         status: filterStatus || undefined,
         limit: 100,
+        min_score: minScore > 0 ? minScore : undefined,
+        game_id: filterGameId ?? undefined,
       });
-      let allItems = res.items || [];
+      let allItems: any[] = res.items || [];
       if (isManualFilter) {
         allItems = allItems.filter((i: any) => i.source_type === 'manual');
+      }
+      // Client-side: filter by gameplay availability
+      if (onlyWithGameplay && availabilityData?.games) {
+        const gamesWithGameplay = new Set(
+          (availabilityData.games as any[])
+            .filter((g: any) => g.availability !== 'none' && g.availability !== 'reuse_only')
+            .map((g: any) => g.game_id),
+        );
+        allItems = allItems.filter((i: any) => !i.game_id || gamesWithGameplay.has(i.game_id));
+      }
+      // Client-side: filter by search text
+      if (searchText.trim()) {
+        const q = searchText.toLowerCase().trim();
+        allItems = allItems.filter((i: any) =>
+          i.title?.toLowerCase().includes(q) ||
+          i.content?.toLowerCase().includes(q) ||
+          i.game_name?.toLowerCase().includes(q),
+        );
       }
       return allItems;
     },
@@ -621,7 +645,29 @@ export function IdeasScreen() {
 
             {/* Filters */}
             <View>
-              <Text style={styles.filterLabel}>Tipo</Text>
+              {/* Search */}
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Buscar por título, conteúdo ou jogo..."
+                placeholderTextColor={colors.textMuted}
+                value={searchText}
+                onChangeText={setSearchText}
+              />
+
+              {/* Score filter */}
+              <Text style={[styles.filterLabel, { marginTop: spacing.sm }]}>Score mínimo</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm, paddingVertical: spacing.xs }}>
+                {[
+                  { v: 0, label: 'Todos' },
+                  { v: 30, label: '≥30' },
+                  { v: 50, label: '≥50' },
+                  { v: 70, label: '≥70' },
+                ].map((s) => (
+                  <FilterChip key={s.v} label={s.label} active={minScore === s.v} onPress={() => setMinScore(s.v)} />
+                ))}
+              </ScrollView>
+
+              <Text style={[styles.filterLabel, { marginTop: spacing.sm }]}>Tipo</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm, paddingVertical: spacing.xs }}>
                 {typeFilters.map((f) => (
                   <FilterChip key={f.value} label={f.label} active={filterType === f.value} onPress={() => setFilterType(f.value)} />
@@ -633,6 +679,35 @@ export function IdeasScreen() {
                   <FilterChip key={f.value} label={f.label} active={filterStatus === f.value} onPress={() => setFilterStatus(f.value)} />
                 ))}
               </ScrollView>
+
+              {/* Gameplay toggle */}
+              <TouchableOpacity
+                style={[styles.gameplayToggle, onlyWithGameplay && styles.gameplayToggleActive]}
+                onPress={() => setOnlyWithGameplay(!onlyWithGameplay)}
+              >
+                <Icon name="gamepad-variant" size={14} color={onlyWithGameplay ? colors.accent : colors.textMuted} />
+                <Text style={[styles.gameplayToggleText, onlyWithGameplay && styles.gameplayToggleTextActive]}>
+                  Só com gameplay disponível
+                </Text>
+              </TouchableOpacity>
+
+              {/* Game filter */}
+              {availability.length > 0 && (
+                <>
+                  <Text style={[styles.filterLabel, { marginTop: spacing.sm }]}>Jogo</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm, paddingVertical: spacing.xs }}>
+                    <FilterChip label="Todos" active={filterGameId === null} onPress={() => setFilterGameId(null)} />
+                    {availability.filter((g: any) => g.availability !== 'none').map((g: any) => (
+                      <FilterChip key={g.game_id} label={g.game_name} active={filterGameId === g.game_id} onPress={() => setFilterGameId(g.game_id)} />
+                    ))}
+                  </ScrollView>
+                </>
+              )}
+
+              {/* Result count */}
+              <Text style={[styles.filterLabel, { marginTop: spacing.sm, color: colors.textMuted }]}>
+                {items.length} {items.length === 1 ? 'ideia' : 'ideias'}
+              </Text>
             </View>
           </View>
         }
@@ -1410,6 +1485,41 @@ const styles = StyleSheet.create({
 
   // Filters
   filterLabel: { fontSize: fontSize.xs, fontWeight: fontWeight.medium, color: colors.textSecondary },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: fontSize.sm,
+    color: colors.text,
+  },
+  gameplayToggle: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignSelf: 'flex-start' as const,
+  },
+  gameplayToggleActive: {
+    borderColor: colors.accent + '60',
+    backgroundColor: colors.accent + '15',
+  },
+  gameplayToggleText: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.medium as const,
+    color: colors.textMuted,
+  },
+  gameplayToggleTextActive: {
+    color: colors.accent,
+  },
   chip: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,

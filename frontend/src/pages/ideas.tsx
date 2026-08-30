@@ -87,6 +87,11 @@ export function IdeasPage() {
   const [newIdeaTitle, setNewIdeaTitle] = useState("");
   const [newIdeaContent, setNewIdeaContent] = useState("");
   const [creating, setCreating] = useState(false);
+  // Advanced filters
+  const [minScore, setMinScore] = useState<number>(0);
+  const [searchText, setSearchText] = useState<string>("");
+  const [onlyWithGameplay, setOnlyWithGameplay] = useState<boolean>(false);
+  const [filterGameId, setFilterGameId] = useState<number | null>(null);
   // V3: Gameplay preference modal
   const [availability, setAvailability] = useState<GameAvailability[]>([]);
   const [queueModalItem, setQueueModalItem] = useState<KnowledgeItem | null>(null);
@@ -146,14 +151,35 @@ export function IdeasPage() {
           item_type: isManualFilter ? undefined : filterType || undefined,
           status: filterStatus || undefined,
           limit: 100,
+          min_score: minScore > 0 ? minScore : undefined,
+          game_id: filterGameId ?? undefined,
         }),
         api.getKnowledgeItemStats(),
         api.getGameplayAvailability(),
         api.getCollectionFocus(),
       ]);
-      let allItems = itemsRes.items || [];
+      let allItems: KnowledgeItem[] = itemsRes.items || [];
       if (isManualFilter) {
-        allItems = allItems.filter((i: KnowledgeItem) => i.source_type === "manual");
+        allItems = allItems.filter((i) => i.source_type === "manual");
+      }
+      // Client-side: filter by gameplay availability
+      if (onlyWithGameplay && availRes.games) {
+        const gamesWithGameplay = new Set(
+          (availRes.games as GameAvailability[])
+            .filter((g) => g.availability !== "none" && g.availability !== "reuse_only")
+            .map((g) => g.game_id),
+        );
+        // Include items without game_id (general curiosities — always usable)
+        allItems = allItems.filter((i) => !i.game_id || gamesWithGameplay.has(i.game_id));
+      }
+      // Client-side: filter by search text
+      if (searchText.trim()) {
+        const q = searchText.toLowerCase().trim();
+        allItems = allItems.filter((i) =>
+          i.title?.toLowerCase().includes(q) ||
+          i.content?.toLowerCase().includes(q) ||
+          i.game_name?.toLowerCase().includes(q),
+        );
       }
       setItems(allItems);
       setStats(statsRes);
@@ -164,7 +190,7 @@ export function IdeasPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterType, filterStatus]);
+  }, [filterType, filterStatus, minScore, filterGameId, onlyWithGameplay, searchText]);
 
   useEffect(() => {
     loadData();
@@ -973,28 +999,96 @@ export function IdeasPage() {
       )}
 
       {/* Filters */}
-      <div className="flex gap-3">
-        <select
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
-        >
-          <option value="">Todos os tipos</option>
-          <option value="news">Notícias</option>
-          <option value="curiosity">Curiosidades</option>
-          <option value="lore">Lore</option>
-          <option value="manual">Manuais</option>
-        </select>
-        <select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
-        >
-          <option value="">Todos os status</option>
-          <option value="fresh">Disponíveis</option>
-          <option value="used">Usados</option>
-          <option value="rejected">Rejeitados</option>
-        </select>
+      <div className="space-y-3">
+        {/* Row 1: Search + score + gameplay toggle */}
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="text"
+            placeholder="Buscar por título, conteúdo ou jogo..."
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            className="flex-1 min-w-[200px] rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40"
+          />
+          {/* Score filter buttons */}
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-1">
+            <span className="text-xs text-text-muted px-2">Score</span>
+            {[
+              { v: 0, label: "Todos" },
+              { v: 30, label: "≥30" },
+              { v: 50, label: "≥50" },
+              { v: 70, label: "≥70" },
+            ].map((s) => (
+              <button
+                key={s.v}
+                onClick={() => setMinScore(s.v)}
+                className={`rounded px-2 py-1 text-xs font-medium transition ${
+                  minScore === s.v
+                    ? "bg-accent text-white"
+                    : "text-text-muted hover:text-text"
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          {/* Gameplay availability toggle */}
+          <button
+            onClick={() => setOnlyWithGameplay(!onlyWithGameplay)}
+            className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition ${
+              onlyWithGameplay
+                ? "border-teal-500/40 bg-teal-500/15 text-teal-300"
+                : "border-border bg-surface text-text-muted hover:text-text"
+            }`}
+            title="Só mostrar ideias cujo jogo tem gameplay disponível para produzir o vídeo"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            Com gameplay
+          </button>
+        </div>
+        {/* Row 2: Type + status + game dropdown */}
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+            className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
+          >
+            <option value="">Todos os tipos</option>
+            <option value="news">Notícias</option>
+            <option value="curiosity">Curiosidades</option>
+            <option value="lore">Lore</option>
+            <option value="manual">Manuais</option>
+          </select>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
+          >
+            <option value="">Todos os status</option>
+            <option value="fresh">Disponíveis</option>
+            <option value="used">Usados</option>
+            <option value="rejected">Rejeitados</option>
+          </select>
+          <select
+            value={filterGameId ?? ""}
+            onChange={(e) => setFilterGameId(e.target.value ? Number(e.target.value) : null)}
+            className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
+          >
+            <option value="">Todos os jogos</option>
+            {availability
+              .filter((g) => g.availability !== "none")
+              .map((g) => (
+                <option key={g.game_id} value={g.game_id}>
+                  {g.game_name} ({g.availability})
+                </option>
+              ))}
+          </select>
+          {/* Result count */}
+          <span className="text-xs text-text-muted ml-auto">
+            {items.length} {items.length === 1 ? "ideia" : "ideias"}
+          </span>
+        </div>
       </div>
 
       {/* Items List */}
