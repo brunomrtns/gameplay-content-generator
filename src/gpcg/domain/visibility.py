@@ -43,3 +43,48 @@ def visible_to_user(user_id_col, is_public_col, consumer_user_id: int | None) ->
         user_id_col == consumer_user_id,
         is_public_col.is_(True),
     )
+
+
+# ── Gameplay visibility ──────────────────────────────────────────────────────
+
+
+def gameplay_visible_to_user(
+    user_id_col,
+    is_public_col,
+    consumer_user_id: int,
+    *,
+    allows_public: bool,
+):
+    """Return a WHERE clause filtering GameplaySource rows visible to a user.
+
+    GameplaySources don't use the ``user_id IS NULL`` system-pool model —
+    every source has an owner. Access to other users' gameplays is gated
+    by the consumer's automation config (``fallback_policy=allow_public``
+    or ``accept_public_gameplays=true``).
+
+    When ``allows_public`` is True, the user can see:
+      - their own sources (``user_id == consumer_user_id``)
+      - public sources from anyone (``is_public == True``)
+
+    When ``allows_public`` is False, only their own sources are visible.
+    """
+    if allows_public:
+        return or_(
+            user_id_col == consumer_user_id,
+            is_public_col.is_(True),
+        )
+    return user_id_col == consumer_user_id
+
+
+def user_allows_public_gameplays(config: dict | None) -> bool:
+    """Check if the user's automation config allows public gameplay fallback.
+
+    Returns True when ``fallback_policy == "allow_public"`` OR
+    ``accept_public_gameplays is True``.
+    """
+    if not config:
+        return False
+    return (
+        config.get("fallback_policy") == "allow_public"
+        or config.get("accept_public_gameplays") is True
+    )

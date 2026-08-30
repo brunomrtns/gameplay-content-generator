@@ -46,6 +46,7 @@ from gpcg.domains.games.models import (
     GameplaySource,
     IngestionStatus,
 )
+from gpcg.domain.visibility import gameplay_visible_to_user
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)
@@ -139,13 +140,19 @@ class EditorialStrategyService:
         # How many days to look back for "recent" videos
         self.recent_days = 30
 
-    def decide_next_video(self, session: Session, user_id: int) -> EditorialDecision:
+    def decide_next_video(
+        self, session: Session, user_id: int, accept_public: bool = False
+    ) -> EditorialDecision:
         """Analyze the user's inventory and decide what to produce next.
 
         Returns an EditorialDecision with the chosen game, format, and fact.
+
+        When ``accept_public`` is True, public gameplays from other users are
+        treated as available to this user (per ``fallback_policy=allow_public``
+        or ``accept_public_gameplays=true`` in their automation config).
         """
         # 1. Build inventory of all games with gameplay + knowledge
-        inventory = self._build_inventory(session, user_id)
+        inventory = self._build_inventory(session, user_id, accept_public=accept_public)
         if not inventory:
             return EditorialDecision(
                 job_type="generate_short",
@@ -192,13 +199,26 @@ class EditorialStrategyService:
         )
         return decision
 
-    def _build_inventory(self, session: Session, user_id: int) -> list[GameInventory]:
-        """Build inventory of all games for the user."""
+    def _build_inventory(
+        self, session: Session, user_id: int, accept_public: bool = False
+    ) -> list[GameInventory]:
+        """Build inventory of all games for the user.
+
+        When ``accept_public`` is True, public gameplays from other users are
+        included (treated as available to this user).
+        """
         # Find all games that have gameplay sources for this user
         games_with_gameplay = session.execute(
             select(Game, func.count(GameplaySource.id), func.sum(GameplaySource.duration))
             .join(GameplaySource, GameplaySource.game_id == Game.id)
-            .where(GameplaySource.user_id == user_id)
+            .where(
+                gameplay_visible_to_user(
+                    GameplaySource.user_id,
+                    GameplaySource.is_public,
+                    user_id,
+                    allows_public=accept_public,
+                )
+            )
             .where(GameplaySource.ingestion_status == IngestionStatus.ready.value)
             .where(GameplaySource.enabled == True)
             .group_by(Game.id)
@@ -273,7 +293,14 @@ class EditorialStrategyService:
             # Total gameplay sources (including non-ready)
             inv.gameplay_sources_total = session.execute(
                 select(func.count(GameplaySource.id))
-                .where(GameplaySource.user_id == user_id)
+                .where(
+                    gameplay_visible_to_user(
+                        GameplaySource.user_id,
+                        GameplaySource.is_public,
+                        user_id,
+                        allows_public=accept_public,
+                    )
+                )
                 .where(GameplaySource.game_id == game.id)
             ).scalar() or 0
 

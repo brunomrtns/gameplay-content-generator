@@ -81,9 +81,29 @@ def list_games(
 ):
     # V2: games are now global (user_id deprecated). Show games that the user
     # has gameplay sources for, OR games still owned by this user (legacy).
+    # Include public gameplays when the user's automation config allows it.
+    from gpcg.core.models import Automation
+    from gpcg.domain.visibility import user_allows_public_gameplays
+    from sqlalchemy import or_
+
+    _automation = db.query(Automation).filter(
+        Automation.user_id == user.id
+    ).first()
+    _allows_public = user_allows_public_gameplays(
+        _automation.config if _automation else None
+    )
+
+    if _allows_public:
+        _source_user_filter = or_(
+            GameplaySource.user_id == user.id,
+            GameplaySource.is_public == True,
+        )
+    else:
+        _source_user_filter = GameplaySource.user_id == user.id
+
     user_game_ids = db.execute(
         select(GameplaySource.game_id).where(
-            GameplaySource.user_id == user.id,
+            _source_user_filter,
             GameplaySource.game_id.is_not(None),
         ).distinct()
     ).scalars().all()
@@ -104,14 +124,14 @@ def list_games(
         sources = db.execute(
             select(func.count()).select_from(GameplaySource).where(
                 GameplaySource.game_id == g.id,
-                GameplaySource.user_id == user.id,
+                _source_user_filter,
             )
         ).scalar() or 0
         assets = db.execute(
             select(func.count())
             .select_from(GameplayAsset)
             .join(GameplaySource, GameplayAsset.source_id == GameplaySource.id)
-            .where(GameplaySource.game_id == g.id, GameplaySource.user_id == user.id)
+            .where(GameplaySource.game_id == g.id, _source_user_filter)
         ).scalar() or 0
         facts = db.execute(
             select(func.count()).select_from(Fact).where(Fact.game_id == g.id, Fact.user_id == user.id)
@@ -255,9 +275,11 @@ def get_source_events(
     db: Session = Depends(get_db),
 ):
     """List mapping events for a gameplay source (timeline of what the VLM saw)."""
+    from sqlalchemy import or_
+
     source = db.query(GameplaySource).filter(
         GameplaySource.id == source_id,
-        GameplaySource.user_id == user.id,
+        or_(GameplaySource.user_id == user.id, GameplaySource.is_public == True),
     ).first()
     if not source:
         raise HTTPException(404, "Source not found")

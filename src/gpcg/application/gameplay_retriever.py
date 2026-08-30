@@ -42,6 +42,7 @@ from gpcg.application.gameplay_index_service import GameplayIndexService
 from gpcg.application.gameplay_selector import GameplaySelector, SelectedClip
 from gpcg.config import get_settings
 from gpcg.domain.creative_plan import VideoCreativePlan
+from gpcg.domain.visibility import gameplay_visible_to_user
 from gpcg.domains.games.models import (
     ContentScope,
     Game,
@@ -255,7 +256,8 @@ class GameplayRetriever:
         """
         # Decide whether to use semantic retrieval or fallback
         use_semantic = self._should_use_semantic(session, game_ids, creative_plan, video_type, user_id,
-                                                  gameplay_source_id=gameplay_source_id)
+                                                  gameplay_source_id=gameplay_source_id,
+                                                  accept_public=accept_public)
 
         if use_semantic and creative_plan is not None:
             clips = self._retrieve_semantic(
@@ -306,6 +308,7 @@ class GameplayRetriever:
         video_type: str,
         user_id: Optional[int] = None,
         gameplay_source_id: Optional[int] = None,
+        accept_public: bool = False,
     ) -> bool:
         """Check if semantic retrieval should be used."""
         if plan is None or not plan.success:
@@ -332,9 +335,21 @@ class GameplayRetriever:
         # V4: restrict to a single source if specified
         if gameplay_source_id is not None:
             query = query.where(GameplaySource.id == gameplay_source_id)
-        # V2: filter by user_id if provided
+        # V2: filter by user_id if provided. When accept_public is True,
+        # use the visibility helper so public gameplays from other users
+        # are also considered available to this consumer.
         if user_id is not None:
-            query = query.where(GameplaySource.user_id == user_id)
+            if accept_public:
+                query = query.where(
+                    gameplay_visible_to_user(
+                        GameplaySource.user_id,
+                        GameplaySource.is_public,
+                        user_id,
+                        allows_public=accept_public,
+                    )
+                )
+            else:
+                query = query.where(GameplaySource.user_id == user_id)
 
         sources = session.execute(query).scalars().all()
 
@@ -534,9 +549,21 @@ class GameplayRetriever:
         # V4: restrict to a single source if specified
         if gameplay_source_id is not None:
             query = query.where(GameplaySource.id == gameplay_source_id)
-        # V2: filter by user_id if provided
+        # V2: filter by user_id if provided. When accept_public is True,
+        # use the visibility helper so public gameplays from other users
+        # are also considered available to this consumer.
         if user_id is not None:
-            query = query.where(GameplaySource.user_id == user_id)
+            if accept_public:
+                query = query.where(
+                    gameplay_visible_to_user(
+                        GameplaySource.user_id,
+                        GameplaySource.is_public,
+                        user_id,
+                        allows_public=accept_public,
+                    )
+                )
+            else:
+                query = query.where(GameplaySource.user_id == user_id)
 
         sources = session.execute(query).scalars().all()
 

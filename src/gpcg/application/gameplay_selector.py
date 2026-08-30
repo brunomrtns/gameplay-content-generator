@@ -32,6 +32,7 @@ from gpcg.application.clip_usage_service import (
     get_used_ranges,
     find_available_segment,
 )
+from gpcg.domain.visibility import gameplay_visible_to_user
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)
@@ -122,6 +123,7 @@ class GameplaySelector:
                 session, game_id, target_duration,
                 scene_duration=scene_duration, rng=rng,
                 user_id=user_id, public_only=False,
+                accept_public=accept_public,
                 max_uses=max_uses,
             )
             if clips:
@@ -162,6 +164,7 @@ class GameplaySelector:
         rng: random.Random,
         user_id: Optional[int],
         public_only: bool,
+        accept_public: bool = False,
         max_uses: int = 1,
     ) -> list[SelectedClip]:
         """Internal: select clips with user/public filters applied."""
@@ -181,8 +184,15 @@ class GameplaySelector:
                 GameplaySource.user_id != user_id,
             )
         elif user_id is not None:
-            # User's own gameplays only
-            query = query.where(GameplaySource.user_id == user_id)
+            # User's own gameplays, plus public gameplays when accept_public
+            query = query.where(
+                gameplay_visible_to_user(
+                    GameplaySource.user_id,
+                    GameplaySource.is_public,
+                    user_id,
+                    allows_public=accept_public,
+                )
+            )
 
         query = query.order_by(GameplayAsset.used_count.asc())
         assets = session.execute(query).scalars().all()

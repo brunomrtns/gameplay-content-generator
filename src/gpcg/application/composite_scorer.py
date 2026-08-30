@@ -37,6 +37,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from gpcg.domain.editorial_types import CompositeScore, EditorialBrief
+from gpcg.domain.visibility import gameplay_visible_to_user
 from gpcg.core.models import ChannelProfile, KnowledgeItem, Video
 from gpcg.domains.games.models import GameplayAsset, GameplaySource
 from gpcg.logging import get_logger
@@ -84,6 +85,7 @@ class CompositeScorer:
         user_id: int,
         channel_embedding: Optional[list[float]] = None,
         ki_embedding: Optional[list[float]] = None,
+        accept_public: bool = False,
     ) -> CompositeScore:
         """Compute the composite score.
 
@@ -94,6 +96,8 @@ class CompositeScorer:
             user_id: the channel owner
             channel_embedding: embedding of the channel profile (optional)
             ki_embedding: embedding of the KI (optional)
+            accept_public: when True, public gameplays from other users are
+                considered available for this channel (default False)
 
         Returns:
             CompositeScore with all 3 layers + breakdown
@@ -103,7 +107,8 @@ class CompositeScorer:
 
         # Layer 2: Production Fit
         fit, fit_breakdown = self._compute_fit(
-            ki, brief, session, user_id, channel_embedding, ki_embedding
+            ki, brief, session, user_id, channel_embedding, ki_embedding,
+            accept_public=accept_public,
         )
 
         # Layer 3: Editorial Timing
@@ -125,6 +130,8 @@ class CompositeScorer:
         user_id: int,
         channel_embedding: Optional[list[float]],
         ki_embedding: Optional[list[float]],
+        *,
+        accept_public: bool = False,
     ) -> tuple[float, dict]:
         """Compute Production Fit (Layer 2).
 
@@ -133,7 +140,7 @@ class CompositeScorer:
         breakdown = {}
 
         # 1. Gameplay availability
-        gameplay_avail = self._gameplay_availability(ki, session, user_id)
+        gameplay_avail = self._gameplay_availability(ki, session, user_id, accept_public=accept_public)
         breakdown["gameplay_availability"] = gameplay_avail
 
         # 2. Content type affinity
@@ -160,11 +167,14 @@ class CompositeScorer:
 
         return fit, breakdown
 
-    def _gameplay_availability(self, ki: KnowledgeItem, session: Session, user_id: int) -> float:
+    def _gameplay_availability(self, ki: KnowledgeItem, session: Session, user_id: int, *, accept_public: bool = False) -> float:
         """Check if the channel has gameplay for the KI's game.
 
         Returns: 1.0 if gameplay ready, 0.5 if sources exist but no assets,
         0.0 if no gameplay at all (or ki has no game_id).
+
+        When ``accept_public`` is True, public gameplays from other users are
+        also considered available.
         """
         if ki.game_id is None:
             # General-topic KI — gameplay availability is neutral (0.5)
@@ -176,7 +186,12 @@ class CompositeScorer:
             select(func.count(GameplayAsset.id))
             .join(GameplaySource, GameplayAsset.source_id == GameplaySource.id)
             .where(
-                GameplaySource.user_id == user_id,
+                gameplay_visible_to_user(
+                    GameplaySource.user_id,
+                    GameplaySource.is_public,
+                    user_id,
+                    allows_public=accept_public,
+                ),
                 GameplaySource.game_id == ki.game_id,
             )
         ).scalar_one()
@@ -187,7 +202,12 @@ class CompositeScorer:
         # Check if sources exist (mapped but no clips yet)
         source_count = session.execute(
             select(func.count(GameplaySource.id)).where(
-                GameplaySource.user_id == user_id,
+                gameplay_visible_to_user(
+                    GameplaySource.user_id,
+                    GameplaySource.is_public,
+                    user_id,
+                    allows_public=accept_public,
+                ),
                 GameplaySource.game_id == ki.game_id,
             )
         ).scalar_one()

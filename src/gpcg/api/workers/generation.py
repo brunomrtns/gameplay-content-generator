@@ -198,11 +198,32 @@ def get_job_data(
     # Kids jobs don't use gameplay sources; sending them wastes bandwidth
     # and could confuse the worker's local DB sync.
     if job.domain != "kids":
-        sources_query = db.query(GameplaySource).filter(
-            GameplaySource.user_id == job.user_id,
-            GameplaySource.processing_status == "ready",
-            GameplaySource.enabled == True,
+        from gpcg.core.models import Automation
+        from gpcg.domain.visibility import user_allows_public_gameplays
+        from sqlalchemy import or_
+
+        _automation = db.query(Automation).filter(
+            Automation.user_id == job.user_id
+        ).first()
+        _allows_public = user_allows_public_gameplays(
+            _automation.config if _automation else None
         )
+
+        if _allows_public:
+            sources_query = db.query(GameplaySource).filter(
+                or_(
+                    GameplaySource.user_id == job.user_id,
+                    GameplaySource.is_public == True,
+                ),
+                GameplaySource.processing_status == "ready",
+                GameplaySource.enabled == True,
+            )
+        else:
+            sources_query = db.query(GameplaySource).filter(
+                GameplaySource.user_id == job.user_id,
+                GameplaySource.processing_status == "ready",
+                GameplaySource.enabled == True,
+            )
         sources = sources_query.all()
     else:
         sources = []

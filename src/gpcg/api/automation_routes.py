@@ -41,6 +41,7 @@ from gpcg.config import get_settings
 from gpcg.infrastructure.auth import get_current_user
 from gpcg.infrastructure.database import get_db, session_scope
 from gpcg.infrastructure.google_integration_adapter import GoogleIntegrationAdapter
+from gpcg.domain.visibility import gameplay_visible_to_user, user_allows_public_gameplays
 from gpcg.logging import get_logger
 from gpcg.api.worker_routes import worker_auth
 
@@ -275,35 +276,26 @@ def start_automation(
         raise HTTPException(status_code=400, detail="Conecte seu canal do YouTube primeiro")
 
     # Check if there are gameplays available.
-    # Count the user's own ready+enabled gameplays, PLUS public gameplays
-    # from other users when the user has opted into the public fallback
-    # (fallback_policy == "allow_public" or accept_public_gameplays == true).
-    own_sources = db.query(GameplaySource).filter(
-        GameplaySource.user_id == user.id,
+    # When the user has opted into the public fallback, public gameplays
+    # from other users count as available.
+    cfg = auto.config or {}
+    allows_public = user_allows_public_gameplays(cfg)
+
+    ready_count = db.query(GameplaySource).filter(
+        gameplay_visible_to_user(
+            GameplaySource.user_id, GameplaySource.is_public, user.id,
+            allows_public=allows_public,
+        ),
         GameplaySource.ingestion_status == IngestionStatus.ready.value,
         GameplaySource.enabled == True,
     ).count()
 
-    if own_sources == 0:
-        # No own gameplays — check if the user allows public fallback
-        # and there are public gameplays available from other users.
-        cfg = auto.config or {}
-        fallback_policy = cfg.get("fallback_policy")
-        accept_public = cfg.get("accept_public_gameplays")
-        allows_public = fallback_policy == "allow_public" or accept_public is True
-
+    if ready_count == 0:
         if allows_public:
-            public_sources = db.query(GameplaySource).filter(
-                GameplaySource.is_public == True,
-                GameplaySource.user_id != user.id,
-                GameplaySource.ingestion_status == IngestionStatus.ready.value,
-                GameplaySource.enabled == True,
-            ).count()
-            if public_sources == 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Nenhuma gameplay pública disponível no momento. Envie suas próprias gameplays ou aguarde novas gameplays públicas.",
-                )
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhuma gameplay pública disponível no momento. Envie suas próprias gameplays ou aguarde novas gameplays públicas.",
+            )
         else:
             raise HTTPException(
                 status_code=400,
@@ -393,29 +385,18 @@ def check_automation(
         if not user or not user.google_user_id:
             continue
 
-        # Check if there are gameplays available.
-        # Count own gameplays + public gameplays from other users when the
-        # user has opted into the public fallback.
+        # Check if there are gameplays available (own + public fallback).
         cfg = auto.config or {}
-        fallback_policy = cfg.get("fallback_policy")
-        accept_public = cfg.get("accept_public_gameplays")
-        allows_public = fallback_policy == "allow_public" or accept_public is True
+        allows_public = user_allows_public_gameplays(cfg)
 
-        from sqlalchemy import or_
-        ready_q = db.query(GameplaySource).filter(
+        ready_count = db.query(GameplaySource).filter(
+            gameplay_visible_to_user(
+                GameplaySource.user_id, GameplaySource.is_public, auto.user_id,
+                allows_public=allows_public,
+            ),
             GameplaySource.ingestion_status == IngestionStatus.ready.value,
             GameplaySource.enabled == True,
-        )
-        if allows_public:
-            ready_q = ready_q.filter(
-                or_(
-                    GameplaySource.user_id == auto.user_id,
-                    GameplaySource.is_public == True,
-                )
-            )
-        else:
-            ready_q = ready_q.filter(GameplaySource.user_id == auto.user_id)
-        ready_count = ready_q.count()
+        ).count()
         if ready_count == 0:
             continue
 
@@ -546,6 +527,10 @@ def _reconcile_with_composite_score(
     from gpcg.application.embedding_service import get_knowledge_item_embedding
     from gpcg.core.models import ChannelProfile, KnowledgeItemEmbedding
 
+    # Load the user's automation config to determine public gameplay access
+    _auto = db.query(Automation).filter(Automation.user_id == user_id).first()
+    _accept_public = user_allows_public_gameplays(_auto.config if _auto else None)
+
     # Fetch a larger pool to score (we need more than max_size to rank properly)
     pool_size = max(max_size * 3, 20)
     candidates = query.limit(pool_size).all()
@@ -559,7 +544,7 @@ def _reconcile_with_composite_score(
     # Build the brief for this channel (needed for scoring context)
     try:
         profile = get_or_create_profile(db, user_id)
-        intent = EditorialIntentBuilder().build(db, user_id, profile)
+        intent = EditorialIntentBuilder().build(db, user_id, profile, accept_public=_accept_public)
         brief = EditorialBriefBuilder().build(db, user_id, profile, intent)
     except Exception as e:
         log.warning(f"Composite scoring: failed to build brief for user {user_id}: {e}, falling back to editorial_score")
@@ -592,7 +577,7 @@ def _reconcile_with_composite_score(
             pass
 
         try:
-            cs = scorer.score(ki, brief, db, user_id, channel_embedding, ki_embedding)
+            cs = scorer.score(ki, brief, db, user_id, channel_embedding, ki_embedding, accept_public=_accept_public)
             scored.append((cs.final_score, ki.id))
         except Exception as e:
             log.warning(f"Composite scoring failed for KI {ki.id}: {e}, using editorial_score")
@@ -836,15 +821,10 @@ def get_editorial_data(
     # into the public fallback.
     auto = db.query(Automation).filter(Automation.user_id == user_id).first()
     auto_cfg = (auto.config or {}) if auto else {}
-    allows_public = (
-        auto_cfg.get("fallback_policy") == "allow_public"
-        or auto_cfg.get("accept_public_gameplays") is True
-    )
-    from sqlalchemy import or_ as _or
-    gameplay_vis = (
-        or_(GameplaySource.user_id == user_id, GameplaySource.is_public == True)
-        if allows_public
-        else GameplaySource.user_id == user_id
+    allows_public = user_allows_public_gameplays(auto_cfg)
+    gameplay_vis = gameplay_visible_to_user(
+        GameplaySource.user_id, GameplaySource.is_public, user_id,
+        allows_public=allows_public,
     )
     games_with_gameplay = db.execute(
         select(Game, func.count(GameplaySource.id), func.sum(GameplaySource.duration))
@@ -1090,7 +1070,9 @@ def get_editorial_brief(
             # No profile — return empty (worker falls back to basic queries)
             return {"search_queries": [], "fallback": True}
 
-        intent = EditorialIntentBuilder().build(db, user_id, profile)
+        _auto = db.query(Automation).filter(Automation.user_id == user_id).first()
+        _accept_public = user_allows_public_gameplays(_auto.config if _auto else None)
+        intent = EditorialIntentBuilder().build(db, user_id, profile, accept_public=_accept_public)
         brief = EditorialBriefBuilder().build(db, user_id, profile, intent)
 
         return {
@@ -1301,25 +1283,15 @@ def create_job_from_automation(user_id: int) -> int | None:
 
         # Check if there are gameplays available (own + public fallback)
         cfg = auto.config or {}
-        allows_public = (
-            cfg.get("fallback_policy") == "allow_public"
-            or cfg.get("accept_public_gameplays") is True
-        )
-        from sqlalchemy import or_ as _or2
-        ready_q = session.query(GameplaySource).filter(
+        allows_public = user_allows_public_gameplays(cfg)
+        ready_count = session.query(GameplaySource).filter(
+            gameplay_visible_to_user(
+                GameplaySource.user_id, GameplaySource.is_public, user_id,
+                allows_public=allows_public,
+            ),
             GameplaySource.ingestion_status == IngestionStatus.ready.value,
             GameplaySource.enabled == True,
-        )
-        if allows_public:
-            ready_q = ready_q.filter(
-                _or2(
-                    GameplaySource.user_id == user_id,
-                    GameplaySource.is_public == True,
-                )
-            )
-        else:
-            ready_q = ready_q.filter(GameplaySource.user_id == user_id)
-        ready_count = ready_q.count()
+        ).count()
         if ready_count == 0:
             return None
 
@@ -1640,7 +1612,16 @@ def create_job_from_automation(user_id: int) -> int | None:
 
     editorial = EditorialStrategyService(llm=get_llm())
     with session_scope() as session:
-        decision = editorial.decide_next_video(session, user_id)
+        # Determine whether the user accepts public gameplays (fallback_policy
+        # == "allow_public" or accept_public_gameplays == True) so the
+        # editorial inventory includes public gameplay sources.
+        from gpcg.domain.visibility import user_allows_public_gameplays
+
+        _auto = session.query(Automation).filter(Automation.user_id == user_id).first()
+        _accept_public = user_allows_public_gameplays(_auto.config if _auto else None)
+        decision = editorial.decide_next_video(
+            session, user_id, accept_public=_accept_public
+        )
 
     if not decision.success:
         log.info(f"automation: editorial decision failed: {decision.error}")

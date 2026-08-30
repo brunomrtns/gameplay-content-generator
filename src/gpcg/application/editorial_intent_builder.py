@@ -30,6 +30,7 @@ from gpcg.core.models import (
     Video,
 )
 from gpcg.domains.games.models import Game, GameplayAsset, GameplaySource
+from gpcg.domain.visibility import gameplay_visible_to_user
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)
@@ -57,8 +58,8 @@ _AFFINITY_TO_TARGET = {
 class EditorialIntentBuilder:
     """Builds the Editorial Intent for a channel at each collection cycle."""
 
-    def build(self, session: Session, user_id: int, profile: ChannelProfile) -> EditorialIntent:
-        gameplay_inventory = self._get_gameplay_inventory(session, user_id)
+    def build(self, session: Session, user_id: int, profile: ChannelProfile, accept_public: bool = False) -> EditorialIntent:
+        gameplay_inventory = self._get_gameplay_inventory(session, user_id, accept_public=accept_public)
         recent_videos = self._get_recent_videos(session, user_id, limit=10)
         queue_state = self._get_queue_state(session, user_id)
 
@@ -94,10 +95,13 @@ class EditorialIntentBuilder:
 
     # ── Gameplay inventory ─────────────────────────────────────────────────
 
-    def _get_gameplay_inventory(self, session: Session, user_id: int) -> list[dict]:
+    def _get_gameplay_inventory(self, session: Session, user_id: int, *, accept_public: bool = False) -> list[dict]:
         """Return gameplay inventory: [{game_id, name, clips_ready, ...}].
 
         Counts gameplay assets (clips) per game for sources that are ready.
+
+        When ``accept_public`` is True, public gameplays from other users are
+        also included in the inventory.
         """
         # Count ready gameplay assets per game for this user
         rows = session.execute(
@@ -109,7 +113,12 @@ class EditorialIntentBuilder:
             .join(Game, GameplaySource.game_id == Game.id)
             .join(GameplayAsset, GameplayAsset.source_id == GameplaySource.id)
             .where(
-                GameplaySource.user_id == user_id,
+                gameplay_visible_to_user(
+                    GameplaySource.user_id,
+                    GameplaySource.is_public,
+                    user_id,
+                    allows_public=accept_public,
+                ),
                 GameplaySource.game_id.isnot(None),
             )
             .group_by(GameplaySource.game_id, Game.canonical_name)
