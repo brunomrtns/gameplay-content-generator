@@ -32,6 +32,7 @@ import React, {
 import EventSource from 'react-native-sse';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getToken } from '../api/client';
+import { useQueryClient } from '@tanstack/react-query';
 
 export interface GpcgEvent {
   id: string;
@@ -63,6 +64,8 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
   const [lastEvent, setLastEvent] = useState<GpcgEvent | null>(null);
   const seenIds = useRef<Set<string>>(new Set());
   const esRef = useRef<EventSource | null>(null);
+  const hasConnectedBefore = useRef(false);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     let mounted = true;
@@ -83,7 +86,14 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       esRef.current = es;
 
       es.addEventListener('open', () => {
-        if (mounted) setConnected(true);
+        if (!mounted) return;
+        setConnected(true);
+        // On RECONNECT (not first connect), invalidate all queries to
+        // recover state missed during the disconnection.
+        if (hasConnectedBefore.current) {
+          queryClient.invalidateQueries();
+        }
+        hasConnectedBefore.current = true;
       });
 
       es.addEventListener('error', () => {
