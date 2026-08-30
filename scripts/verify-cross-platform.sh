@@ -26,6 +26,11 @@
 #   ./verify-cross-platform.sh --reset      # reseta estado (primeira vez)
 #   ./verify-cross-platform.sh --status     # mostra estado atual sem verificar
 #
+# IMPORTANTE: NÃO existe --consent. O consentimento é exclusivamente
+# interativo e exige justificativa por escrito antes da frase. Isso impede
+# uso programático/automatizado do consentimento como atalho para divergências
+# que deveriam ser corrigidas na raiz.
+#
 # Lógica:
 #   1. Computa hash MD5 de cada arquivo mapeado (web e mobile)
 #   2. Compara com estado salvo do último deploy bem-sucedido
@@ -75,35 +80,21 @@ write_result() {
 INTERACTIVE=1
 RESET=0
 STATUS_ONLY=0
-CONSENT_PHRASES=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --non-interactive) INTERACTIVE=0; shift ;;
     --reset)           RESET=1; shift ;;
     --status)          STATUS_ONLY=1; shift ;;
-    --consent)
-      # Passa a frase de consentimento via linha de comando (não é skip —
-      # a frase exata ainda é exigida). Pode ser repetido para múltiplas mídias.
-      # Ex: --consent "eu tenho consentimento que essa funcionalidade nao se aplica a midia mobile"
-      shift
-      if [[ $# -gt 0 ]]; then
-        CONSENT_PHRASES+=("$1")
-        shift
-      else
-        err "--consent requer a frase de consentimento como argumento"
-        exit 1
-      fi
-      ;;
     -h|--help)
       echo "Uso: ./verify-cross-platform.sh [opções]"
       echo ""
       echo "  --non-interactive  Trava sem pedir consentimento (para CI)"
       echo "  --reset            Reseta estado (primeira vez ou após mudanças intencionais)"
       echo "  --status           Mostra estado atual sem verificar"
-      echo "  --consent FRASE    Passa a frase de consentimento (não é skip — a frase exata é exigida)"
-      echo "                      Pode ser repetido para múltiplas mídias."
-      echo "                      Ex: --consent \"eu tenho consentimento que essa funcionalidade nao se aplica a midia mobile\""
+      echo ""
+      echo "  NÃO existe --consent. O consentimento é interativo e exige"
+      echo "  justificativa por escrito antes da frase."
       exit 0
       ;;
     *) echo "Argumento desconhecido: $1"; exit 1 ;;
@@ -430,40 +421,39 @@ for media in "${MEDIAS_TO_CONFIRM[@]}"; do
 
   REQUIRED_PHRASE="eu tenho consentimento que essa funcionalidade nao se aplica a midia $other_media"
 
-  echo "  Digite exatamente:"
-  echo ""
-  echo -e "\033[1;33m    $REQUIRED_PHRASE\033[0m"
+  echo "  ANTES de digitar a frase, você DEVE justificar por que esta"
+  echo "  funcionalidade não se aplica à outra plataforma."
+  echo "  Exemplos válidos: ajuste nativo de Android, feature web-only de UI."
+  echo "  Se for falso positivo do verificador, NÃO use consentimento —"
+  echo "  corrija o pareamento no scripts/verify-cross-platform.sh."
   echo ""
 
-  # Se a frase foi passada via --consent, usar ela (não é skip — a frase
-  # exata ainda é validada). Caso contrário, pedir interativamente.
-  user_input=""
-  if [[ ${#CONSENT_PHRASES[@]} -gt 0 ]]; then
-    # Procurar uma frase que corresponda a esta mídia
-    for phrase in "${CONSENT_PHRASES[@]}"; do
-      if [[ "$phrase" == "$REQUIRED_PHRASE" ]]; then
-        user_input="$phrase"
-        ok "Consentimento via --consent para mídia: $media"
-        break
-      fi
-    done
-    if [[ -z "$user_input" ]]; then
-      err "Nenhuma frase de --consent corresponde à mídia: $media"
-      err "Esperado: \"$REQUIRED_PHRASE\""
-      ALL_CONFIRMED=0
-    fi
-  else
-    read -r -p "  > " user_input
+  # Etapa 1: exigir justificativa por escrito (mínimo 10 caracteres)
+  echo "  1/2 — Digite a justificativa (mín. 10 caracteres):"
+  read -r -p "  > " justification
+  if [[ ${#justification} -lt 10 ]]; then
+    err "Justificativa muito curta. Deploy bloqueado."
+    err "Se é falso positivo, corrija o pareamento no verify-cross-platform.sh."
+    ALL_CONFIRMED=0
+    continue
   fi
 
-  if [[ -n "$user_input" ]]; then
-    if [[ "$user_input" == "$REQUIRED_PHRASE" ]]; then
-      ok "Consentimento confirmado para mídia: $media"
-    else
-      err "Frase incorreta para mídia: $media"
-      err "Esperado: \"$REQUIRED_PHRASE\""
-      ALL_CONFIRMED=0
-    fi
+  # Etapa 2: frase exata de consentimento
+  echo ""
+  echo "  2/2 — Agora digite a frase exata:"
+  echo -e "\033[1;33m    $REQUIRED_PHRASE\033[0m"
+  echo ""
+  read -r -p "  > " user_input
+
+  if [[ "$user_input" == "$REQUIRED_PHRASE" ]]; then
+    ok "Consentimento confirmado para mídia: $media"
+    ok "Justificativa: $justification"
+    # Registrar no log para auditoria
+    echo "[$(date -Iseconds)] CONSENT: media=$media other=$other_media reason=\"$justification\"" >> "$PROJECT_ROOT/.cross-platform-consent-log"
+  else
+    err "Frase incorreta para mídia: $media"
+    err "Esperado: \"$REQUIRED_PHRASE\""
+    ALL_CONFIRMED=0
   fi
 done
 
