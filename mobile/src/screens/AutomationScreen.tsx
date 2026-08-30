@@ -1,3 +1,4 @@
+// i18n: aligned with web i18n migration cycle
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,

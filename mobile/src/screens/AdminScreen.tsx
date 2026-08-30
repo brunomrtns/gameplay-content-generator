@@ -1,3 +1,4 @@
+// i18n: aligned with web i18n migration cycle
 import React from 'react';
 import { View, Text, StyleSheet, FlatList, RefreshControl, Alert } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
