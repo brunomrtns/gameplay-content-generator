@@ -147,11 +147,13 @@ export function AutomationPage() {
   const update = (key: keyof AutomationConfig, value: any) => {
     setConfig((prev) => {
       const next = { ...prev, [key]: value };
-      // Clean up empty/zero values but preserve booleans
+      // Clean up empty/undefined values but preserve booleans and
+      // numeric 0 (used by max_clip_uses=0 to mean "unlimited").
       Object.keys(next).forEach((k) => {
         const v = (next as any)[k];
         if (typeof v === "boolean") return;
-        if (v === "" || v === 0 || v === undefined || v === null) delete (next as any)[k];
+        if (typeof v === "number") return;
+        if (v === "" || v === undefined || v === null) delete (next as any)[k];
       });
       return next;
     });

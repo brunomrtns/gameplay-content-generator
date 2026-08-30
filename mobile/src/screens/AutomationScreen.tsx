@@ -163,11 +163,13 @@ export function AutomationScreen() {
   const update = (key: string, value: any) => {
     setConfig((prev: any) => {
       const next = { ...prev, [key]: value };
-      // Clean up empty/zero values but preserve booleans
+      // Clean up empty/undefined values but preserve booleans and
+      // numeric 0 (used by max_clip_uses=0 to mean "unlimited").
       Object.keys(next).forEach((k) => {
         const v = next[k];
         if (typeof v === 'boolean') return;
-        if (v === '' || v === 0 || v === undefined || v === null) delete next[k];
+        if (typeof v === 'number') return;
+        if (v === '' || v === undefined || v === null) delete next[k];
       });
       return next;
     });
