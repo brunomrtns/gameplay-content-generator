@@ -44,6 +44,7 @@ def list_items(
     game_id: Optional[int] = None,
     item_type: Optional[str] = None,
     status: Optional[str] = None,
+    source_type: Optional[str] = None,
     user_id: Optional[int] = None,
     limit: int = 50,
     offset: int = 0,
@@ -56,12 +57,30 @@ def list_items(
     "fresh" (or None), public KnowledgeItems already used by that consumer
     are excluded via a NOT EXISTS subquery against KnowledgeItemUsage.
     """
-    stmt = select(KnowledgeItem).order_by(KnowledgeItem.editorial_score.desc())
+    # Order: user's manual items first (most recently created), then by score.
+    # Without this, manual ideas (score=50) get buried under 1000+ RSS items
+    # with higher scores and never appear in the default limit=100 listing.
+    if user_id is not None:
+        manual_first = (
+            (KnowledgeItem.user_id == user_id)
+            & (KnowledgeItem.source_type == "manual")
+        ).desc()
+        stmt = select(KnowledgeItem).order_by(
+            manual_first,
+            KnowledgeItem.created_at.desc().nullslast(),
+            KnowledgeItem.editorial_score.desc(),
+        )
+    else:
+        stmt = select(KnowledgeItem).order_by(
+            KnowledgeItem.editorial_score.desc()
+        )
 
     if game_id is not None:
         stmt = stmt.where(KnowledgeItem.game_id == game_id)
     if item_type:
         stmt = stmt.where(KnowledgeItem.item_type == item_type)
+    if source_type:
+        stmt = stmt.where(KnowledgeItem.source_type == source_type)
     if status:
         stmt = stmt.where(KnowledgeItem.status == status)
     if user_id is not None:

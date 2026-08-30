@@ -131,15 +131,13 @@ export function IdeasScreen() {
     queryFn: async () => {
       const res = await knowledgeApi.list({
         item_type: isManualFilter ? undefined : filterType || undefined,
+        source_type: isManualFilter ? 'manual' : undefined,
         status: filterStatus || undefined,
-        limit: 100,
+        limit: 200,
         min_score: minScore > 0 ? minScore : undefined,
         game_id: filterGameId ?? undefined,
       });
       let allItems: any[] = res.items || [];
-      if (isManualFilter) {
-        allItems = allItems.filter((i: any) => i.source_type === 'manual');
-      }
       // Client-side: filter by gameplay availability
       if (onlyWithGameplay && availabilityData?.games) {
         const gamesWithGameplay = new Set(

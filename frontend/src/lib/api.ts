@@ -481,6 +481,7 @@ export const api = {
   listKnowledgeItems: (params?: {
     game_id?: number;
     item_type?: string;
+    source_type?: string;
     status?: string;
     limit?: number;
     offset?: number;
@@ -489,6 +490,7 @@ export const api = {
     const qs = new URLSearchParams();
     if (params?.game_id) qs.set("game_id", String(params.game_id));
     if (params?.item_type) qs.set("item_type", params.item_type);
+    if (params?.source_type) qs.set("source_type", params.source_type);
     if (params?.status) qs.set("status", params.status);
     if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.offset) qs.set("offset", String(params.offset));

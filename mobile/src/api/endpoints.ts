@@ -318,6 +318,7 @@ export const domainsApi = {
 export const knowledgeApi = {
   async list(params?: {
     item_type?: string;
+    source_type?: string;
     status?: string;
     game_id?: number;
     limit?: number;

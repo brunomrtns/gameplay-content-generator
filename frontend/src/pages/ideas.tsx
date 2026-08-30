@@ -144,13 +144,14 @@ export function IdeasPage() {
     setLoading(true);
     setError(null);
     try {
-      // "manual" is a source_type filter, not item_type — handle specially
+      // "manual" is a source_type filter, not item_type — handle server-side
       const isManualFilter = filterType === "manual";
       const [itemsRes, statsRes, availRes, focusRes] = await Promise.all([
         api.listKnowledgeItems({
           item_type: isManualFilter ? undefined : filterType || undefined,
+          source_type: isManualFilter ? "manual" : undefined,
           status: filterStatus || undefined,
-          limit: 100,
+          limit: 200,
           min_score: minScore > 0 ? minScore : undefined,
           game_id: filterGameId ?? undefined,
         }),
@@ -159,9 +160,6 @@ export function IdeasPage() {
         api.getCollectionFocus(),
       ]);
       let allItems: KnowledgeItem[] = itemsRes.items || [];
-      if (isManualFilter) {
-        allItems = allItems.filter((i) => i.source_type === "manual");
-      }
       // Client-side: filter by gameplay availability
       if (onlyWithGameplay && availRes.games) {
         const gamesWithGameplay = new Set(
