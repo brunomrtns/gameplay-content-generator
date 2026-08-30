@@ -412,3 +412,80 @@ def test_get_current_user_receives_response_for_cookie_passthrough():
     annotation = response_param.annotation
     annotation_name = getattr(annotation, "__name__", str(annotation))
     assert annotation_name == "Response", f"response param must be typed as Response, got {annotation_name}"
+
+
+def test_validate_bi_user_with_only_refresh_token():
+    """When bi_auth is missing (browser deleted expired cookie) but
+    bi_refresh is present, _validate_bi_user should still call BI Identity
+    with only bi_refresh. BI Identity will rotate and return a new bi_auth
+    via Set-Cookie.
+
+    This is the critical fix for the 'logged out every 15 minutes' bug:
+    the browser deletes bi_auth after maxAge=15min, so the next request
+    only has bi_refresh. Without this fix, the GPCG returns 401 immediately
+    without even trying bi_refresh.
+    """
+    from gpcg.infrastructure.auth import _validate_bi_user
+
+    request = MagicMock(spec=Request)
+    request.state = MagicMock()
+    request.state._bi_user = None
+    # Only bi_refresh, no bi_auth (browser deleted expired cookie)
+    request.cookies = {"bi_refresh": "valid_refresh_token"}
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "id": "123",
+        "email": "test@example.com",
+        "name": "Test",
+    }
+    # BI Identity rotates and sends new bi_auth
+    mock_response.headers.get_list.return_value = [
+        "bi_auth=new_rotated_token; Path=/; Max-Age=900; HttpOnly; Secure; SameSite=Lax",
+    ]
+
+    response_obj = MagicMock()
+
+    with patch("gpcg.infrastructure.auth.httpx.get", return_value=mock_response) as mock_get:
+        with patch("gpcg.infrastructure.auth.get_settings") as mock_settings:
+            mock_settings.return_value.bi_identity_url = "http://bi-api:3300"
+            with patch("gpcg.infrastructure.cache.cache_get", return_value=None):
+                with patch("gpcg.infrastructure.cache.cache_set"):
+                    result = _validate_bi_user(request, response_obj)
+
+    # User must be returned
+    assert result is not None
+    assert result["email"] == "test@example.com"
+
+    # Verify httpx.get was called with only bi_refresh (no bi_auth)
+    call_kwargs = mock_get.call_args
+    cookies_sent = call_kwargs.kwargs.get("cookies", {})
+    assert "bi_refresh" in cookies_sent, "bi_refresh must be forwarded"
+    assert "bi_auth" not in cookies_sent, "bi_auth should not be sent when missing"
+
+    # The new bi_auth cookie MUST be forwarded to the browser
+    response_obj.headers.append.assert_called_with(
+        "set-cookie",
+        "bi_auth=new_rotated_token; Path=/; Max-Age=900; HttpOnly; Secure; SameSite=Lax",
+    )
+
+
+def test_validate_bi_user_returns_none_when_no_cookies():
+    """When both bi_auth and bi_refresh are missing, return None immediately
+    without calling BI Identity.
+    """
+    from gpcg.infrastructure.auth import _validate_bi_user
+
+    request = MagicMock(spec=Request)
+    request.state = MagicMock()
+    request.state._bi_user = None
+    request.cookies = {}
+
+    response_obj = MagicMock()
+
+    with patch("gpcg.infrastructure.auth.httpx.get") as mock_get:
+        result = _validate_bi_user(request, response_obj)
+
+    assert result is None
+    mock_get.assert_not_called()

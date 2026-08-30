@@ -59,24 +59,32 @@ def _validate_bi_user(request: Request, response: Optional[Response] = None) -> 
         return cached
 
     bi_auth = request.cookies.get("bi_auth")
-    if not bi_auth:
+    bi_refresh = request.cookies.get("bi_refresh")
+
+    # If bi_auth is missing but bi_refresh exists, the browser deleted the
+    # expired access token (maxAge=15min). Try to validate using only
+    # bi_refresh — BI Identity will rotate and return a new bi_auth cookie.
+    if not bi_auth and not bi_refresh:
         return None
+    if not bi_auth:
+        # Only have bi_refresh — BI Identity can still validate + rotate
+        cookies = {"bi_refresh": bi_refresh}
+    else:
+        cookies = {"bi_auth": bi_auth}
+        if bi_refresh:
+            cookies["bi_refresh"] = bi_refresh
 
     # Try Redis cache (TTL 10s — short window to limit revocation risk)
+    # Only cache when we have bi_auth (not when relying on bi_refresh alone)
     import hashlib
     from gpcg.infrastructure.cache import cache_get, cache_set
-    cache_key_hash = hashlib.sha256(bi_auth.encode()).hexdigest()[:16]
-    cache_key = f"auth:{cache_key_hash}"
-    redis_cached = cache_get(cache_key)
-    if redis_cached is not None:
-        setattr(request.state, _BI_USER_KEY, redis_cached)
-        return redis_cached
-
-    # Also forward bi_refresh so BI Identity can refresh expired access tokens
-    bi_refresh = request.cookies.get("bi_refresh")
-    cookies = {"bi_auth": bi_auth}
-    if bi_refresh:
-        cookies["bi_refresh"] = bi_refresh
+    if bi_auth:
+        cache_key_hash = hashlib.sha256(bi_auth.encode()).hexdigest()[:16]
+        cache_key = f"auth:{cache_key_hash}"
+        redis_cached = cache_get(cache_key)
+        if redis_cached is not None:
+            setattr(request.state, _BI_USER_KEY, redis_cached)
+            return redis_cached
 
     settings = get_settings()
     try:
@@ -119,7 +127,7 @@ def _validate_bi_user(request: Request, response: Optional[Response] = None) -> 
     # NOTE: only cache if the access token was valid (not refreshed) —
     # if BI Identity rotated the cookie, the cached user would be tied to
     # the old token. We detect rotation by checking if Set-Cookie was sent.
-    if not rotated:
+    if not rotated and bi_auth:
         cache_set(cache_key, bi_user, ttl=10)
     return bi_user
 
