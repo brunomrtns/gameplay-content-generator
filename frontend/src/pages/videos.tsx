@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useTranslation, Trans } from "react-i18next";
 import { api } from "@/lib/api";
 import { useDomain } from "@/lib/domain-config";
 import { useLiveData } from "@/hooks/useLiveData";
@@ -28,15 +29,15 @@ import {
 
 const VIDEO_STATUS_CONFIG: Record<
   string,
-  { variant: "default" | "success" | "warning" | "error" | "info"; label: string }
+  { variant: "default" | "success" | "warning" | "error" | "info" }
 > = {
-  pending: { variant: "default", label: "Pendente" },
-  ready: { variant: "info", label: "Pronto" },
-  qa_passed: { variant: "success", label: "QA OK" },
-  qa_failed: { variant: "error", label: "QA Falhou" },
-  pending_approval: { variant: "warning", label: "Aguardando publicação" },
-  published: { variant: "success", label: "Publicado" },
-  publish_failed: { variant: "error", label: "Publicação falhou" },
+  pending: { variant: "default" },
+  ready: { variant: "info" },
+  qa_passed: { variant: "success" },
+  qa_failed: { variant: "error" },
+  pending_approval: { variant: "warning" },
+  published: { variant: "success" },
+  publish_failed: { variant: "error" },
 };
 
 // V3: Helper — can publish from modal (any non-published status with a file)
@@ -44,6 +45,7 @@ const canPublishModal = (v: any) =>
   v.storage_key && v.status !== "published";
 
 export function VideosPage() {
+  const { t } = useTranslation();
   const { config } = useDomain();
   const { data: videos, isLoading, refetch } = useLiveData(['videos'], () => api.listVideos(), ['video.created', 'video.updated']);
   const isKidsDomain = config.id === "kids";
@@ -81,12 +83,12 @@ export function VideosPage() {
         await refetch();
         setPlaying(null);
       } catch (e: any) {
-        setPublishError(e.message || "Falha ao publicar no YouTube");
+        setPublishError(e.message || t("videos:errors.publish"));
       } finally {
         setPublishing(null);
       }
     },
-    [refetch]
+    [refetch, t]
   );
 
   // V3: Open modal and initialize edit fields from video data
@@ -116,12 +118,12 @@ export function VideosPage() {
         await refetch();
         setEditMode(false);
       } catch (e: any) {
-        setPublishError(e.message || "Falha ao salvar metadados");
+        setPublishError(e.message || t("videos:errors.saveMeta"));
       } finally {
         setSavingMeta(false);
       }
     },
-    [editTitle, editDescription, editTags, refetch]
+    [editTitle, editDescription, editTags, refetch, t]
   );
 
   // V3: Publish from modal — sends edited metadata as overrides
@@ -149,12 +151,12 @@ export function VideosPage() {
         await api.deleteVideo(id, releaseClips);
         await refetch();
       } catch (e: any) {
-        setPublishError(e.message || "Falha ao deletar vídeo");
+        setPublishError(e.message || t("videos:errors.delete"));
       } finally {
         setDeleting(null);
       }
     },
-    [refetch]
+    [refetch, t]
   );
 
   const handleRegenerate = useCallback(
@@ -166,12 +168,12 @@ export function VideosPage() {
         await refetch();
         setPlaying(null);
       } catch (e: any) {
-        setPublishError(e.message || "Falha ao regenerar vídeo");
+        setPublishError(e.message || t("videos:errors.regenerate"));
       } finally {
         setRegenerating(null);
       }
     },
-    [refetch]
+    [refetch, t]
   );
 
   return (
@@ -179,9 +181,9 @@ export function VideosPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Vídeos</h1>
+          <h1 className="text-3xl font-bold tracking-tight">{t("videos:title")}</h1>
           <p className="mt-1 text-sm text-text-secondary">
-            Galeria de vídeos gerados {videos && `(${videos.length})`}
+            {t("videos:subtitle")} {videos && `(${videos.length})`}
           </p>
         </div>
         {/* Search */}
@@ -191,7 +193,7 @@ export function VideosPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por título..."
+            placeholder={t("videos:searchPlaceholder")}
             className="h-10 w-full sm:w-64 rounded-xl border border-border bg-surface px-10 text-sm text-text placeholder:text-text-muted transition-all focus:border-accent"
           />
         </div>
@@ -217,9 +219,9 @@ export function VideosPage() {
         <Card>
           <EmptyState
             icon={<VideoIcon className="h-10 w-10" />}
-            title={search ? "Nenhum vídeo encontrado" : "Nenhum vídeo gerado ainda"}
+            title={search ? t("videos:empty.searchTitle") : t("videos:empty.title")}
             description={
-              search ? "Tente outra busca" : "Dispare uma geração na aba Automação para criar vídeos."
+              search ? t("videos:empty.searchDescription") : t("videos:empty.description")
             }
           />
         </Card>
@@ -293,7 +295,7 @@ export function VideosPage() {
 
                   {/* Status + actions */}
                   <div className="mt-3 flex items-center justify-between gap-2">
-                    <Badge variant={statusCfg.variant}>{statusCfg.label}</Badge>
+                    <Badge variant={statusCfg.variant}>{t(`videos:status.${v.status}`)}</Badge>
 
                     <div className="flex items-center gap-1.5">
                       {/* YouTube link */}
@@ -303,7 +305,7 @@ export function VideosPage() {
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-text-muted transition-all hover:border-red-600/40 hover:text-red-400"
-                          title="Abrir no YouTube"
+                          title={t("videos:actions.openYoutube")}
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
                         </a>
@@ -314,14 +316,14 @@ export function VideosPage() {
                           onClick={() => handlePublish(v.id)}
                           disabled={publishing === v.id}
                           className="flex h-7 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[11px] font-medium text-text-muted transition-all hover:border-accent/40 hover:text-accent disabled:opacity-50"
-                          title="Publicar no YouTube"
+                          title={t("videos:actions.publishYoutube")}
                         >
                           {publishing === v.id ? (
                             <Loader2 className="h-3 w-3 animate-spin" />
                           ) : (
                             <Upload className="h-3 w-3" />
                           )}
-                          Publicar
+                          {t("videos:actions.publish")}
                         </button>
                       )}
                       {/* Regenerate button */}
@@ -330,7 +332,7 @@ export function VideosPage() {
                           onClick={() => setConfirmRegenerate(v)}
                           disabled={regenerating === v.id}
                           className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-text-muted transition-all hover:border-accent/40 hover:text-accent disabled:opacity-50"
-                          title="Regenerar vídeo"
+                          title={t("videos:actions.regenerate")}
                         >
                           {regenerating === v.id ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -344,7 +346,7 @@ export function VideosPage() {
                         onClick={() => setConfirmDelete(v.id)}
                         disabled={deleting === v.id}
                         className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-text-muted transition-all hover:border-red-600/40 hover:text-red-400 disabled:opacity-50"
-                        title="Deletar vídeo"
+                        title={t("videos:actions.delete")}
                       >
                         {deleting === v.id ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -394,13 +396,13 @@ export function VideosPage() {
                 <>
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="text-sm font-semibold flex-1">
-                      {editTitle || `Vídeo #${playing.id}`}
+                      {editTitle || t("videos:modal.videoNumber", { id: playing.id })}
                     </h3>
                     <button
                       onClick={() => setEditMode(true)}
                       className="shrink-0 rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium text-text-muted transition-all hover:border-accent/40 hover:text-accent"
                     >
-                      Editar
+                      {t("videos:modal.edit")}
                     </button>
                   </div>
                   {editDescription && (
@@ -426,7 +428,7 @@ export function VideosPage() {
                 <div className="space-y-3">
                   <div>
                     <label className="text-[10px] font-medium text-text-muted uppercase tracking-wide">
-                      Título
+                      {t("videos:modal.titleLabel")}
                     </label>
                     <input
                       type="text"
@@ -434,7 +436,7 @@ export function VideosPage() {
                       onChange={(e) => setEditTitle(e.target.value)}
                       maxLength={100}
                       className="mt-1 w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
-                      placeholder="Título do vídeo"
+                      placeholder={t("videos:modal.titlePlaceholder")}
                     />
                     <p className="mt-1 text-[10px] text-text-muted text-right">
                       {editTitle.length}/100
@@ -442,26 +444,26 @@ export function VideosPage() {
                   </div>
                   <div>
                     <label className="text-[10px] font-medium text-text-muted uppercase tracking-wide">
-                      Descrição
+                      {t("videos:modal.descriptionLabel")}
                     </label>
                     <textarea
                       value={editDescription}
                       onChange={(e) => setEditDescription(e.target.value)}
                       rows={4}
                       className="mt-1 w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent resize-none"
-                      placeholder="Descrição do vídeo"
+                      placeholder={t("videos:modal.descriptionPlaceholder")}
                     />
                   </div>
                   <div>
                     <label className="text-[10px] font-medium text-text-muted uppercase tracking-wide">
-                      Tags (separadas por vírgula)
+                      {t("videos:modal.tagsLabel")}
                     </label>
                     <input
                       type="text"
                       value={editTags}
                       onChange={(e) => setEditTags(e.target.value)}
                       className="mt-1 w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
-                      placeholder="gaming, curiosidades, nintendo"
+                      placeholder={t("videos:modal.tagsPlaceholder")}
                     />
                   </div>
                   <div className="flex justify-end gap-2">
@@ -469,14 +471,14 @@ export function VideosPage() {
                       onClick={() => setEditMode(false)}
                       className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text transition-colors"
                     >
-                      Cancelar
+                      {t("common:cancel")}
                     </button>
                     <button
                       onClick={() => handleSaveMetadata(playing.id)}
                       disabled={savingMeta}
                       className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
                     >
-                      {savingMeta ? "Salvando..." : "Salvar"}
+                      {savingMeta ? t("videos:modal.saving") : t("common:save")}
                     </button>
                   </div>
                 </div>
@@ -496,7 +498,7 @@ export function VideosPage() {
                     rel="noopener noreferrer"
                     className="flex items-center gap-1 text-red-400 hover:text-red-300"
                   >
-                    <Youtube className="h-3 w-3" /> Abrir no YouTube
+                    <Youtube className="h-3 w-3" /> {t("videos:actions.openYoutube")}
                   </a>
                 )}
               </div>
@@ -507,7 +509,7 @@ export function VideosPage() {
                 {playing.knowledge_item && (
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-1.5 text-[10px] font-medium text-text-muted uppercase tracking-wide">
-                      <Lightbulb className="h-3 w-3" /> Ideia
+                      <Lightbulb className="h-3 w-3" /> {t("videos:modal.idea")}
                     </div>
                     <p className="text-xs text-text-secondary">
                       {playing.knowledge_item.title}
@@ -526,7 +528,7 @@ export function VideosPage() {
                     )}
                     {playing.knowledge_item.source_name && (
                       <p className="text-[10px] text-text-muted">
-                        Fonte: {playing.knowledge_item.source_name}
+                        {t("videos:modal.source", { name: playing.knowledge_item.source_name })}
                       </p>
                     )}
                   </div>
@@ -536,7 +538,7 @@ export function VideosPage() {
                 {playing.game_name && (
                   <div className="space-y-1">
                     <div className="flex items-center gap-1.5 text-[10px] font-medium text-text-muted uppercase tracking-wide">
-                      <Gamepad2 className="h-3 w-3" /> Jogo
+                      <Gamepad2 className="h-3 w-3" /> {t("videos:modal.game")}
                     </div>
                     <p className="text-xs text-text-secondary">{playing.game_name}</p>
                   </div>
@@ -546,15 +548,15 @@ export function VideosPage() {
                 {playing.creative_plan && (
                   <div className="space-y-1">
                     <div className="flex items-center gap-1.5 text-[10px] font-medium text-text-muted uppercase tracking-wide">
-                      <Sparkles className="h-3 w-3" /> Plano editorial
+                      <Sparkles className="h-3 w-3" /> {t("videos:modal.editorialPlan")}
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       <span className="rounded-md bg-surface-elevated px-2 py-0.5 text-[10px] text-text-muted">
-                        {playing.creative_plan.video_type === "GENERAL_TOPIC" ? "Tópico geral" : "Sobre o jogo"}
+                        {playing.creative_plan.video_type === "GENERAL_TOPIC" ? t("videos:modal.generalTopic") : t("videos:modal.aboutGame")}
                       </span>
                       {playing.creative_plan.humor_enabled !== null && (
                         <span className="rounded-md bg-surface-elevated px-2 py-0.5 text-[10px] text-text-muted">
-                          {playing.creative_plan.humor_enabled ? "Humor" : "Sem humor"}
+                          {playing.creative_plan.humor_enabled ? t("videos:modal.humor") : t("videos:modal.noHumor")}
                           {playing.creative_plan.humor_enabled && playing.creative_plan.humor_intensity
                             ? ` (${playing.creative_plan.humor_intensity})`
                             : ""}
@@ -573,7 +575,7 @@ export function VideosPage() {
                 {playing.script_review && (
                   <div className="space-y-1">
                     <div className="flex items-center gap-1.5 text-[10px] font-medium text-text-muted uppercase tracking-wide">
-                      <CheckCircle2 className="h-3 w-3" /> Script critic
+                      <CheckCircle2 className="h-3 w-3" /> {t("videos:modal.scriptCritic")}
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant={playing.script_review.verdict === "PASS" ? "success" : "warning"}>
@@ -581,7 +583,7 @@ export function VideosPage() {
                       </Badge>
                       {playing.script_review.score != null && (
                         <span className="text-[10px] text-text-muted">
-                          Score: {playing.script_review.score.toFixed(0)}
+                          {t("videos:modal.score", { score: playing.script_review.score.toFixed(0) })}
                         </span>
                       )}
                     </div>
@@ -592,7 +594,9 @@ export function VideosPage() {
                 {playing.clips_used?.length > 0 && (
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-1.5 text-[10px] font-medium text-text-muted uppercase tracking-wide">
-                      <Clapperboard className="h-3 w-3" /> {config.content.assetLabelPlural === "imagens" ? "Imagens usadas" : "Trechos de gameplay"} ({playing.clips_used.length})
+                      <Clapperboard className="h-3 w-3" /> {config.content.assetLabelPlural === "imagens"
+                        ? t("videos:modal.clipsUsedImages", { count: playing.clips_used.length })
+                        : t("videos:modal.clipsUsedGameplay", { count: playing.clips_used.length })}
                     </div>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
                       {playing.clips_used.map((clip: any, i: number) => (
@@ -613,7 +617,7 @@ export function VideosPage() {
                 {playing.script_final && (
                   <details className="space-y-1">
                     <summary className="flex cursor-pointer items-center gap-1.5 text-[10px] font-medium text-text-muted uppercase tracking-wide hover:text-text-secondary">
-                      <FileText className="h-3 w-3" /> Roteiro
+                      <FileText className="h-3 w-3" /> {t("videos:modal.script")}
                     </summary>
                     <p className="text-xs text-text-secondary whitespace-pre-wrap mt-1.5 p-2 bg-surface-elevated rounded-lg max-h-40 overflow-y-auto">
                       {playing.script_final}
@@ -632,12 +636,12 @@ export function VideosPage() {
                   {regenerating === playing.id ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Regenerando...
+                      {t("videos:modal.regenerating")}
                     </>
                   ) : (
                     <>
                       <RotateCcw className="h-4 w-4" />
-                      Regenerar vídeo
+                      {t("videos:actions.regenerate")}
                     </>
                   )}
                 </button>
@@ -653,12 +657,12 @@ export function VideosPage() {
                   {publishing === playing.id ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Publicando no YouTube...
+                      {t("videos:modal.publishing")}
                     </>
                   ) : (
                     <>
                       <Youtube className="h-4 w-4" />
-                      Publicar no YouTube
+                      {t("videos:actions.publishYoutube")}
                     </>
                   )}
                 </button>
@@ -666,13 +670,13 @@ export function VideosPage() {
               {playing.status === "published" && (
                 <div className="flex items-center justify-center gap-2 rounded-xl border border-green-600/30 bg-green-600/10 px-4 py-3 text-sm font-medium text-green-400">
                   <CheckCircle2 className="h-4 w-4" />
-                  Publicado no YouTube
+                  {t("videos:modal.published")}
                 </div>
               )}
               {playing.status === "publish_failed" && (
                 <div className="flex items-center justify-center gap-2 rounded-xl border border-red-600/30 bg-red-600/10 px-4 py-3 text-sm font-medium text-red-400">
                   <XCircle className="h-4 w-4" />
-                  Publicação falhou — tente novamente
+                  {t("videos:modal.publishFailed")}
                 </div>
               )}
             </div>
@@ -694,24 +698,23 @@ export function VideosPage() {
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-500/10 text-red-400">
                 <Trash2 className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold">Deletar vídeo?</h3>
+              <h3 className="text-lg font-semibold">{t("videos:delete.title")}</h3>
             </div>
             <p className="text-sm text-text-secondary">
-              Esta ação não pode ser desfeita. O arquivo de vídeo e a thumbnail
-              serão removidos permanentemente.
+              {t("videos:delete.description")}
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setConfirmDelete(null)}
                 className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text-primary transition-colors"
               >
-                Cancelar
+                {t("common:cancel")}
               </button>
               <button
                 onClick={() => setConfirmRelease(confirmDelete)}
                 className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors"
               >
-                Sim, deletar
+                {t("videos:delete.confirm")}
               </button>
             </div>
           </div>
@@ -732,30 +735,29 @@ export function VideosPage() {
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-accent">
                 <Film className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold">Liberar trechos e ideia?</h3>
+              <h3 className="text-lg font-semibold">{t("videos:release.title")}</h3>
             </div>
             <p className="text-sm text-text-secondary">
-              Os trechos de {config.content.sourceLabelPlural} e a ideia de conteúdo usados neste vídeo
-              podem ser liberados para uso em vídeos futuros. Deseja liberá-los?
+              {t("videos:release.description", { sourceLabel: config.content.sourceLabelPlural })}
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setConfirmRelease(null)}
                 className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text-primary transition-colors"
               >
-                Cancelar
+                {t("common:cancel")}
               </button>
               <button
                 onClick={() => handleDelete(confirmRelease, false)}
                 className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text-primary transition-colors"
               >
-                Não, manter usados
+                {t("videos:release.keepUsed")}
               </button>
               <button
                 onClick={() => handleDelete(confirmRelease, true)}
                 className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 transition-colors"
               >
-                Sim, liberar trechos e ideia
+                {t("videos:release.confirm")}
               </button>
             </div>
           </div>
@@ -776,21 +778,26 @@ export function VideosPage() {
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-accent">
                 <RotateCcw className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold">Regenerar vídeo?</h3>
+              <h3 className="text-lg font-semibold">{t("videos:regenerate.title")}</h3>
             </div>
             <div className="space-y-2">
               <p className="text-sm text-text-secondary">
-                A ideia <strong>"{confirmRegenerate.knowledge_item?.title}"</strong> voltará
-                para o <strong>final da fila de ideias</strong>. Você poderá reorderá-la
-                antes de aprovar a geração.
+                <Trans
+                  t={t}
+                  i18nKey="videos:regenerate.desc1"
+                  components={[<strong key="0" />, <strong key="1" />]}
+                  values={{ title: confirmRegenerate.knowledge_item?.title }}
+                />
               </p>
               <p className="text-sm text-text-secondary">
-                Os trechos de {config.content.sourceLabelPlural} usados neste vídeo serão liberados e poderão
-                ser reutilizados na nova geração.
+                {t("videos:regenerate.desc2", { sourceLabel: config.content.sourceLabelPlural })}
               </p>
               <p className="text-sm text-text-secondary">
-                O vídeo atual <strong>não será deletado</strong> — os dois coexistirão
-                na galeria.
+                <Trans
+                  t={t}
+                  i18nKey="videos:regenerate.desc3"
+                  components={[<strong key="0" />]}
+                />
               </p>
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -798,14 +805,14 @@ export function VideosPage() {
                 onClick={() => setConfirmRegenerate(null)}
                 className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text-primary transition-colors"
               >
-                Cancelar
+                {t("common:cancel")}
               </button>
               <button
                 onClick={() => handleRegenerate(confirmRegenerate.id)}
                 disabled={regenerating === confirmRegenerate.id}
                 className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
               >
-                {regenerating === confirmRegenerate.id ? "Regenerando..." : "Sim, regenerar"}
+                {regenerating === confirmRegenerate.id ? t("videos:modal.regenerating") : t("videos:regenerate.confirm")}
               </button>
             </div>
           </div>

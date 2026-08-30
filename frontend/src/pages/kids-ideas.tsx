@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
 import { useLiveData } from "@/hooks/useLiveData";
 import { Spinner } from "@/components/ui";
@@ -20,30 +21,21 @@ import {
 } from "lucide-react";
 
 const TOPIC_LIBRARY_CATEGORIES = [
-  { value: "animals", label: "Animais" },
-  { value: "science", label: "Ciência" },
-  { value: "space", label: "Espaço" },
-  { value: "dinosaurs", label: "Dinossauros" },
-  { value: "nature", label: "Natureza" },
-  { value: "ocean", label: "Oceano" },
-  { value: "human_body", label: "Corpo Humano" },
-  { value: "history", label: "História" },
-  { value: "geography", label: "Geografia" },
-  { value: "vehicles", label: "Veículos" },
-  { value: "food", label: "Comida" },
-  { value: "colors", label: "Cores" },
-  { value: "numbers", label: "Números" },
-  { value: "curiosity", label: "Curiosidades" },
+  "animals",
+  "science",
+  "space",
+  "dinosaurs",
+  "nature",
+  "ocean",
+  "human_body",
+  "history",
+  "geography",
+  "vehicles",
+  "food",
+  "colors",
+  "numbers",
+  "curiosity",
 ];
-
-const IDEA_STATUS_LABELS: Record<string, string> = {
-  discovered: "Descoberta",
-  evaluated: "Avaliada",
-  queued: "Na Fila",
-  converted: "Convertida",
-  rejected: "Rejeitada",
-  expired: "Expirada",
-};
 
 const IDEA_STATUS_COLORS: Record<string, string> = {
   discovered: "bg-blue-500/20 text-blue-300 border-blue-500/30",
@@ -54,14 +46,8 @@ const IDEA_STATUS_COLORS: Record<string, string> = {
   expired: "bg-gray-500/20 text-gray-300 border-gray-500/30",
 };
 
-const IDEA_SOURCE_LABELS: Record<string, string> = {
-  ai_ideation: "IA",
-  topic_library: "Biblioteca",
-  seasonal: "Sazonal",
-  manual: "Manual",
-};
-
 export function KidsIdeasPage() {
+  const { t } = useTranslation();
   const [ideas, setIdeas] = useState<any[]>([]);
   const [queue, setQueue] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,7 +77,7 @@ export function KidsIdeasPage() {
       setIdeas(ideasRes.ideas || []);
       setQueue(queueRes.items || []);
     } catch (err: any) {
-      toast.error(err.message || "Erro ao carregar dados");
+      toast.error(err.message || t('kids:ideas.toast.loadError'));
     } finally {
       setLoading(false);
     }
@@ -111,10 +97,10 @@ export function KidsIdeasPage() {
         include_topic_library: true,
       });
       setDiscoveryJobId(result.job_id);
-      toast.info(`Job #${result.job_id} na fila — o worker vai processar`);
+      toast.info(t('kids:ideas.toast.discoveryQueued', { jobId: result.job_id }));
       setShowDiscover(false);
     } catch (err: any) {
-      toast.error(err.message || "Erro na descoberta");
+      toast.error(err.message || t('kids:ideas.toast.discoveryError'));
       setDiscovering(false);
     }
   };
@@ -124,29 +110,29 @@ export function KidsIdeasPage() {
       const result = await api.scoreKidsIdea(id);
       const jobId = result.job_id;
       if (!jobId) {
-        toast.error("Erro ao agendar avaliação");
+        toast.error(t('kids:ideas.toast.scoreScheduleError'));
         return;
       }
       setScoring((prev) => ({ ...prev, [id]: jobId }));
-      toast.info(`Avaliação na fila (job #${jobId})`);
+      toast.info(t('kids:ideas.toast.scoreQueued', { jobId }));
     } catch (err: any) {
-      toast.error(err.message || "Erro ao avaliar");
+      toast.error(err.message || t('kids:ideas.toast.scoreError'));
     }
   };
 
   const handleReject = async (id: number) => {
     try {
       await api.rejectKidsIdea(id);
-      toast.success("Ideia rejeitada");
+      toast.success(t('kids:ideas.toast.rejected'));
       await loadData();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao rejeitar");
+      toast.error(err.message || t('kids:ideas.toast.rejectError'));
     }
   };
 
   const handleCreateIdea = async () => {
     if (!newIdeaTitle.trim()) {
-      toast.error("Título é obrigatório");
+      toast.error(t('kids:ideas.toast.titleRequired'));
       return;
     }
     setCreating(true);
@@ -156,14 +142,14 @@ export function KidsIdeasPage() {
         description: newIdeaDescription.trim(),
         category: newIdeaCategory,
       });
-      toast.success("Ideia criada");
+      toast.success(t('kids:ideas.toast.created'));
       setNewIdeaTitle("");
       setNewIdeaDescription("");
       setNewIdeaCategory("general");
       setShowCreateForm(false);
       await loadData();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao criar ideia");
+      toast.error(err.message || t('kids:ideas.toast.createError'));
     } finally {
       setCreating(false);
     }
@@ -172,30 +158,30 @@ export function KidsIdeasPage() {
   const handleProduce = async (id: number) => {
     try {
       const result = await api.produceKidsIdea(id);
-      toast.success(`Job #${result.job_id} criado! Tópico #${result.topic_id}`);
+      toast.success(t('kids:ideas.toast.produced', { jobId: result.job_id, topicId: result.topic_id }));
       await loadData();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao produzir");
+      toast.error(err.message || t('kids:ideas.toast.produceError'));
     }
   };
 
   const handleAddToQueue = async (id: number) => {
     try {
       await api.addKidsIdeaToQueue(id);
-      toast.success("Adicionada à fila");
+      toast.success(t('kids:ideas.toast.addedToQueue'));
       await loadData();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao adicionar à fila");
+      toast.error(err.message || t('kids:ideas.toast.addToQueueError'));
     }
   };
 
   const handleRemoveFromQueue = async (id: number) => {
     try {
       await api.removeKidsIdeaFromQueue(id);
-      toast.success("Removida da fila");
+      toast.success(t('kids:ideas.toast.removedFromQueue'));
       await loadData();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao remover");
+      toast.error(err.message || t('kids:ideas.toast.removeFromQueueError'));
     }
   };
 
@@ -203,10 +189,10 @@ export function KidsIdeasPage() {
     setReconciling(true);
     try {
       await api.reconcileKidsIdeaQueue();
-      toast.success("Fila reconciliada");
+      toast.success(t('kids:ideas.toast.reconciled'));
       await loadData();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao reconciliar");
+      toast.error(err.message || t('kids:ideas.toast.reconcileError'));
     } finally {
       setReconciling(false);
     }
@@ -221,7 +207,7 @@ export function KidsIdeasPage() {
     try {
       await api.reorderKidsIdeaQueue(newQueue.map((q) => q.id));
     } catch (err: any) {
-      toast.error(err.message || "Erro ao reordenar");
+      toast.error(err.message || t('kids:ideas.toast.reorderError'));
       loadData();
     }
   };
@@ -246,7 +232,7 @@ export function KidsIdeasPage() {
     setDragIndex(null);
     setDragOverIndex(null);
     api.reorderKidsIdeaQueue(newQueue.map((q) => q.id)).catch((e: any) => {
-      toast.error(e.message || "Erro ao reordenar");
+      toast.error(e.message || t('kids:ideas.toast.reorderError'));
       loadData();
     });
   };
@@ -269,13 +255,13 @@ export function KidsIdeasPage() {
           onCompleted={(job) => {
             const created = job.artifacts?.created_count ?? 0;
             const skipped = job.artifacts?.skipped_count ?? 0;
-            toast.success(`Descoberta concluída: ${created} criadas, ${skipped} duplicadas`);
+            toast.success(t('kids:ideas.toast.discoveryCompleted', { created, skipped }));
             setDiscoveryJobId(null);
             setDiscovering(false);
             loadData();
           }}
           onFailed={(job) => {
-            toast.error(`Descoberta falhou: ${job.error || "erro desconhecido"}`);
+            toast.error(t('kids:ideas.toast.discoveryFailed', { error: job.error || t('kids:ideas.toast.unknownError') }));
             setDiscoveryJobId(null);
             setDiscovering(false);
           }}
@@ -286,7 +272,7 @@ export function KidsIdeasPage() {
           key={jobId}
           jobId={jobId}
           onCompleted={() => {
-            toast.success(`Ideia #${ideaIdStr} avaliada!`);
+            toast.success(t('kids:ideas.toast.scored', { id: ideaIdStr }));
             setScoring((prev) => {
               const next = { ...prev };
               delete next[Number(ideaIdStr)];
@@ -295,7 +281,7 @@ export function KidsIdeasPage() {
             loadData();
           }}
           onFailed={(job) => {
-            toast.error(`Avaliação da ideia #${ideaIdStr} falhou: ${job.error || ""}`);
+            toast.error(t('kids:ideas.toast.scoreFailed', { id: ideaIdStr, error: job.error || "" }));
             setScoring((prev) => {
               const next = { ...prev };
               delete next[Number(ideaIdStr)];
@@ -307,9 +293,9 @@ export function KidsIdeasPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-text">Ideias Kids</h1>
+          <h1 className="text-2xl font-bold text-text">{t('kids:ideas.title')}</h1>
           <p className="text-sm text-text-muted mt-1">
-            Descubra, avalie e selecione ideias para produzir vídeos educativos
+            {t('kids:ideas.subtitle')}
           </p>
         </div>
         <div className="flex gap-2">
@@ -317,13 +303,13 @@ export function KidsIdeasPage() {
             onClick={() => setShowCreateForm(!showCreateForm)}
             className="rounded-lg border border-teal-500/30 bg-teal-500/10 px-4 py-2 text-sm font-medium text-teal-300 hover:bg-teal-500/20"
           >
-            + Nova Ideia
+            {t('kids:ideas.newIdea')}
           </button>
           <button
             onClick={() => setShowDiscover(!showDiscover)}
             className="rounded-lg border border-accent/30 bg-accent/10 px-4 py-2 text-sm font-medium text-accent hover:bg-accent/20"
           >
-            <Wand2 className="h-4 w-4 inline mr-1" /> Descobrir
+            <Wand2 className="h-4 w-4 inline mr-1" /> {t('kids:ideas.discover')}
           </button>
         </div>
       </div>
@@ -332,7 +318,7 @@ export function KidsIdeasPage() {
       {showCreateForm && (
         <div className="rounded-lg border border-teal-500/30 bg-teal-500/5 p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-text">Nova Ideia Manual</h3>
+            <h3 className="font-semibold text-text">{t('kids:ideas.manualTitle')}</h3>
             <button
               onClick={() => {
                 setShowCreateForm(false);
@@ -347,29 +333,29 @@ export function KidsIdeasPage() {
           </div>
           <input
             type="text"
-            placeholder="Título da ideia"
+            placeholder={t('kids:ideas.titlePlaceholder')}
             value={newIdeaTitle}
             onChange={(e) => setNewIdeaTitle(e.target.value)}
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40"
           />
           <textarea
-            placeholder="Descrição (opcional)"
+            placeholder={t('kids:ideas.descPlaceholder')}
             value={newIdeaDescription}
             onChange={(e) => setNewIdeaDescription(e.target.value)}
             rows={3}
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 resize-none"
           />
           <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Categoria</label>
+            <label className="block text-xs font-medium text-text-secondary mb-1">{t('kids:ideas.category')}</label>
             <select
               value={newIdeaCategory}
               onChange={(e) => setNewIdeaCategory(e.target.value)}
               className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
             >
               {TOPIC_LIBRARY_CATEGORIES.map((c) => (
-                <option key={c.value} value={c.value}>{c.label}</option>
+                <option key={c} value={c}>{t(`kids:category.${c}`)}</option>
               ))}
-              <option value="general">Geral</option>
+              <option value="general">{t('kids:category.general')}</option>
             </select>
           </div>
           <div className="flex gap-2 justify-end">
@@ -382,14 +368,14 @@ export function KidsIdeasPage() {
               }}
               className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text"
             >
-              Cancelar
+              {t('common:cancel')}
             </button>
             <button
               onClick={handleCreateIdea}
               disabled={creating || !newIdeaTitle.trim()}
               className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-500 disabled:opacity-50"
             >
-              {creating ? "Criando..." : "Criar Ideia"}
+              {creating ? t('kids:ideas.creating') : t('kids:ideas.createIdea')}
             </button>
           </div>
         </div>
@@ -399,40 +385,40 @@ export function KidsIdeasPage() {
       {showDiscover && (
         <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-text">Descoberta de Ideias</h3>
+            <h3 className="font-semibold text-text">{t('kids:ideas.discoveryTitle')}</h3>
             <button onClick={() => setShowDiscover(false)} className="text-text-muted hover:text-text">
               <X className="h-4 w-4" />
             </button>
           </div>
           <div>
             <label className="block text-xs font-medium text-text-secondary mb-2">
-              Categorias (vazio = todas)
+              {t('kids:ideas.categoriesLabel')}
             </label>
             <div className="flex flex-wrap gap-2">
               {TOPIC_LIBRARY_CATEGORIES.map((c) => (
                 <button
-                  key={c.value}
+                  key={c}
                   onClick={() => {
                     setDiscoverCategories((prev) =>
-                      prev.includes(c.value)
-                        ? prev.filter((v) => v !== c.value)
-                        : [...prev, c.value],
+                      prev.includes(c)
+                        ? prev.filter((v) => v !== c)
+                        : [...prev, c],
                     );
                   }}
                   className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    discoverCategories.includes(c.value)
+                    discoverCategories.includes(c)
                       ? "border-accent bg-accent/10 text-accent"
                       : "border-border bg-surface text-text-muted hover:text-text"
                   }`}
                 >
-                  {c.label}
+                  {t(`kids:category.${c}`)}
                 </button>
               ))}
             </div>
           </div>
           <div>
             <label className="block text-xs font-medium text-text-secondary">
-              Ideias por categoria (IA): {discoverCount}
+              {t('kids:ideas.ideasPerCategory', { count: discoverCount })}
             </label>
             <input
               type="range"
@@ -448,7 +434,7 @@ export function KidsIdeasPage() {
               onClick={() => setShowDiscover(false)}
               className="rounded-lg border border-border px-4 py-2 text-sm text-text-muted hover:text-text"
             >
-              Cancelar
+              {t('common:cancel')}
             </button>
             <button
               onClick={handleDiscover}
@@ -458,10 +444,10 @@ export function KidsIdeasPage() {
               {discovering ? (
                 <span className="flex items-center gap-1.5">
                   <Clock className="h-3.5 w-3.5 animate-pulse" />
-                  Job na fila...
+                  {t('kids:ideas.jobQueued')}
                 </span>
               ) : (
-                "Descobrir"
+                t('kids:ideas.discover')
               )}
             </button>
           </div>
@@ -470,10 +456,10 @@ export function KidsIdeasPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatCard label="Total" value={ideas.length} />
-        <StatCard label="Na Fila" value={queue.length} accent="purple" />
-        <StatCard label="Avaliadas" value={ideas.filter((i) => i.status === "evaluated").length} accent="green" />
-        <StatCard label="Descobertas" value={ideas.filter((i) => i.status === "discovered").length} accent="blue" />
+        <StatCard label={t('kids:ideas.stats.total')} value={ideas.length} />
+        <StatCard label={t('kids:ideas.stats.inQueue')} value={queue.length} accent="purple" />
+        <StatCard label={t('kids:ideas.stats.evaluated')} value={ideas.filter((i) => i.status === "evaluated").length} accent="green" />
+        <StatCard label={t('kids:ideas.stats.discovered')} value={ideas.filter((i) => i.status === "discovered").length} accent="blue" />
       </div>
 
       {/* Idea Queue Section — same pattern as Games ideas.tsx */}
@@ -481,18 +467,18 @@ export function KidsIdeasPage() {
         <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4">
           <div className="flex items-center gap-2 mb-3">
             <ListChecks className="h-5 w-5 text-purple-400" />
-            <h2 className="text-lg font-semibold text-text">Fila de Produção</h2>
+            <h2 className="text-lg font-semibold text-text">{t('kids:ideas.queue.title')}</h2>
             <span className="text-sm text-text-muted">
-              {queue.length} {queue.length === 1 ? "ideia" : "ideias"} — consumidas em ordem
+              {t('kids:ideas.queue.count', { count: queue.length })}
             </span>
             <button
               onClick={handleReconcile}
               disabled={reconciling}
               className="ml-auto rounded-lg border border-border px-3 py-1.5 text-xs text-text-muted hover:text-text hover:border-accent/40"
-              title="Reconciliar fila automaticamente"
+              title={t('kids:ideas.queue.reconcileTitle')}
             >
               {reconciling ? <Loader2 className="h-3.5 w-3.5 animate-spin inline" /> : <RefreshCw className="h-3.5 w-3.5 inline" />}
-              Reconciliar
+              {t('kids:ideas.queue.reconcile')}
             </button>
           </div>
           <div className="space-y-2">
@@ -539,7 +525,7 @@ export function KidsIdeasPage() {
                 <button
                   onClick={() => handleRemoveFromQueue(item.id)}
                   className="rounded-lg border border-border px-2 py-1 text-xs text-text-muted hover:border-red-500/30 hover:text-red-300"
-                  title="Remover da fila"
+                  title={t('kids:ideas.queue.removeFromQueue')}
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -547,8 +533,7 @@ export function KidsIdeasPage() {
             ))}
           </div>
           <p className="mt-3 text-xs text-text-muted">
-            A automação consome estas ideias em ordem (primeiro = próximo vídeo).
-            Arraste para reordenar. Clique em Reconciliar para preencher automaticamente com as melhores ideias avaliadas.
+            {t('kids:ideas.queue.hint')}
           </p>
         </div>
       )}
@@ -560,13 +545,13 @@ export function KidsIdeasPage() {
           onChange={(e) => setFilterStatus(e.target.value)}
           className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/40"
         >
-          <option value="">Todos os status</option>
-          <option value="discovered">Descobertas</option>
-          <option value="evaluated">Avaliadas</option>
-          <option value="queued">Na Fila</option>
-          <option value="converted">Convertidas</option>
-          <option value="rejected">Rejeitadas</option>
-          <option value="expired">Expiradas</option>
+          <option value="">{t('kids:ideas.filter.allStatus')}</option>
+          <option value="discovered">{t('kids:ideas.status.discovered')}</option>
+          <option value="evaluated">{t('kids:ideas.status.evaluated')}</option>
+          <option value="queued">{t('kids:ideas.status.queued')}</option>
+          <option value="converted">{t('kids:ideas.status.converted')}</option>
+          <option value="rejected">{t('kids:ideas.status.rejected')}</option>
+          <option value="expired">{t('kids:ideas.status.expired')}</option>
         </select>
       </div>
 
@@ -577,7 +562,7 @@ export function KidsIdeasPage() {
         </div>
       ) : ideas.length === 0 ? (
         <div className="rounded-lg border border-border bg-surface p-8 text-center text-text-muted">
-          Nenhuma ideia ainda. Clique em Descobrir para gerar ideias automaticamente via IA, biblioteca de tópicos e calendário sazonal.
+          {t('kids:ideas.empty')}
         </div>
       ) : (
         <div className="space-y-3">
@@ -594,10 +579,10 @@ export function KidsIdeasPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${IDEA_STATUS_COLORS[idea.status] || ""}`}>
-                      {IDEA_STATUS_LABELS[idea.status] || idea.status}
+                      {t(`kids:ideas.status.${idea.status}`)}
                     </span>
                     <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted">
-                      {IDEA_SOURCE_LABELS[idea.source] || idea.source}
+                      {t(`kids:ideas.source.${idea.source}`)}
                     </span>
                     {idea.category && (
                       <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted">
@@ -633,34 +618,34 @@ export function KidsIdeasPage() {
                       className="rounded-lg bg-accent/80 px-3 py-1.5 text-xs font-medium text-white hover:bg-accent disabled:opacity-50"
                     >
                       {scoring[idea.id] ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Brain className="h-3.5 w-3.5" />}
-                      {" "}Avaliar
+                      {" "}{t('kids:ideas.actions.evaluate')}
                     </button>
                   )}
                   {idea.status === "evaluated" && !queueIds.has(idea.id) && (
                     <button
                       onClick={() => handleAddToQueue(idea.id)}
                       className="rounded-lg bg-purple-600/80 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500"
-                      title="Adicionar à fila de produção"
+                      title={t('kids:ideas.actions.addToQueueTitle')}
                     >
-                      + Fila
+                      {t('kids:ideas.actions.addToQueue')}
                     </button>
                   )}
                   {queueIds.has(idea.id) && (
                     <button
                       onClick={() => handleRemoveFromQueue(idea.id)}
                       className="rounded-lg border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 text-xs font-medium text-purple-300 hover:bg-purple-500/20"
-                      title="Remover da fila"
+                      title={t('kids:ideas.actions.removeFromQueueTitle')}
                     >
-                      Na Fila ✓
+                      {t('kids:ideas.actions.inQueue')}
                     </button>
                   )}
                   {(idea.status === "evaluated" || idea.status === "converted") && (
                     <button
                       onClick={() => handleProduce(idea.id)}
                       className="rounded-lg border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/20"
-                      title="Produzir vídeo agora"
+                      title={t('kids:ideas.actions.produceTitle')}
                     >
-                      <Play className="h-3.5 w-3.5" /> Produzir
+                      <Play className="h-3.5 w-3.5" /> {t('kids:ideas.actions.produce')}
                     </button>
                   )}
                   {(idea.status === "discovered" || idea.status === "evaluated" || idea.status === "queued") && (
@@ -668,7 +653,7 @@ export function KidsIdeasPage() {
                       onClick={() => handleReject(idea.id)}
                       className="rounded-lg border border-border px-3 py-1.5 text-xs text-text-muted hover:border-red-500/30 hover:text-red-300"
                     >
-                      Rejeitar
+                      {t('kids:ideas.actions.reject')}
                     </button>
                   )}
                 </div>

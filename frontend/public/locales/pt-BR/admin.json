@@ -1,0 +1,32 @@
+{
+  "title": "Administração",
+  "subtitle": "Gerencie usuários da plataforma",
+  "accessDenied": {
+    "title": "Acesso negado",
+    "description": "Você precisa ser administrador para acessar esta página."
+  },
+  "authBanner": {
+    "title": "Autenticação via BI Identity",
+    "description": "Usuários e credenciais são gerenciados pelo Brunointegrations Identity Service. Novos usuários são criados automaticamente no primeiro login via SSO. Aqui você pode ativar/desativar e excluir usuários locais."
+  },
+  "usersTitle": "Usuários",
+  "emptyUsers": "Nenhum usuário",
+  "badge": {
+    "you": "você",
+    "admin": "Admin",
+    "user": "Usuário",
+    "active": "Ativo",
+    "inactive": "Inativo"
+  },
+  "action": {
+    "deactivate": "Desativar",
+    "activate": "Ativar"
+  },
+  "toast": {
+    "deactivated": "Usuário desativado",
+    "activated": "Usuário ativado",
+    "deleted": "Usuário excluído",
+    "cannotDeleteSelf": "Você não pode excluir seu próprio usuário"
+  },
+  "confirmDelete": "Excluir usuário \"{{email}}\"? Esta ação não pode ser desfeita."
+}

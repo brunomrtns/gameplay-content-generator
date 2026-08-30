@@ -1,0 +1,119 @@
+{
+  "header": {
+    "subtitle": "Gerencie suas mídias e o perfil do canal"
+  },
+  "tabs": {
+    "recordings": "Gravações",
+    "channel": "Identidade do Canal"
+  },
+  "status": {
+    "discovered": "Descoberto",
+    "probing": "Analisando",
+    "ready": "Pronto",
+    "error": "Erro",
+    "needs_review": "Revisão",
+    "duplicate": "Duplicado",
+    "parked": "Estacionada",
+    "uploading": "Enviando",
+    "uploaded": "Aguardando worker",
+    "waiting_worker": "Na fila",
+    "downloading": "Baixando",
+    "downloaded": "Baixado",
+    "mapping": "Mapeando",
+    "mapped": "Mapeado",
+    "generating": "Gerando vídeo",
+    "finished": "Vídeo pronto",
+    "failed": "Falhou",
+    "pending": "Pendente",
+    "processing": "Processando",
+    "indexed": "Indexado"
+  },
+  "mapping": {
+    "loadError": "Erro ao carregar eventos",
+    "viewAnalysis": "Ver análise do mapeamento",
+    "eventsDetected": "{{count}} eventos detectados",
+    "noEvents": "Nenhum evento encontrado.",
+    "request": "Solicitar mapeamento",
+    "requestHelp": "Envia para o worker analisar (VLM + ASR)",
+    "requested": "Mapeamento solicitado para \"{{filename}}\". O worker processará em breve.",
+    "requestError": "Erro ao solicitar mapeamento"
+  },
+  "upload": {
+    "title": "Enviar gravações",
+    "dragDrop": "Arraste gravações aqui ou clique para enviar",
+    "formats": "MP4, MKV, MOV, AVI · Análise automática após o upload",
+    "uploading": "{{count}} arquivo(s) em upload…",
+    "processing": "{{count}} gravação(ões) em processamento — a análise leva alguns minutos",
+    "success": "\"{{name}}\" enviado com sucesso",
+    "error": "Erro no upload",
+    "errorWithName": "Erro no upload de \"{{name}}\""
+  },
+  "scan": {
+    "button": "Escanear inbox",
+    "scanning": "Escaneando...",
+    "found": "{{count}} arquivo(s) encontrado(s)"
+  },
+  "recordings": {
+    "title": "Gravações ({{count}})",
+    "emptyTitle": "Nenhuma gravação ainda",
+    "emptyDescription": "Envie arquivos de gameplay ou escaneie a pasta inbox para descobrir gravações automaticamente."
+  },
+  "delete": {
+    "title": "Deletar gameplay",
+    "confirm1": "Tem certeza que deseja deletar \"{{filename}}\"?\n\nIsso vai remover TODOS os clips, eventos e arquivos físicos associados a esta gameplay. Esta ação não pode ser desfeita.",
+    "confirm2": "Confirma novamente? Os arquivos no HD serão apagados permanentemente.",
+    "success": "Gameplay \"{{filename}}\" deletada. Os arquivos físicos serão removidos pelo worker.",
+    "error": "Erro ao deletar gameplay"
+  },
+  "visibility": {
+    "nowPublic": "\"{{filename}}\" agora é pública.",
+    "nowPrivate": "\"{{filename}}\" agora é privada.",
+    "error": "Erro ao alterar visibilidade",
+    "publicTitle": "Pública — clique para tornar privada",
+    "privateTitle": "Privada — clique para tornar pública",
+    "publicLabel": "Pública"
+  },
+  "enabled": {
+    "available": "\"{{filename}}\" disponível para uso.",
+    "parked": "\"{{filename}}\" estacionada.",
+    "error": "Erro ao alterar disponibilidade",
+    "availableTitle": "Disponível — clique para estacionar",
+    "parkedTitle": "Estacionada — clique para disponibilizar"
+  },
+  "game": {
+    "set": "Definir jogo",
+    "change": "Alterar jogo",
+    "assigned": "Jogo definido: {{name}}",
+    "assignError": "Erro ao atribuir jogo",
+    "removed": "Associação de jogo removida",
+    "removeError": "Erro ao remover jogo",
+    "modalTitle": "Definir Jogo da Gravação",
+    "modalSubtitle": "Busque pelo nome ou nome alternativo (GTA, Witcher, etc.)"
+  },
+  "community": {
+    "title": "Gameplays públicas da comunidade"
+  },
+  "channel": {
+    "title": "Identidade do Canal",
+    "subtitle": "Define como a IA personaliza os roteiros para o seu canal",
+    "saving": "Salvando...",
+    "saved": "Perfil do canal salvo",
+    "saveError": "Erro ao salvar perfil",
+    "description": "Descrição do canal",
+    "descriptionPlaceholder": "Ex: Meu canal é focado em análises de partidas competitivas de FPS. Quero vídeos com tom educativo, destacando estratégias e momentos decisivos.",
+    "contentLanguage": "Idioma do conteúdo",
+    "contentLanguageHelp": "Idioma em que os roteiros, narração, legendas e metadados serão gerados",
+    "niche": "Nicho",
+    "nichePlaceholder": "Ex: FPS competitivo",
+    "targetAudience": "Público-alvo",
+    "targetAudiencePlaceholder": "Ex: Jogadores casuais que querem melhorar",
+    "toneOfVoice": "Tom de voz",
+    "tonePlaceholder": "Ex: educativo, analítico",
+    "narrativeStyle": "Estilo de narrativa",
+    "narrativePlaceholder": "Ex: storytelling, análise direta",
+    "goals": "Objetivos do canal",
+    "goalsPlaceholder": "Ex: Crescer como autoridade em FPS competitivo, educar a audiência",
+    "specialRules": "Regras especiais para a IA",
+    "specialRulesPlaceholder": "Ex: Nunca usar gírias de CS:GO se o vídeo é sobre Valorant. Sempre citar o nome do agente."
+  }
+}

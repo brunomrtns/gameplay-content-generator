@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
 import { useLiveData } from "@/hooks/useLiveData";
 import { Badge, Button, Card, Spinner, EmptyState } from "@/components/ui";
@@ -35,48 +36,49 @@ import {
 } from "lucide-react";
 import { GameSearchModal, type CatalogGame } from "@/components/game-search-modal";
 
-const STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string }> = {
-  discovered: { variant: "info", label: "Descoberto" },
-  probing: { variant: "info", label: "Analisando" },
-  ready: { variant: "success", label: "Pronto" },
-  error: { variant: "error", label: "Erro" },
-  needs_review: { variant: "warning", label: "Revisão" },
-  duplicate: { variant: "default", label: "Duplicado" },
+const STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; labelKey: string }> = {
+  discovered: { variant: "info", labelKey: "content:status.discovered" },
+  probing: { variant: "info", labelKey: "content:status.probing" },
+  ready: { variant: "success", labelKey: "content:status.ready" },
+  error: { variant: "error", labelKey: "content:status.error" },
+  needs_review: { variant: "warning", labelKey: "content:status.needs_review" },
+  duplicate: { variant: "default", labelKey: "content:status.duplicate" },
 };
 
-const PROCESSING_STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string }> = {
-  uploading: { variant: "info", label: "Enviando" },
-  uploaded: { variant: "info", label: "Aguardando worker" },
-  waiting_worker: { variant: "info", label: "Na fila" },
-  downloading: { variant: "info", label: "Baixando" },
-  downloaded: { variant: "info", label: "Baixado" },
-  mapping: { variant: "info", label: "Mapeando" },
-  mapped: { variant: "success", label: "Mapeado" },
-  ready: { variant: "success", label: "Pronto" },
-  generating: { variant: "info", label: "Gerando vídeo" },
-  finished: { variant: "success", label: "Vídeo pronto" },
-  failed: { variant: "error", label: "Falhou" },
+const PROCESSING_STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; labelKey: string }> = {
+  uploading: { variant: "info", labelKey: "content:status.uploading" },
+  uploaded: { variant: "info", labelKey: "content:status.uploaded" },
+  waiting_worker: { variant: "info", labelKey: "content:status.waiting_worker" },
+  downloading: { variant: "info", labelKey: "content:status.downloading" },
+  downloaded: { variant: "info", labelKey: "content:status.downloaded" },
+  mapping: { variant: "info", labelKey: "content:status.mapping" },
+  mapped: { variant: "success", labelKey: "content:status.mapped" },
+  ready: { variant: "success", labelKey: "content:status.ready" },
+  generating: { variant: "info", labelKey: "content:status.generating" },
+  finished: { variant: "success", labelKey: "content:status.finished" },
+  failed: { variant: "error", labelKey: "content:status.failed" },
 };
 
-const KNOWLEDGE_STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string }> = {
-  pending: { variant: "info", label: "Pendente" },
-  processing: { variant: "info", label: "Processando" },
-  indexed: { variant: "success", label: "Indexado" },
-  error: { variant: "error", label: "Erro" },
+const KNOWLEDGE_STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; labelKey: string }> = {
+  pending: { variant: "info", labelKey: "content:status.pending" },
+  processing: { variant: "info", labelKey: "content:status.processing" },
+  indexed: { variant: "success", labelKey: "content:status.indexed" },
+  error: { variant: "error", labelKey: "content:status.error" },
 };
 
 type Tab = "media" | "channel";
 
 export function ContentPage() {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("media");
 
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Conteúdo</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{t("common:content")}</h1>
         <p className="mt-1 text-sm text-text-secondary">
-          Gerencie suas mídias e o perfil do canal
+          {t("content:header.subtitle")}
         </p>
       </div>
 
@@ -86,13 +88,13 @@ export function ContentPage() {
           active={tab === "media"}
           onClick={() => setTab("media")}
           icon={<Film className="h-4 w-4" />}
-          label="Gravações"
+          label={t("content:tabs.recordings")}
         />
         <TabButton
           active={tab === "channel"}
           onClick={() => setTab("channel")}
           icon={<Brain className="h-4 w-4" />}
-          label="Identidade do Canal"
+          label={t("content:tabs.channel")}
         />
       </div>
 
@@ -142,6 +144,7 @@ const EVENT_TYPE_COLORS: Record<string, string> = {
 };
 
 function MappingTimeline({ sourceId, filename }: { sourceId: number; filename: string }) {
+  const { t } = useTranslation();
   const [events, setEvents] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,7 +157,7 @@ function MappingTimeline({ sourceId, filename }: { sourceId: number; filename: s
       const res = await api.getSourceEvents(sourceId);
       setEvents(res.events || []);
     } catch (e: any) {
-      setError(e.message || "Erro ao carregar eventos");
+      setError(e.message || t("content:mapping.loadError"));
     } finally {
       setLoading(false);
     }
@@ -167,10 +170,10 @@ function MappingTimeline({ sourceId, filename }: { sourceId: number; filename: s
         onClick={loadEvents}
       >
         <Activity className="h-3.5 w-3.5" />
-        {events === null && !loading && "Ver análise do mapeamento"}
-        {loading && "Carregando..."}
+        {events === null && !loading && t("content:mapping.viewAnalysis")}
+        {loading && t("common:loading")}
         {error && <span className="text-red-400">{error}</span>}
-        {events !== null && `${events.length} eventos detectados`}
+        {events !== null && t("content:mapping.eventsDetected", { count: events.length })}
       </div>
 
       {events !== null && events.length > 0 && (
@@ -225,7 +228,7 @@ function MappingTimeline({ sourceId, filename }: { sourceId: number; filename: s
       )}
 
       {events !== null && events.length === 0 && (
-        <p className="mt-2 text-xs text-text-muted">Nenhum evento encontrado.</p>
+        <p className="mt-2 text-xs text-text-muted">{t("content:mapping.noEvents")}</p>
       )}
     </div>
   );
@@ -235,6 +238,7 @@ function MappingTimeline({ sourceId, filename }: { sourceId: number; filename: s
 // ── Media Tab (gameplay upload + list) ───────────────────────────────────────
 
 function MediaTab() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data: allSources, isLoading, refetch } = useLiveData(['sources'], () => api.listSources(undefined, undefined, true), ['gameplay.status_changed', 'job.created']);
   const { uploads, addUpload, updateUpload, removeUpload } = useUploadStore();
@@ -271,13 +275,13 @@ function MediaTab() {
         }
       });
       updateUpload(id, { status: "done", progress: 100 });
-      toast.success(`"${file.name}" enviado com sucesso`);
+      toast.success(t("content:upload.success", { name: file.name }));
       // Invalidate sources list so the new gameplay appears immediately
       queryClient.invalidateQueries({ queryKey: ['sources'] });
       setTimeout(() => removeUpload(id), 5000);
     } catch (err: any) {
-      updateUpload(id, { status: "error", error: err.message || "Erro no upload" });
-      toast.error(err.message || `Erro no upload de "${file.name}"`);
+      updateUpload(id, { status: "error", error: err.message || t("content:upload.error") });
+      toast.error(err.message || t("content:upload.errorWithName", { name: file.name }));
     }
   };
 
@@ -296,7 +300,7 @@ function MediaTab() {
     setScanning(true);
     try {
       const r = await api.scanInbox();
-      toast.success(`${r.discovered} arquivo(s) encontrado(s)`);
+      toast.success(t("content:scan.found", { count: r.discovered }));
     } catch (err: any) {
       toast.error(err.message);
     } finally {
@@ -307,44 +311,40 @@ function MediaTab() {
   const handleCreateMappingJob = async (sourceId: number, filename: string) => {
     try {
       await api.createMappingJob(sourceId);
-      toast.success(`Mapeamento solicitado para "${filename}". O worker processará em breve.`);
+      toast.success(t("content:mapping.requested", { filename }));
     } catch (err: any) {
-      toast.error(err.message || "Erro ao solicitar mapeamento");
+      toast.error(err.message || t("content:mapping.requestError"));
     }
   };
 
   const handleDeleteSource = async (sourceId: number, filename: string) => {
-    if (!window.confirm(
-      `Tem certeza que deseja deletar "${filename}"?\n\n` +
-      `Isso vai remover TODOS os clips, eventos e arquivos físicos ` +
-      `associados a esta gameplay. Esta ação não pode ser desfeita.`
-    )) return;
-    if (!window.confirm(`Confirma novamente? Os arquivos no HD serão apagados permanentemente.`)) return;
+    if (!window.confirm(t("content:delete.confirm1", { filename }))) return;
+    if (!window.confirm(t("content:delete.confirm2"))) return;
     try {
       await api.deleteSource(sourceId);
-      toast.success(`Gameplay "${filename}" deletada. Os arquivos físicos serão removidos pelo worker.`);
+      toast.success(t("content:delete.success", { filename }));
       queryClient.invalidateQueries({ queryKey: ['sources'] });
     } catch (err: any) {
-      toast.error(err.message || "Erro ao deletar gameplay");
+      toast.error(err.message || t("content:delete.error"));
     }
   };
 
   const handleToggleVisibility = async (sourceId: number, isPublic: boolean, filename: string) => {
     try {
       await api.toggleGameplayVisibility(sourceId, isPublic);
-      toast.success(`"${filename}" agora é ${isPublic ? "pública" : "privada"}.`);
+      toast.success(isPublic ? t("content:visibility.nowPublic", { filename }) : t("content:visibility.nowPrivate", { filename }));
     } catch (err: any) {
-      toast.error(err.message || "Erro ao alterar visibilidade");
+      toast.error(err.message || t("content:visibility.error"));
     }
   };
 
   const handleToggleEnabled = async (sourceId: number, enabled: boolean, filename: string) => {
     try {
       await api.toggleGameplayEnabled(sourceId, enabled);
-      toast.success(`"${filename}" ${enabled ? "disponível para uso" : "estacionada"}.`);
+      toast.success(enabled ? t("content:enabled.available", { filename }) : t("content:enabled.parked", { filename }));
       refetch();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao alterar disponibilidade");
+      toast.error(err.message || t("content:enabled.error"));
     }
   };
 
@@ -352,10 +352,10 @@ function MediaTab() {
     if (gameModalSourceId === null) return;
     try {
       await api.assignGameByName(gameModalSourceId, game.name, game.slug);
-      toast.success(`Jogo definido: ${game.name}`);
+      toast.success(t("content:game.assigned", { name: game.name }));
       refetch();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao atribuir jogo");
+      toast.error(err.message || t("content:game.assignError"));
     }
   };
 
@@ -363,10 +363,10 @@ function MediaTab() {
     if (gameModalSourceId === null) return;
     try {
       await api.assignGameByName(gameModalSourceId, "", "");
-      toast.success("Associação de jogo removida");
+      toast.success(t("content:game.removed"));
       refetch();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao remover jogo");
+      toast.error(err.message || t("content:game.removeError"));
     }
   };
 
@@ -379,9 +379,9 @@ function MediaTab() {
       {/* Upload zone */}
       <Card>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">Enviar gravações</h2>
+          <h2 className="text-sm font-semibold">{t("content:upload.title")}</h2>
           <Button variant="outline" size="sm" onClick={handleScan} disabled={scanning}>
-            {scanning ? <><Spinner className="h-3.5 w-3.5" /> Escaneando...</> : <><RefreshCw className="h-3.5 w-3.5" /> Escanear inbox</>}
+            {scanning ? <><Spinner className="h-3.5 w-3.5" /> {t("content:scan.scanning")}</> : <><RefreshCw className="h-3.5 w-3.5" /> {t("content:scan.button")}</>}
           </Button>
         </div>
         <div
@@ -416,12 +416,12 @@ function MediaTab() {
             <div>
               <p className="text-sm font-medium">
                 {hasActiveUploads
-                  ? `${activeUploads.length} arquivo(s) em upload…`
-                  : "Arraste gravações aqui ou clique para enviar"}
+                  ? t("content:upload.uploading", { count: activeUploads.length })
+                  : t("content:upload.dragDrop")}
               </p>
               {!hasActiveUploads && (
                 <p className="mt-1 text-xs text-text-muted">
-                  MP4, MKV, MOV, AVI · Análise automática após o upload
+                  {t("content:upload.formats")}
                 </p>
               )}
             </div>
@@ -434,7 +434,7 @@ function MediaTab() {
         <div className="flex items-center gap-3 rounded-xl border border-accent-warm/30 bg-accent-warm/5 px-4 py-3">
           <Loader2 className="h-4 w-4 text-accent-warm animate-spin" />
           <span className="text-sm text-accent-warm">
-            {processing} gravação(ões) em processamento — a análise leva alguns minutos
+            {t("content:upload.processing", { count: processing })}
           </span>
         </div>
       )}
@@ -442,7 +442,7 @@ function MediaTab() {
       {/* Gameplays list */}
       <div>
         <h2 className="mb-4 text-lg font-semibold">
-          Gravações {sources && `(${sources.length})`}
+          {sources ? t("content:recordings.title", { count: sources.length }) : t("content:tabs.recordings")}
         </h2>
         {isLoading && !sources ? (
           <div className="flex justify-center py-16"><Spinner className="h-8 w-8" /></div>
@@ -450,8 +450,8 @@ function MediaTab() {
           <Card>
             <EmptyState
               icon={<Film className="h-10 w-10" />}
-              title="Nenhuma gravação ainda"
-              description="Envie arquivos de gameplay ou escaneie a pasta inbox para descobrir gravações automaticamente."
+              title={t("content:recordings.emptyTitle")}
+              description={t("content:recordings.emptyDescription")}
             />
           </Card>
         ) : (
@@ -498,7 +498,7 @@ function MediaTab() {
                           <button
                             onClick={() => setGameModalSourceId(s.id)}
                             className="flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent transition-colors hover:bg-accent/20"
-                            title="Alterar jogo"
+                            title={t("content:game.change")}
                           >
                             <Gamepad2 className="h-3 w-3" />
                             {s.game_name}
@@ -508,10 +508,10 @@ function MediaTab() {
                           <button
                             onClick={() => setGameModalSourceId(s.id)}
                             className="flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-text-muted transition-colors hover:border-accent/40 hover:text-accent"
-                            title="Definir jogo"
+                            title={t("content:game.set")}
                           >
                             <Gamepad2 className="h-3 w-3" />
-                            Definir jogo
+                            {t("content:game.set")}
                           </button>
                         )}
                       </div>
@@ -519,18 +519,18 @@ function MediaTab() {
                     <div className="flex shrink-0 flex-col items-end gap-1.5">
                       <Badge variant={cfg.variant}>
                         {isProcessing && <Loader2 className="h-3 w-3 animate-spin" />}
-                        {cfg.label}
+                        {t(cfg.labelKey)}
                       </Badge>
                       {s.processing_status && s.processing_status !== "ready" && (
                         <Badge variant={procCfg.variant}>
                           {isMapping && <Server className="h-3 w-3 animate-pulse" />}
-                          {procCfg.label}
+                          {t(procCfg.labelKey)}
                         </Badge>
                       )}
                       {s.enabled === false && (
                         <Badge variant="warning">
                           <PowerOff className="h-3 w-3" />
-                          Estacionada
+                          {t("content:status.parked")}
                         </Badge>
                       )}
                       {!isProcessing && !isMapping && (
@@ -538,21 +538,21 @@ function MediaTab() {
                           <button
                             onClick={() => handleToggleEnabled(s.id, !s.enabled, s.filename)}
                             className={`transition-colors p-1 rounded ${s.enabled ? "text-green-400" : "text-text-muted hover:text-green-400"}`}
-                            title={s.enabled ? "Disponível — clique para estacionar" : "Estacionada — clique para disponibilizar"}
+                            title={s.enabled ? t("content:enabled.availableTitle") : t("content:enabled.parkedTitle")}
                           >
                             {s.enabled ? <Power className="h-4 w-4" /> : <PowerOff className="h-4 w-4" />}
                           </button>
                           <button
                             onClick={() => handleToggleVisibility(s.id, !s.is_public, s.filename)}
                             className={`transition-colors p-1 rounded ${s.is_public ? "text-accent" : "text-text-muted hover:text-accent"}`}
-                            title={s.is_public ? "Pública — clique para tornar privada" : "Privada — clique para tornar pública"}
+                            title={s.is_public ? t("content:visibility.publicTitle") : t("content:visibility.privateTitle")}
                           >
                             <Eye className="h-4 w-4" />
                           </button>
                           <button
                             onClick={() => handleDeleteSource(s.id, s.filename)}
                             className="text-text-muted hover:text-red-400 transition-colors p-1 rounded"
-                            title="Deletar gameplay"
+                            title={t("content:delete.title")}
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -563,7 +563,7 @@ function MediaTab() {
                           <button
                             onClick={() => handleDeleteSource(s.id, s.filename)}
                             className="text-text-muted hover:text-red-400 transition-colors p-1 rounded"
-                            title="Deletar gameplay"
+                            title={t("content:delete.title")}
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -583,10 +583,10 @@ function MediaTab() {
                         size="sm"
                         onClick={() => handleCreateMappingJob(s.id, s.filename)}
                       >
-                        <Cpu className="h-3.5 w-3.5" /> Solicitar mapeamento
+                        <Cpu className="h-3.5 w-3.5" /> {t("content:mapping.request")}
                       </Button>
                       <span className="text-xs text-text-muted">
-                        Envia para o worker analisar (VLM + ASR)
+                        {t("content:mapping.requestHelp")}
                       </span>
                     </div>
                   )}
@@ -608,7 +608,7 @@ function MediaTab() {
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Users className="h-4 w-4 text-text-muted" />
-            <h2 className="text-sm font-semibold">Gameplays públicas da comunidade</h2>
+            <h2 className="text-sm font-semibold">{t("content:community.title")}</h2>
             <Badge variant="default">{publicSources.length}</Badge>
           </div>
           <div className="grid gap-3">
@@ -638,7 +638,7 @@ function MediaTab() {
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1.5">
                       <Badge variant="default">
-                        <Eye className="h-3 w-3" /> Pública
+                        <Eye className="h-3 w-3" /> {t("content:visibility.publicLabel")}
                       </Badge>
                     </div>
                   </div>
@@ -657,8 +657,8 @@ function MediaTab() {
         open={gameModalSourceId !== null}
         onClose={() => setGameModalSourceId(null)}
         onSelect={handleAssignGame}
-        title="Definir Jogo da Gravação"
-        subtitle="Busque pelo nome ou nome alternativo (GTA, Witcher, etc.)"
+        title={t("content:game.modalTitle")}
+        subtitle={t("content:game.modalSubtitle")}
         allowClear
         onClear={handleClearGame}
       />
@@ -667,6 +667,7 @@ function MediaTab() {
 }
 
 function ChannelProfileSection() {
+  const { t } = useTranslation();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -704,9 +705,9 @@ function ChannelProfileSection() {
     setSaving(true);
     try {
       await api.updateChannelProfile(form);
-      toast.success("Perfil do canal salvo");
+      toast.success(t("content:channel.saved"));
     } catch (err: any) {
-      toast.error(err.message || "Erro ao salvar perfil");
+      toast.error(err.message || t("content:channel.saveError"));
     } finally {
       setSaving(false);
     }
@@ -722,26 +723,26 @@ function ChannelProfileSection() {
         <div>
           <h2 className="flex items-center gap-2 text-sm font-semibold">
             <Brain className="h-4 w-4 text-accent" />
-            Identidade do Canal
+            {t("content:channel.title")}
           </h2>
           <p className="mt-1 text-xs text-text-muted">
-            Define como a IA personaliza os roteiros para o seu canal
+            {t("content:channel.subtitle")}
           </p>
         </div>
         <Button size="sm" onClick={handleSave} disabled={saving}>
-          {saving ? <><Spinner className="h-3.5 w-3.5" /> Salvando...</> : <><Save className="h-3.5 w-3.5" /> Salvar</>}
+          {saving ? <><Spinner className="h-3.5 w-3.5" /> {t("content:channel.saving")}</> : <><Save className="h-3.5 w-3.5" /> {t("common:save")}</>}
         </Button>
       </div>
 
       <div className="space-y-4">
         <div>
           <label className="mb-1 block text-xs font-medium text-text-secondary">
-            Descrição do canal
+            {t("content:channel.description")}
           </label>
           <textarea
             value={form.channel_description}
             onChange={(e) => setForm({ ...form, channel_description: e.target.value })}
-            placeholder="Ex: Meu canal é focado em análises de partidas competitivas de FPS. Quero vídeos com tom educativo, destacando estratégias e momentos decisivos."
+            placeholder={t("content:channel.descriptionPlaceholder")}
             rows={3}
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
           />
@@ -749,7 +750,7 @@ function ChannelProfileSection() {
 
         <div>
           <label className="mb-1 block text-xs font-medium text-text-secondary">
-            Idioma do conteúdo
+            {t("content:channel.contentLanguage")}
           </label>
           <select
             value={form.target_language}
@@ -763,30 +764,30 @@ function ChannelProfileSection() {
             <option value="zh">普通话 (Mandarin)</option>
           </select>
           <p className="mt-1 text-xs text-text-muted">
-            Idioma em que os roteiros, narração, legendas e metadados serão gerados
+            {t("content:channel.contentLanguageHelp")}
           </p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium text-text-secondary">
-              Nicho
+              {t("content:channel.niche")}
             </label>
             <input
               value={form.niche}
               onChange={(e) => setForm({ ...form, niche: e.target.value })}
-              placeholder="Ex: FPS competitivo"
+              placeholder={t("content:channel.nichePlaceholder")}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
             />
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-text-secondary">
-              Público-alvo
+              {t("content:channel.targetAudience")}
             </label>
             <input
               value={form.target_audience}
               onChange={(e) => setForm({ ...form, target_audience: e.target.value })}
-              placeholder="Ex: Jogadores casuais que querem melhorar"
+              placeholder={t("content:channel.targetAudiencePlaceholder")}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
             />
           </div>
@@ -795,23 +796,23 @@ function ChannelProfileSection() {
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium text-text-secondary">
-              Tom de voz
+              {t("content:channel.toneOfVoice")}
             </label>
             <input
               value={form.tone_of_voice}
               onChange={(e) => setForm({ ...form, tone_of_voice: e.target.value })}
-              placeholder="Ex: educativo, analítico"
+              placeholder={t("content:channel.tonePlaceholder")}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
             />
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-text-secondary">
-              Estilo de narrativa
+              {t("content:channel.narrativeStyle")}
             </label>
             <input
               value={form.narrative_style}
               onChange={(e) => setForm({ ...form, narrative_style: e.target.value })}
-              placeholder="Ex: storytelling, análise direta"
+              placeholder={t("content:channel.narrativePlaceholder")}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
             />
           </div>
@@ -819,12 +820,12 @@ function ChannelProfileSection() {
 
         <div>
           <label className="mb-1 block text-xs font-medium text-text-secondary">
-            Objetivos do canal
+            {t("content:channel.goals")}
           </label>
           <textarea
             value={form.content_goals}
             onChange={(e) => setForm({ ...form, content_goals: e.target.value })}
-            placeholder="Ex: Crescer como autoridade em FPS competitivo, educar a audiência"
+            placeholder={t("content:channel.goalsPlaceholder")}
             rows={2}
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
           />
@@ -832,12 +833,12 @@ function ChannelProfileSection() {
 
         <div>
           <label className="mb-1 block text-xs font-medium text-text-secondary">
-            Regras especiais para a IA
+            {t("content:channel.specialRules")}
           </label>
           <textarea
             value={form.special_rules}
             onChange={(e) => setForm({ ...form, special_rules: e.target.value })}
-            placeholder="Ex: Nunca usar gírias de CS:GO se o vídeo é sobre Valorant. Sempre citar o nome do agente."
+            placeholder={t("content:channel.specialRulesPlaceholder")}
             rows={2}
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
           />

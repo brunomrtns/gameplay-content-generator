@@ -1,0 +1,219 @@
+{
+  "title": "Conteúdo Kids",
+  "subtitle": "Gerencie suas mídias e o perfil do canal",
+  "badge": "Kids",
+  "tab": {
+    "media": "Mídias",
+    "config": "Configuração do Canal"
+  },
+  "category": {
+    "animals": "Animais",
+    "science": "Ciência",
+    "space": "Espaço",
+    "dinosaurs": "Dinossauros",
+    "nature": "Natureza",
+    "ocean": "Oceano",
+    "human_body": "Corpo Humano",
+    "history": "História",
+    "geography": "Geografia",
+    "vehicles": "Veículos",
+    "food": "Comida",
+    "colors": "Cores",
+    "numbers": "Números",
+    "curiosity": "Curiosidades",
+    "general": "Geral"
+  },
+  "howItWorks": {
+    "title": "Como funciona",
+    "steps": "<strong>1.</strong> Envie vídeos e imagens · <strong>2.</strong> Adicione <strong>tags</strong> (ex: dinossauro, floresta) — é assim que o sistema encontra as melhores mídias pra cada ideia · <strong>3.</strong> Vídeos são mapeados automaticamente (VLM analisa cada cena)",
+    "fallback": "Mídias sem tags = <strong>gerais</strong> (usadas como fallback pra qualquer vídeo, igual gameplays genéricas nos Games)"
+  },
+  "upload": {
+    "uploading": "Enviando mídias...",
+    "dropHere": "Arraste imagens e vídeos aqui",
+    "clickHint": "ou clique para selecionar — PNG, JPEG, WebP, GIF, MP4, WebM, MOV",
+    "tagsLabel": "Tags (separadas por vírgula) — categoriza a mídia",
+    "tagsPlaceholder": "Ex: dinossauro, floresta, verde — vazio = geral",
+    "descLabel": "Descrição (opcional)",
+    "descPlaceholder": "Ex: Tiranossauro em floresta"
+  },
+  "uploadStatus": {
+    "done": "Concluído",
+    "error": "Erro"
+  },
+  "processingBanner": "{{count}} mídia(s) em processamento — a análise leva alguns minutos",
+  "filter": {
+    "images": "Imagens",
+    "videos": "Vídeos",
+    "readyOnly": "Só prontos"
+  },
+  "media": {
+    "title": "Mídias",
+    "empty": {
+      "title": "Nenhuma mídia na biblioteca",
+      "description": "Envie imagens e vídeos para a biblioteca do canal. Adicione tags para categorizar — o sistema usa as tags pra encontrar as melhores mídias pra cada ideia."
+    },
+    "publicTitle": "Mídias públicas da comunidade"
+  },
+  "processingStatus": {
+    "uploading": "Enviando",
+    "queued": "Na fila",
+    "processing": "Processando",
+    "mapping": "Mapeando",
+    "ready": "Pronto",
+    "failed": "Falhou"
+  },
+  "timeline": {
+    "loadError": "Erro ao carregar eventos",
+    "viewAnalysis": "Ver análise do mapeamento",
+    "eventsDetected": "{{count}} eventos detectados",
+    "noEvents": "Nenhum evento encontrado."
+  },
+  "card": {
+    "confirmDelete": "Excluir \"{{name}}\"?",
+    "deleted": "Mídia excluída",
+    "deleteError": "Erro ao excluir",
+    "updated": "Mídia atualizada",
+    "updateError": "Erro ao atualizar",
+    "visibilityChanged": "\"{{name}}\" agora é {{visibility}}.",
+    "visibilityPublic": "pública",
+    "visibilityPrivate": "privada",
+    "visibilityError": "Erro ao alterar visibilidade",
+    "eventCount": "{{count}} eventos",
+    "noTags": "Geral — sem tags (fallback)",
+    "public": "Pública",
+    "editTagsDesc": "Editar tags e descrição",
+    "makePrivate": "Pública — clique para tornar privada",
+    "makePublic": "Privada — clique para tornar pública",
+    "deleteMedia": "Deletar mídia",
+    "requestMapping": "Solicitar mapeamento",
+    "requestMappingHint": "Envia para o worker analisar (VLM + ASR)",
+    "tagsPlaceholder": "tags (vírgula)",
+    "descPlaceholder": "descrição"
+  },
+  "toast": {
+    "uploadSuccess": "\"{{name}}\" enviado com sucesso",
+    "uploadError": "Erro no upload",
+    "uploadErrorFile": "Erro no upload de \"{{name}}\"",
+    "mappingRequested": "Mapeamento solicitado para \"{{name}}\". O worker processará em breve.",
+    "mappingError": "Erro ao solicitar mapeamento"
+  },
+  "config": {
+    "profileSaved": "Perfil editorial salvo",
+    "profileSaveError": "Erro ao salvar perfil",
+    "saving": "Salvando...",
+    "onboarding": {
+      "title": "Configure seu canal para começar",
+      "description": "Preencha o perfil editorial abaixo para que a IA gere ideias relevantes para o seu canal. Sem isso, a descoberta funciona mas sem direcionamento editorial."
+    },
+    "channelIdentity": "Identidade do Canal",
+    "channelIdentityDesc": "Define como a IA personaliza ideias e roteiros para o seu canal",
+    "channelDescription": "Descrição do canal",
+    "channelDescriptionPlaceholder": "Ex: Canal educativo infantil sobre ciência, natureza e curiosidades. Vídeos curtos e divertidos para crianças de 6-10 anos.",
+    "niche": "Nicho",
+    "nichePlaceholder": "Ex: Ciência e natureza para crianças",
+    "targetAudience": "Público-alvo",
+    "targetAudiencePlaceholder": "Ex: Crianças de 6-10 anos e seus pais",
+    "toneOfVoice": "Tom de voz",
+    "toneOfVoicePlaceholder": "Ex: amigável, curioso, divertido",
+    "narrativeStyle": "Estilo de narrativa",
+    "narrativeStylePlaceholder": "Ex: perguntas e respostas, descoberta",
+    "contentGoals": "Objetivos de conteúdo",
+    "contentGoalsPlaceholder": "Ex: Educar e entreter, despertar curiosidade científica",
+    "kidsConfig": "Configuração Kids",
+    "kidsConfigDesc": "Faixa etária, categorias e duração para a descoberta de ideias",
+    "ageRange": "Faixa etária alvo",
+    "ageRange3to6": "3-6 anos",
+    "ageRange6to10": "6-10 anos",
+    "ageRange7to10": "7-10 anos",
+    "ageRangeAll": "Todas as idades",
+    "targetDuration": "Duração alvo (segundos): {{count}}",
+    "interestCategories": "Categorias de interesse (vazio = todas)"
+  },
+  "ideas": {
+    "title": "Ideias Kids",
+    "subtitle": "Descubra, avalie e selecione ideias para produzir vídeos educativos",
+    "newIdea": "+ Nova Ideia",
+    "discover": "Descobrir",
+    "manualTitle": "Nova Ideia Manual",
+    "titlePlaceholder": "Título da ideia",
+    "descPlaceholder": "Descrição (opcional)",
+    "category": "Categoria",
+    "creating": "Criando...",
+    "createIdea": "Criar Ideia",
+    "discoveryTitle": "Descoberta de Ideias",
+    "categoriesLabel": "Categorias (vazio = todas)",
+    "ideasPerCategory": "Ideias por categoria (IA): {{count}}",
+    "jobQueued": "Job na fila...",
+    "empty": "Nenhuma ideia ainda. Clique em Descobrir para gerar ideias automaticamente via IA, biblioteca de tópicos e calendário sazonal.",
+    "status": {
+      "discovered": "Descoberta",
+      "evaluated": "Avaliada",
+      "queued": "Na Fila",
+      "converted": "Convertida",
+      "rejected": "Rejeitada",
+      "expired": "Expirada"
+    },
+    "source": {
+      "ai_ideation": "IA",
+      "topic_library": "Biblioteca",
+      "seasonal": "Sazonal",
+      "manual": "Manual"
+    },
+    "stats": {
+      "total": "Total",
+      "inQueue": "Na Fila",
+      "evaluated": "Avaliadas",
+      "discovered": "Descobertas"
+    },
+    "queue": {
+      "title": "Fila de Produção",
+      "count_one": "{{count}} ideia — consumidas em ordem",
+      "count_other": "{{count}} ideias — consumidas em ordem",
+      "reconcileTitle": "Reconciliar fila automaticamente",
+      "reconcile": "Reconciliar",
+      "removeFromQueue": "Remover da fila",
+      "hint": "A automação consome estas ideias em ordem (primeiro = próximo vídeo). Arraste para reordenar. Clique em Reconciliar para preencher automaticamente com as melhores ideias avaliadas."
+    },
+    "filter": {
+      "allStatus": "Todos os status"
+    },
+    "actions": {
+      "evaluate": "Avaliar",
+      "addToQueueTitle": "Adicionar à fila de produção",
+      "addToQueue": "+ Fila",
+      "removeFromQueueTitle": "Remover da fila",
+      "inQueue": "Na Fila ✓",
+      "produceTitle": "Produzir vídeo agora",
+      "produce": "Produzir",
+      "reject": "Rejeitar"
+    },
+    "toast": {
+      "loadError": "Erro ao carregar dados",
+      "discoveryQueued": "Job #{{jobId}} na fila — o worker vai processar",
+      "discoveryError": "Erro na descoberta",
+      "scoreScheduleError": "Erro ao agendar avaliação",
+      "scoreQueued": "Avaliação na fila (job #{{jobId}})",
+      "scoreError": "Erro ao avaliar",
+      "rejected": "Ideia rejeitada",
+      "rejectError": "Erro ao rejeitar",
+      "titleRequired": "Título é obrigatório",
+      "created": "Ideia criada",
+      "createError": "Erro ao criar ideia",
+      "produced": "Job #{{jobId}} criado! Tópico #{{topicId}}",
+      "produceError": "Erro ao produzir",
+      "addedToQueue": "Adicionada à fila",
+      "addToQueueError": "Erro ao adicionar à fila",
+      "removedFromQueue": "Removida da fila",
+      "removeFromQueueError": "Erro ao remover",
+      "reconciled": "Fila reconciliada",
+      "reconcileError": "Erro ao reconciliar",
+      "reorderError": "Erro ao reordenar",
+      "discoveryCompleted": "Descoberta concluída: {{created}} criadas, {{skipped}} duplicadas",
+      "discoveryFailed": "Descoberta falhou: {{error}}",
+      "unknownError": "erro desconhecido",
+      "scored": "Ideia #{{id}} avaliada!",
+      "scoreFailed": "Avaliação da ideia #{{id}} falhou: {{error}}"
+    }
+  }
+}

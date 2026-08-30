@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
 import { useDomain } from "@/lib/domain-config";
 import { useLiveData } from "@/hooks/useLiveData";
@@ -40,29 +41,29 @@ import {
 } from "lucide-react";
 
 const CREATIVE_STYLES = [
-  { value: "", label: "Padrão (sem estilo)" },
-  { value: "humor", label: "Humor" },
-  { value: "absurd", label: "Absurdo" },
-  { value: "sarcastic", label: "Sarcástico" },
-  { value: "storytelling", label: "Narrativa" },
-  { value: "curiosity", label: "Curiosidade" },
-  { value: "nostalgia", label: "Nostalgia" },
-  { value: "dark_humor", label: "Humor negro" },
-  { value: "high_energy", label: "Alta energia" },
+  { value: "", labelKey: "automation:creativeStyle.default" },
+  { value: "humor", labelKey: "automation:creativeStyle.humor" },
+  { value: "absurd", labelKey: "automation:creativeStyle.absurd" },
+  { value: "sarcastic", labelKey: "automation:creativeStyle.sarcastic" },
+  { value: "storytelling", labelKey: "automation:creativeStyle.storytelling" },
+  { value: "curiosity", labelKey: "automation:creativeStyle.curiosity" },
+  { value: "nostalgia", labelKey: "automation:creativeStyle.nostalgia" },
+  { value: "dark_humor", labelKey: "automation:creativeStyle.darkHumor" },
+  { value: "high_energy", labelKey: "automation:creativeStyle.highEnergy" },
 ];
 
 const YOUTUBE_PRIVACY = [
-  { value: "public", label: "Público" },
-  { value: "unlisted", label: "Não listado" },
-  { value: "private", label: "Privado" },
+  { value: "public", labelKey: "automation:youtube.public" },
+  { value: "unlisted", labelKey: "automation:youtube.unlisted" },
+  { value: "private", labelKey: "automation:youtube.private" },
 ];
 
 const YOUTUBE_CATEGORIES = [
-  { value: "20", label: "Games" },
-  { value: "22", label: "Pessoas e blogs" },
-  { value: "24", label: "Entretenimento" },
-  { value: "23", label: "Comédia" },
-  { value: "27", label: "Educação" },
+  { value: "20", labelKey: "automation:youtube.categoryGames" },
+  { value: "22", labelKey: "automation:youtube.categoryPeopleBlogs" },
+  { value: "24", labelKey: "automation:youtube.categoryEntertainment" },
+  { value: "23", labelKey: "automation:youtube.categoryComedy" },
+  { value: "27", labelKey: "automation:youtube.categoryEducation" },
 ];
 
 interface AutomationConfig extends VideoCustomization {
@@ -119,6 +120,7 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 }
 
 export function AutomationPage() {
+  const { t } = useTranslation();
   const { config: domainConfig } = useDomain();
   const queryClient = useQueryClient();
   const { data: automation } = useLiveData(['automation'], () => api.getAutomation(), ['automation.status_changed', 'job.status_changed']);
@@ -159,9 +161,9 @@ export function AutomationPage() {
     setSaving(true);
     try {
       await api.updateAutomation({ config });
-      toast.success("Configuração salva");
+      toast.success(t("automation:toast.configSaved"));
     } catch (err: any) {
-      toast.error(err.message || "Erro ao salvar");
+      toast.error(err.message || t("automation:toast.saveError"));
     } finally {
       setSaving(false);
     }
@@ -172,13 +174,13 @@ export function AutomationPage() {
     try {
       if (automation?.status === "running") {
         await api.pauseAutomation();
-        toast.success("Automação pausada. O vídeo atual será concluído.");
+        toast.success(t("automation:toast.paused"));
       } else {
         await api.startAutomation();
-        toast.success("Automação iniciada! Vídeos serão produzidos continuamente.");
+        toast.success(t("automation:toast.started"));
       }
     } catch (err: any) {
-      toast.error(err.message || "Erro ao alterar automação");
+      toast.error(err.message || t("automation:toast.toggleError"));
     } finally {
       setToggling(false);
     }
@@ -190,7 +192,7 @@ export function AutomationPage() {
     setUploadingVoice(true);
     try {
       const r = await api.uploadVoice(file);
-      toast.success(`Voz "${r.filename}" enviada`);
+      toast.success(t("automation:toast.voiceUploaded", { filename: r.filename }));
       const updated = await api.listVoices();
       queryClient.setQueryData(['voices'], updated);
     } catch (err: any) {
@@ -202,10 +204,10 @@ export function AutomationPage() {
   };
 
   const deleteVoice = async (filename: string) => {
-    if (!confirm(`Excluir a voz "${filename}"?`)) return;
+    if (!confirm(t("automation:toast.confirmDeleteVoice", { filename }))) return;
     try {
       await api.deleteVoice(filename);
-      toast.success(`Voz excluída`);
+      toast.success(t("automation:toast.voiceDeleted"));
       const updated = await api.listVoices();
       queryClient.setQueryData(['voices'], updated);
       if (config.voice === filename) update("voice", "");
@@ -227,12 +229,12 @@ export function AutomationPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Automação</h1>
-          <p className="mt-1 text-sm text-text-secondary">Configure como sua máquina produz vídeos</p>
+          <h1 className="text-3xl font-bold tracking-tight">{t("automation:header.title")}</h1>
+          <p className="mt-1 text-sm text-text-secondary">{t("automation:header.subtitle")}</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleSave} disabled={saving}>
-            {saving ? <><Spinner className="h-4 w-4" /> Salvando...</> : <><Save className="h-4 w-4" /> Salvar</>}
+            {saving ? <><Spinner className="h-4 w-4" /> {t("automation:header.saving")}</> : <><Save className="h-4 w-4" /> {t("common:save")}</>}
           </Button>
           <Button
             variant={automation?.status === "running" ? "danger" : "primary"}
@@ -240,11 +242,11 @@ export function AutomationPage() {
             disabled={toggling}
           >
             {toggling ? (
-              <><Spinner className="h-4 w-4" /> Aguarde...</>
+              <><Spinner className="h-4 w-4" /> {t("automation:header.pleaseWait")}</>
             ) : automation?.status === "running" ? (
-              <><Pause className="h-4 w-4" /> Pausar</>
+              <><Pause className="h-4 w-4" /> {t("automation:header.pause")}</>
             ) : (
-              <><Play className="h-4 w-4" /> Iniciar</>
+              <><Play className="h-4 w-4" /> {t("automation:header.start")}</>
             )}
           </Button>
         </div>
@@ -259,54 +261,53 @@ export function AutomationPage() {
           {/* Section 1: Conteúdo (Games-only — gameplay source selection) */}
           {domainConfig.features.gameplayUpload && (
           <Card>
-            <SectionTitle icon={Film} title="Conteúdo" desc="Qual gameplay usar como fonte" />
+            <SectionTitle icon={Film} title={t("automation:content.title")} desc={t("automation:content.description")} />
             <div className="space-y-4">
               <div>
-                <Label>Jogo</Label>
+                <Label>{t("common:game")}</Label>
                 <Select
                   value={config.game_id ? String(config.game_id) : ""}
                   onChange={(v) => update("game_id", v ? Number(v) : null)}
                 >
-                  <option value="">Qualquer jogo (aleatório)</option>
+                  <option value="">{t("automation:content.anyGame")}</option>
                   {games?.map((g: any) => (
                     <option key={g.id} value={g.id}>{g.canonical_name}</option>
                   ))}
                 </Select>
                 <p className="mt-1.5 text-xs text-text-muted">
-                  Escolha um jogo específico ou deixe o sistema escolher aleatoriamente
+                  {t("automation:content.gameHint")}
                 </p>
               </div>
 
               {/* V3: Reuse policy */}
               <div>
-                <Label>Reutilização de cenas</Label>
+                <Label>{t("automation:content.sceneReuse")}</Label>
                 <Select
                   value={String(config.max_clip_uses ?? 1)}
                   onChange={(v) => update("max_clip_uses", Number(v))}
                 >
-                  <option value="1">1 vez (cada trecho aparece em apenas 1 vídeo)</option>
-                  <option value="2">2 vezes (permite uma reutilização)</option>
-                  <option value="3">3 vezes (permite duas reutilizações)</option>
-                  <option value="0">Ilimitado (sem bloqueio por quota)</option>
+                  <option value="1">{t("automation:content.reuse1")}</option>
+                  <option value="2">{t("automation:content.reuse2")}</option>
+                  <option value="3">{t("automation:content.reuse3")}</option>
+                  <option value="0">{t("automation:content.reuseUnlimited")}</option>
                 </Select>
                 <p className="mt-1.5 text-xs text-text-muted">
-                  Máximo de vídeos em que uma mesma região de gameplay pode aparecer.
-                  O histórico sempre é registrado para análise de diversidade.
+                  {t("automation:content.reuseHint")}
                 </p>
               </div>
 
               {/* V3: Fallback policy for public gameplays */}
               <div>
-                <Label>Gameplay pública</Label>
+                <Label>{t("automation:content.publicGameplay")}</Label>
                 <Select
                   value={config.fallback_policy || (config.accept_public_gameplays ? "allow_public" : "stop")}
                   onChange={(v) => update("fallback_policy", v)}
                 >
-                  <option value="stop">Apenas minhas gameplays</option>
-                  <option value="allow_public">Permitir gameplays públicas como fallback</option>
+                  <option value="stop">{t("automation:content.onlyMine")}</option>
+                  <option value="allow_public">{t("automation:content.allowPublic")}</option>
                 </Select>
                 <p className="mt-1.5 text-xs text-text-muted">
-                  Quando suas gameplays se esgotarem, usar gameplays públicas de outros usuários?
+                  {t("automation:content.fallbackHint")}
                 </p>
               </div>
             </div>
@@ -315,27 +316,27 @@ export function AutomationPage() {
 
           {/* Section 2: Formato */}
           <Card>
-            <SectionTitle icon={Monitor} title="Formato" desc="Dimensões e duração das cenas" />
+            <SectionTitle icon={Monitor} title={t("automation:format.title")} desc={t("automation:format.description")} />
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <Label>Formato da tela</Label>
+                <Label>{t("automation:format.screenFormat")}</Label>
                 <Select
                   value={config.video_format || ""}
                   onChange={(v) => update("video_format", v)}
                 >
-                  <option value="">Padrão (9:16)</option>
+                  <option value="">{t("automation:format.default")}</option>
                   {VIDEO_FORMATS.map((f) => (
                     <option key={f.value} value={f.value}>{f.label}</option>
                   ))}
                 </Select>
               </div>
               <div>
-                <Label>Duração de cada cena (segundos)</Label>
+                <Label>{t("automation:format.sceneDuration")}</Label>
                 <input
                   type="number"
                   min={0}
                   step={1}
-                  placeholder="0 = automático"
+                  placeholder={t("automation:format.autoPlaceholder")}
                   value={config.scene_duration || ""}
                   onChange={(e) => update("scene_duration", Number(e.target.value))}
                   className="h-11 w-full rounded-xl border border-border bg-bg/60 px-4 text-sm text-text placeholder:text-text-muted backdrop-blur-sm transition-all"
@@ -343,54 +344,54 @@ export function AutomationPage() {
               </div>
             </div>
             <p className="mt-2 text-xs text-text-muted">
-              Ex: 10 = cenas de 10s · 7200 = uma cena longa contínua
+              {t("automation:format.durationHint")}
             </p>
           </Card>
 
           {/* Section 3: Legenda */}
           <Card>
-            <SectionTitle icon={Type} title="Legenda" desc="Estilo das legendas no vídeo" />
+            <SectionTitle icon={Type} title={t("automation:subtitles.title")} desc={t("automation:subtitles.description")} />
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <Label>Fonte</Label>
+                <Label>{t("automation:subtitles.font")}</Label>
                 <Select value={config.subtitle_font || ""} onChange={(v) => update("subtitle_font", v)}>
                   {SUBTITLE_FONTS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
                 </Select>
               </div>
               <div>
-                <Label>Tamanho da fonte</Label>
+                <Label>{t("automation:subtitles.fontSize")}</Label>
                 <input
                   type="number"
                   min={0}
-                  placeholder="0 = automático"
+                  placeholder={t("automation:subtitles.autoPlaceholder")}
                   value={config.subtitle_font_size || ""}
                   onChange={(e) => update("subtitle_font_size", Number(e.target.value))}
                   className="h-11 w-full rounded-xl border border-border bg-bg/60 px-4 text-sm text-text placeholder:text-text-muted backdrop-blur-sm transition-all"
                 />
               </div>
               <div>
-                <Label>Cor do texto</Label>
+                <Label>{t("automation:subtitles.textColor")}</Label>
                 <Select value={config.subtitle_color || ""} onChange={(v) => update("subtitle_color", v)}>
                   {SUBTITLE_COLORS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </Select>
               </div>
               <div>
-                <Label>Cor do contorno</Label>
+                <Label>{t("automation:subtitles.outlineColor")}</Label>
                 <Select value={config.subtitle_outline_color || ""} onChange={(v) => update("subtitle_outline_color", v)}>
-                  <option value="">Padrão (preto)</option>
-                  <option value="black">Preto</option>
-                  <option value="white">Branco</option>
-                  <option value="red">Vermelho</option>
+                  <option value="">{t("automation:subtitles.defaultBlack")}</option>
+                  <option value="black">{t("automation:subtitles.black")}</option>
+                  <option value="white">{t("automation:subtitles.white")}</option>
+                  <option value="red">{t("automation:subtitles.red")}</option>
                 </Select>
               </div>
               <div>
-                <Label>Posição</Label>
+                <Label>{t("automation:subtitles.position")}</Label>
                 <Select value={config.subtitle_position || ""} onChange={(v) => update("subtitle_position", v)}>
                   {SUBTITLE_POSITIONS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
                 </Select>
               </div>
               <div>
-                <Label>Caixa (case)</Label>
+                <Label>{t("automation:subtitles.case")}</Label>
                 <Select value={config.subtitle_case || ""} onChange={(v) => update("subtitle_case", v)}>
                   {SUBTITLE_CASES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </Select>
@@ -402,22 +403,22 @@ export function AutomationPage() {
               <Toggle
                 checked={config.subtitle_box_enabled ?? false}
                 onChange={(v) => update("subtitle_box_enabled", v)}
-                label="Ativar fundo (box) na legenda"
+                label={t("automation:subtitles.enableBox")}
               />
               {config.subtitle_box_enabled && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <Label>Cor do fundo</Label>
+                    <Label>{t("automation:subtitles.boxColor")}</Label>
                     <Select value={config.subtitle_box_color || ""} onChange={(v) => update("subtitle_box_color", v)}>
                       {BOX_COLORS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                     </Select>
                   </div>
                   <div>
-                    <Label>Padding do fundo</Label>
+                    <Label>{t("automation:subtitles.boxPadding")}</Label>
                     <input
                       type="number"
                       min={0}
-                      placeholder="0 = padrão"
+                      placeholder={t("automation:subtitles.defaultPlaceholder")}
                       value={config.subtitle_box_padding || ""}
                       onChange={(e) => update("subtitle_box_padding", Number(e.target.value))}
                       className="h-11 w-full rounded-xl border border-border bg-bg/60 px-4 text-sm text-text placeholder:text-text-muted backdrop-blur-sm transition-all"
@@ -427,7 +428,7 @@ export function AutomationPage() {
                     <Toggle
                       checked={config.subtitle_rounded_box ?? false}
                       onChange={(v) => update("subtitle_rounded_box", v)}
-                      label="Fundo arredondado (pill)"
+                      label={t("automation:subtitles.roundedBox")}
                     />
                   </div>
                 </div>
@@ -436,23 +437,23 @@ export function AutomationPage() {
 
             {/* Stroke settings */}
             <div className="mt-3 grid gap-3 sm:grid-cols-2 rounded-lg border border-border bg-surface-elevated/50 p-4">
-              <div className="sm:col-span-2 text-xs font-semibold text-text-secondary">Traço (stroke)</div>
+              <div className="sm:col-span-2 text-xs font-semibold text-text-secondary">{t("automation:subtitles.stroke")}</div>
               <div>
-                <Label>Cor do traço</Label>
+                <Label>{t("automation:subtitles.strokeColor")}</Label>
                 <Select value={config.subtitle_stroke_color || ""} onChange={(v) => update("subtitle_stroke_color", v)}>
-                  <option value="">Padrão</option>
-                  <option value="black">Preto</option>
-                  <option value="white">Branco</option>
-                  <option value="red">Vermelho</option>
-                  <option value="blue">Azul</option>
+                  <option value="">{t("automation:subtitles.default")}</option>
+                  <option value="black">{t("automation:subtitles.black")}</option>
+                  <option value="white">{t("automation:subtitles.white")}</option>
+                  <option value="red">{t("automation:subtitles.red")}</option>
+                  <option value="blue">{t("automation:subtitles.blue")}</option>
                 </Select>
               </div>
               <div>
-                <Label>Largura do traço</Label>
+                <Label>{t("automation:subtitles.strokeWidth")}</Label>
                 <input
                   type="number"
                   min={0}
-                  placeholder="0 = padrão"
+                  placeholder={t("automation:subtitles.defaultPlaceholder")}
                   value={config.subtitle_stroke_width || ""}
                   onChange={(e) => update("subtitle_stroke_width", Number(e.target.value))}
                   className="h-11 w-full rounded-xl border border-border bg-bg/60 px-4 text-sm text-text placeholder:text-text-muted backdrop-blur-sm transition-all"
@@ -463,22 +464,22 @@ export function AutomationPage() {
 
           {/* Section 4: Transição */}
           <Card>
-            <SectionTitle icon={ArrowRightLeft} title="Transição" desc="Transição entre cenas" />
+            <SectionTitle icon={ArrowRightLeft} title={t("automation:transitions.title")} desc={t("automation:transitions.description")} />
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <Label>Tipo de transição</Label>
+                <Label>{t("automation:transitions.type")}</Label>
                 <Select value={config.transition_type || ""} onChange={(v) => update("transition_type", v)}>
-                  {TRANSITION_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  {TRANSITION_TYPES.map((tr) => <option key={tr.value} value={tr.value}>{tr.label}</option>)}
                 </Select>
               </div>
               <div>
-                <Label>Duração (segundos)</Label>
+                <Label>{t("automation:transitions.duration")}</Label>
                 <input
                   type="number"
                   min={0}
                   max={5}
                   step={0.1}
-                  placeholder="0 = padrão (0.5s)"
+                  placeholder={t("automation:transitions.durationPlaceholder")}
                   value={config.transition_duration || ""}
                   onChange={(e) => update("transition_duration", Number(e.target.value))}
                   className="h-11 w-full rounded-xl border border-border bg-bg/60 px-4 text-sm text-text placeholder:text-text-muted backdrop-blur-sm transition-all"
@@ -489,40 +490,40 @@ export function AutomationPage() {
 
           {/* Section 5: Voz */}
           <Card>
-            <SectionTitle icon={Mic} title="Voz" desc="Voz da narração (TTS por clonagem)" />
+            <SectionTitle icon={Mic} title={t("automation:voice.title")} desc={t("automation:voice.description")} />
             <div className="flex items-center justify-between mb-3">
-              <Label>Voz selecionada</Label>
+              <Label>{t("automation:voice.selected")}</Label>
               <div className="flex gap-2">
                 <input ref={voiceInput} type="file" className="hidden" onChange={uploadVoice} accept=".wav,.mp3,.ogg,.flac,.m4a" />
                 <Button size="sm" variant="outline" onClick={() => voiceInput.current?.click()} disabled={uploadingVoice}>
-                  {uploadingVoice ? <><Spinner className="h-3.5 w-3.5" /> Enviando...</> : <><Upload className="h-3.5 w-3.5" /> Upload voz</>}
+                  {uploadingVoice ? <><Spinner className="h-3.5 w-3.5" /> {t("automation:voice.uploading")}</> : <><Upload className="h-3.5 w-3.5" /> {t("automation:voice.upload")}</>}
                 </Button>
               </div>
             </div>
             <Select value={config.voice || ""} onChange={(v) => update("voice", v)}>
-              <option value="">Padrão do sistema</option>
+              <option value="">{t("automation:voice.systemDefault")}</option>
               {voices?.map((v: any) => (
                 <option key={v.filename} value={v.filename}>{v.filename} ({v.file_size_kb} KB)</option>
               ))}
             </Select>
             <p className="mt-1.5 text-xs text-text-muted">
-              Envie um áudio curto (5-30s) da voz que o XTTS deve clonar.
+              {t("automation:voice.hint")}
             </p>
             {config.voice && (
               <button className="mt-2 flex items-center gap-1 text-xs text-red-400 hover:underline" onClick={() => deleteVoice(config.voice!)}>
-                <Trash2 className="h-3 w-3" /> Excluir "{config.voice}"
+                <Trash2 className="h-3 w-3" /> {t("common:delete")} "{config.voice}"
               </button>
             )}
           </Card>
 
           {/* Section 6: Estilo */}
           <Card>
-            <SectionTitle icon={Palette} title="Estilo" desc="Estilo criativo do roteiro" />
+            <SectionTitle icon={Palette} title={t("automation:style.title")} desc={t("automation:style.description")} />
             <Select value={config.creative_style || ""} onChange={(v) => update("creative_style", v)}>
-              {CREATIVE_STYLES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              {CREATIVE_STYLES.map((s) => <option key={s.value} value={s.value}>{t(s.labelKey)}</option>)}
             </Select>
             <p className="mt-1.5 text-xs text-text-muted">
-              O estilo influencia o tom e humor do roteiro gerado pela IA
+              {t("automation:style.hint")}
             </p>
           </Card>
 
@@ -535,21 +536,21 @@ export function AutomationPage() {
           {/* Section 7: Fila de Produção (Games) */}
           {domainConfig.features.gameplayUpload && (
           <Card>
-            <SectionTitle icon={ListOrdered} title="Fila de Produção" desc="Como a automação escolhe o próximo vídeo" />
+            <SectionTitle icon={ListOrdered} title={t("automation:queue.title")} desc={t("automation:queue.description")} />
             <div className="space-y-4">
               <div>
-                <Label>Modo da fila</Label>
+                <Label>{t("automation:queue.mode")}</Label>
                 <Select
                   value={config.queue_mode || "automatic"}
                   onChange={(v) => update("queue_mode", v)}
                 >
-                  <option value="automatic">Automático (fila + decisão editorial)</option>
-                  <option value="manual">Manual (apenas fila do usuário)</option>
+                  <option value="automatic">{t("automation:queue.automatic")}</option>
+                  <option value="manual">{t("automation:queue.manual")}</option>
                 </Select>
                 <p className="mt-1.5 text-xs text-text-muted">
                   {config.queue_mode === "manual"
-                    ? "Manual: a automação só produz vídeos das ideias que você enfileirar. Quando a fila esvazia, a produção para até você adicionar mais."
-                    : "Automático: quando a fila esvazia, o sistema decide automaticamente o próximo vídeo baseado no material disponível."}
+                    ? t("automation:queue.manualDesc")
+                    : t("automation:queue.automaticDesc")}
                 </p>
               </div>
 
@@ -558,11 +559,11 @@ export function AutomationPage() {
                   <Toggle
                     checked={config.auto_fill_queue ?? false}
                     onChange={(v) => update("auto_fill_queue", v)}
-                    label="Auto-preencher fila quando vazia (reconciliador)"
+                    label={t("automation:queue.autoFill")}
                   />
                   {config.auto_fill_queue && (
                     <div>
-                      <Label>Tamanho máximo da fila auto-preenchida</Label>
+                      <Label>{t("automation:queue.maxSize")}</Label>
                       <input
                         type="number"
                         min={1}
@@ -573,7 +574,7 @@ export function AutomationPage() {
                         className="h-11 w-full rounded-xl border border-border bg-bg/60 px-4 text-sm text-text placeholder:text-text-muted backdrop-blur-sm transition-all"
                       />
                       <p className="mt-1.5 text-xs text-text-muted">
-                        Quantas ideias fresh adicionar automaticamente (ordenadas por score editorial).
+                        {t("automation:queue.maxSizeHint")}
                       </p>
                     </div>
                   )}
@@ -586,21 +587,21 @@ export function AutomationPage() {
           {/* Section 7b: Fila de Produção (Kids) */}
           {domainConfig.id === "kids" && (
           <Card>
-            <SectionTitle icon={ListOrdered} title="Fila de Produção" desc="Como a automação escolhe o próximo vídeo Kids" />
+            <SectionTitle icon={ListOrdered} title={t("automation:queue.title")} desc={t("automation:queue.kidsDescription")} />
             <div className="space-y-4">
               <div>
-                <Label>Modo da fila</Label>
+                <Label>{t("automation:queue.mode")}</Label>
                 <Select
                   value={config.kids_queue_mode || "manual"}
                   onChange={(v) => update("kids_queue_mode", v)}
                 >
-                  <option value="manual">Manual (apenas fila do usuário)</option>
-                  <option value="auto">Automático (preenche sozinho)</option>
+                  <option value="manual">{t("automation:queue.manual")}</option>
+                  <option value="auto">{t("automation:queue.kidsAutomatic")}</option>
                 </Select>
                 <p className="mt-1.5 text-xs text-text-muted">
                   {config.kids_queue_mode === "auto"
-                    ? "Automático: o sistema preenche a fila com as melhores ideias avaliadas automaticamente."
-                    : "Manual: você adiciona ideias à fila manualmente. Quando a fila esvazia, a produção para."}
+                    ? t("automation:queue.kidsAutoDesc")
+                    : t("automation:queue.kidsManualDesc")}
                 </p>
               </div>
 
@@ -608,10 +609,10 @@ export function AutomationPage() {
                 <Toggle
                   checked={config.kids_auto_fill_queue ?? true}
                   onChange={(v) => update("kids_auto_fill_queue", v)}
-                  label="Preencher fila automaticamente com as melhores ideias avaliadas"
+                  label={t("automation:queue.kidsAutoFill")}
                 />
                 <div>
-                  <Label>Tamanho máximo da fila</Label>
+                  <Label>{t("automation:queue.kidsMaxSize")}</Label>
                   <input
                     type="number"
                     min={1}
@@ -622,7 +623,7 @@ export function AutomationPage() {
                     className="h-11 w-full rounded-xl border border-border bg-bg/60 px-4 text-sm text-text placeholder:text-text-muted backdrop-blur-sm transition-all"
                   />
                   <p className="mt-1.5 text-xs text-text-muted">
-                    Quantas ideias avaliadas adicionar automaticamente (ordenadas por score).
+                    {t("automation:queue.kidsMaxSizeHint")}
                   </p>
                 </div>
               </div>
@@ -632,18 +633,18 @@ export function AutomationPage() {
 
           {/* Section 8: YouTube */}
           <Card>
-            <SectionTitle icon={Youtube} title="YouTube" desc="Configurações de publicação" />
+            <SectionTitle icon={Youtube} title={t("automation:youtube.title")} desc={t("automation:youtube.description")} />
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <Label>Privacidade</Label>
+                <Label>{t("automation:youtube.privacy")}</Label>
                 <Select value={config.youtube_privacy || "unlisted"} onChange={(v) => update("youtube_privacy", v)}>
-                  {YOUTUBE_PRIVACY.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                  {YOUTUBE_PRIVACY.map((p) => <option key={p.value} value={p.value}>{t(p.labelKey)}</option>)}
                 </Select>
               </div>
               <div>
-                <Label>Categoria</Label>
+                <Label>{t("automation:youtube.category")}</Label>
                 <Select value={config.youtube_category_id || "20"} onChange={(v) => update("youtube_category_id", v)}>
-                  {YOUTUBE_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  {YOUTUBE_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{t(c.labelKey)}</option>)}
                 </Select>
               </div>
             </div>
@@ -651,7 +652,7 @@ export function AutomationPage() {
               <Toggle
                 checked={config.auto_publish ?? true}
                 onChange={(v) => update("auto_publish", v)}
-                label="Publicar automaticamente após a geração"
+                label={t("automation:youtube.autoPublish")}
               />
             </div>
           </Card>
@@ -662,20 +663,20 @@ export function AutomationPage() {
           <div className="sticky top-24 space-y-4">
             <Card>
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold">Preview ao vivo</h3>
+                <h3 className="text-sm font-semibold">{t("automation:preview.livePreview")}</h3>
                 {config.presentation?.enabled && (
                   <div className="flex gap-1 rounded-lg bg-bg/60 p-0.5">
                     <button
                       className={`px-2.5 py-1 text-xs rounded-md transition-all ${previewMode === "video" ? "bg-teal-500 text-white" : "text-text-muted"}`}
                       onClick={() => setPreviewMode("video")}
                     >
-                      Vídeo
+                      {t("automation:preview.video")}
                     </button>
                     <button
                       className={`px-2.5 py-1 text-xs rounded-md transition-all ${previewMode === "capa" ? "bg-teal-500 text-white" : "text-text-muted"}`}
                       onClick={() => setPreviewMode("capa")}
                     >
-                      Capa
+                      {t("automation:preview.cover")}
                     </button>
                   </div>
                 )}
@@ -699,21 +700,21 @@ export function AutomationPage() {
 
               {/* Summary */}
               <div className="mt-6 space-y-2 border-t border-border pt-4">
-                <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">Resumo</p>
+                <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">{t("automation:preview.summary")}</p>
                 <div className="space-y-1.5 text-xs">
-                  <SummaryRow label="Formato" value={config.video_format || "9:16"} />
-                  <SummaryRow label="Cena" value={config.scene_duration ? `${config.scene_duration}s` : "auto"} />
-                  <SummaryRow label="Voz" value={config.voice || "padrão"} />
-                  <SummaryRow label="Estilo" value={CREATIVE_STYLES.find(s => s.value === config.creative_style)?.label || "padrão"} />
-                  <SummaryRow label="Transição" value={TRANSITION_TYPES.find(t => t.value === config.transition_type)?.label || "padrão"} />
-                  <SummaryRow label="YouTube" value={YOUTUBE_PRIVACY.find(p => p.value === (config.youtube_privacy || "unlisted"))?.label || "Não listado"} />
-                  <SummaryRow label="Fila" value={config.queue_mode === "manual" ? "Manual" : "Automática"} />
+                  <SummaryRow label={t("automation:preview.format")} value={config.video_format || "9:16"} />
+                  <SummaryRow label={t("automation:preview.scene")} value={config.scene_duration ? `${config.scene_duration}s` : t("automation:preview.default")} />
+                  <SummaryRow label={t("automation:preview.voice")} value={config.voice || t("automation:preview.default")} />
+                  <SummaryRow label={t("automation:preview.style")} value={CREATIVE_STYLES.find(s => s.value === config.creative_style)?.labelKey ? t(CREATIVE_STYLES.find(s => s.value === config.creative_style)!.labelKey) : t("automation:preview.default")} />
+                  <SummaryRow label={t("automation:preview.transition")} value={TRANSITION_TYPES.find(tr => tr.value === config.transition_type)?.label || t("automation:preview.default")} />
+                  <SummaryRow label={t("automation:youtube.title")} value={YOUTUBE_PRIVACY.find(p => p.value === (config.youtube_privacy || "unlisted"))?.labelKey ? t(YOUTUBE_PRIVACY.find(p => p.value === (config.youtube_privacy || "unlisted"))!.labelKey) : t("automation:youtube.unlisted")} />
+                  <SummaryRow label={t("automation:preview.queue")} value={config.queue_mode === "manual" ? t("automation:preview.manual") : t("automation:preview.automatic")} />
                 </div>
               </div>
 
               <div className="mt-4 flex gap-2">
                 <Button variant="outline" size="sm" className="flex-1" onClick={handleSave} disabled={saving}>
-                  <Save className="h-3.5 w-3.5" /> Salvar
+                  <Save className="h-3.5 w-3.5" /> {t("common:save")}
                 </Button>
                 <Button
                   variant={automation?.status === "running" ? "danger" : "primary"}
@@ -725,9 +726,9 @@ export function AutomationPage() {
                   {toggling ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : automation?.status === "running" ? (
-                    <><Pause className="h-3.5 w-3.5" /> Pausar</>
+                    <><Pause className="h-3.5 w-3.5" /> {t("automation:header.pause")}</>
                   ) : (
-                    <><Play className="h-3.5 w-3.5" /> Iniciar</>
+                    <><Play className="h-3.5 w-3.5" /> {t("automation:header.start")}</>
                   )}
                 </Button>
               </div>
@@ -750,15 +751,16 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 
 // ── Domain Section — destructive domain switch ──────────────────────────────
 
-const DOMAIN_LABELS: Record<string, string> = {
-  games: "Games",
-  kids: "Kids",
-  movies: "Filmes & Séries",
-  conspiracy: "Mistérios & Teorias",
-  technology: "Tecnologia",
+const DOMAIN_LABEL_KEYS: Record<string, string> = {
+  games: "automation:domain.games",
+  kids: "automation:domain.kids",
+  movies: "automation:domain.movies",
+  conspiracy: "automation:domain.conspiracy",
+  technology: "automation:domain.technology",
 };
 
 function DomainSection({ currentDomain, onResetDone }: { currentDomain?: string; onResetDone: () => void }) {
+  const { t } = useTranslation();
   const [domains, setDomains] = useState<any[]>([]);
   const [current, setCurrent] = useState<string>(currentDomain || "games");
   const [loading, setLoading] = useState(true);
@@ -790,11 +792,11 @@ function DomainSection({ currentDomain, onResetDone }: { currentDomain?: string;
     try {
       const result = await api.resetDomain(selectedDomain, true);
       setResetSummary(result);
-      toast.success(`Domínio alterado para ${DOMAIN_LABELS[selectedDomain] || selectedDomain}`);
+      toast.success(t("automation:domain.changedTo", { domain: DOMAIN_LABEL_KEYS[selectedDomain] ? t(DOMAIN_LABEL_KEYS[selectedDomain]) : selectedDomain }));
       // Reload after a short delay so the user sees the summary
       setTimeout(() => onResetDone(), 2000);
     } catch (err: any) {
-      toast.error(err.message || "Erro ao trocar domínio");
+      toast.error(err.message || t("automation:domain.changeError"));
     } finally {
       setResetting(false);
     }
@@ -813,23 +815,23 @@ function DomainSection({ currentDomain, onResetDone }: { currentDomain?: string;
       <Card>
         <SectionTitle
           icon={Globe}
-          title="Domínio do Canal"
-          desc="Tipo de conteúdo que este canal produz. A troca é destrutiva."
+          title={t("automation:domain.title")}
+          desc={t("automation:domain.description")}
         />
         <div className="space-y-4">
           {/* Current domain badge */}
           <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3">
             <CheckCircle2 className="h-5 w-5 text-accent" />
             <div>
-              <p className="text-xs text-text-muted">Domínio atual</p>
-              <p className="text-sm font-semibold">{DOMAIN_LABELS[current] || current}</p>
+              <p className="text-xs text-text-muted">{t("automation:domain.current")}</p>
+              <p className="text-sm font-semibold">{DOMAIN_LABEL_KEYS[current] ? t(DOMAIN_LABEL_KEYS[current]) : current}</p>
             </div>
           </div>
 
           {/* Domain selector */}
           <div>
             <label className="mb-2 block text-xs font-medium text-text-secondary">
-              Trocar para
+              {t("automation:domain.switchTo")}
             </label>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {domains.map((d) => {
@@ -853,7 +855,7 @@ function DomainSection({ currentDomain, onResetDone }: { currentDomain?: string;
                     {isActive ? (
                       <CheckCircle2 className="h-4 w-4 text-accent" />
                     ) : !isImplemented ? (
-                      <span className="text-[10px] text-text-muted">em breve</span>
+                      <span className="text-[10px] text-text-muted">{t("automation:domain.comingSoon")}</span>
                     ) : null}
                   </button>
                 );
@@ -864,8 +866,7 @@ function DomainSection({ currentDomain, onResetDone }: { currentDomain?: string;
           <div className="flex items-start gap-2 rounded-lg border border-yellow-600/20 bg-yellow-600/5 px-3 py-2.5">
             <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-500/80 mt-0.5" />
             <p className="text-xs text-text-muted">
-              Trocar de domínio apaga todo o estado de produção do canal (mídias, jobs, conteúdo não publicado, conhecimento).
-              Vídeos já publicados no YouTube não são removidos.
+              {t("automation:domain.warning")}
             </p>
           </div>
         </div>
@@ -885,7 +886,7 @@ function DomainSection({ currentDomain, onResetDone }: { currentDomain?: string;
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5 text-yellow-500" />
-                <h2 className="text-base font-semibold">Confirmar troca de domínio</h2>
+                <h2 className="text-base font-semibold">{t("automation:domain.confirmTitle")}</h2>
               </div>
               {!resetting && (
                 <button
@@ -903,62 +904,61 @@ function DomainSection({ currentDomain, onResetDone }: { currentDomain?: string;
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 text-sm text-accent">
                     <CheckCircle2 className="h-5 w-5" />
-                    <span className="font-semibold">Domínio alterado com sucesso!</span>
+                    <span className="font-semibold">{t("automation:domain.changeSuccess")}</span>
                   </div>
                   <div className="rounded-lg border border-border bg-surface-elevated p-3 text-xs space-y-1.5">
-                    <p className="text-text-muted">Resumo da limpeza:</p>
+                    <p className="text-text-muted">{t("automation:domain.cleanupSummary")}</p>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                      <span>Jobs cancelados:</span><span className="font-medium">{resetSummary.jobs_cancelled}</span>
-                      <span>Vídeos deletados:</span><span className="font-medium">{resetSummary.videos_deleted}</span>
-                      <span>Planos deletados:</span><span className="font-medium">{resetSummary.content_plans_deleted}</span>
-                      <span>Fatos deletados:</span><span className="font-medium">{resetSummary.facts_deleted}</span>
-                      <span>Documentos:</span><span className="font-medium">{resetSummary.documents_deleted}</span>
-                      <span>Itens de conhecimento:</span><span className="font-medium">{resetSummary.knowledge_items_deleted}</span>
-                      <span>Gameplays:</span><span className="font-medium">{resetSummary.gameplay_sources_deleted}</span>
-                      <span>Jobs de limpeza:</span><span className="font-medium">{resetSummary.cleanup_jobs_created}</span>
-                      <span>Vídeos preservados:</span><span className="font-medium">{resetSummary.videos_preserved_published}</span>
+                      <span>{t("automation:domain.jobsCancelled")}</span><span className="font-medium">{resetSummary.jobs_cancelled}</span>
+                      <span>{t("automation:domain.videosDeleted")}</span><span className="font-medium">{resetSummary.videos_deleted}</span>
+                      <span>{t("automation:domain.plansDeleted")}</span><span className="font-medium">{resetSummary.content_plans_deleted}</span>
+                      <span>{t("automation:domain.factsDeleted")}</span><span className="font-medium">{resetSummary.facts_deleted}</span>
+                      <span>{t("automation:domain.documents")}</span><span className="font-medium">{resetSummary.documents_deleted}</span>
+                      <span>{t("automation:domain.knowledgeItems")}</span><span className="font-medium">{resetSummary.knowledge_items_deleted}</span>
+                      <span>{t("automation:domain.gameplays")}</span><span className="font-medium">{resetSummary.gameplay_sources_deleted}</span>
+                      <span>{t("automation:domain.cleanupJobs")}</span><span className="font-medium">{resetSummary.cleanup_jobs_created}</span>
+                      <span>{t("automation:domain.videosPreserved")}</span><span className="font-medium">{resetSummary.videos_preserved_published}</span>
                     </div>
                   </div>
-                  <p className="text-xs text-text-muted">Recarregando página...</p>
+                  <p className="text-xs text-text-muted">{t("automation:domain.reloading")}</p>
                 </div>
               ) : (
                 <>
                   <div className="flex items-center gap-3 rounded-lg border border-border bg-surface-elevated px-4 py-3">
                     <div className="text-center">
-                      <p className="text-xs text-text-muted">De</p>
-                      <p className="text-sm font-semibold">{DOMAIN_LABELS[current] || current}</p>
+                      <p className="text-xs text-text-muted">{t("automation:domain.from")}</p>
+                      <p className="text-sm font-semibold">{DOMAIN_LABEL_KEYS[current] ? t(DOMAIN_LABEL_KEYS[current]) : current}</p>
                     </div>
                     <div className="flex-1 text-center text-text-muted">→</div>
                     <div className="text-center">
-                      <p className="text-xs text-text-muted">Para</p>
-                      <p className="text-sm font-semibold text-accent">{DOMAIN_LABELS[selectedDomain] || selectedDomain}</p>
+                      <p className="text-xs text-text-muted">{t("automation:domain.to")}</p>
+                      <p className="text-sm font-semibold text-accent">{DOMAIN_LABEL_KEYS[selectedDomain] ? t(DOMAIN_LABEL_KEYS[selectedDomain]) : selectedDomain}</p>
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <p className="text-sm font-medium text-text-secondary">Os seguintes dados serão permanentemente removidos:</p>
+                    <p className="text-sm font-medium text-text-secondary">{t("automation:domain.willBeRemoved")}</p>
                     <ul className="space-y-1.5 text-xs text-text-muted">
-                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Mídias importadas e armazenadas nos workers</li>
-                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Mídias em processo de importação</li>
-                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Jobs em fila e em execução</li>
-                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Conteúdo gerado não publicado</li>
-                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Dados específicos do domínio anterior</li>
-                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Conhecimento/RAG específico do domínio</li>
-                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> Estado de produção e plano editorial</li>
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> {t("automation:domain.removed.importedMedia")}</li>
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> {t("automation:domain.removed.importingMedia")}</li>
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> {t("automation:domain.removed.queuedJobs")}</li>
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> {t("automation:domain.removed.unpublishedContent")}</li>
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> {t("automation:domain.removed.domainData")}</li>
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> {t("automation:domain.removed.domainKnowledge")}</li>
+                      <li className="flex items-center gap-2"><Trash2 className="h-3 w-3 text-red-400/70" /> {t("automation:domain.removed.productionState")}</li>
                     </ul>
                   </div>
 
                   <div className="flex items-start gap-2 rounded-lg border border-green-600/20 bg-green-600/5 px-3 py-2.5">
                     <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500/80 mt-0.5" />
                     <p className="text-xs text-text-muted">
-                      Vídeos já publicados no YouTube <strong>não</strong> serão removidos.
-                      A conexão com YouTube não será alterada.
+                      {t("automation:domain.preservedNote")}
                     </p>
                   </div>
 
                   <div className="rounded-lg border border-red-600/30 bg-red-600/10 px-3 py-2.5">
                     <p className="text-xs text-red-400 font-medium">
-                      ⚠️ Esta operação não pode ser desfeita.
+                      {t("automation:domain.irreversible")}
                     </p>
                   </div>
                 </>
@@ -973,7 +973,7 @@ function DomainSection({ currentDomain, onResetDone }: { currentDomain?: string;
                   onClick={() => setShowConfirm(false)}
                   disabled={resetting}
                 >
-                  Cancelar
+                  {t("common:cancel")}
                 </Button>
                 <Button
                   variant="danger"
@@ -981,9 +981,9 @@ function DomainSection({ currentDomain, onResetDone }: { currentDomain?: string;
                   disabled={resetting}
                 >
                   {resetting ? (
-                    <><Spinner className="h-4 w-4" /> Resetando...</>
+                    <><Spinner className="h-4 w-4" /> {t("automation:domain.resetting")}</>
                   ) : (
-                    <><AlertTriangle className="h-4 w-4" /> Entendo e quero continuar</>
+                    <><AlertTriangle className="h-4 w-4" /> {t("automation:domain.confirmContinue")}</>
                   )}
                 </Button>
               </div>

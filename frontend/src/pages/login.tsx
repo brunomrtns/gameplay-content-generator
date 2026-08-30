@@ -1,9 +1,11 @@
 import { Zap, ArrowRight, LogIn } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui";
 
 const SSO_LOGIN_URL = "/id/login?redirect=/gpcg/dashboard";
 
 export function LoginPage() {
+  const { t } = useTranslation();
   const handleSSO = () => {
     window.location.href = SSO_LOGIN_URL;
   };
@@ -18,16 +20,16 @@ export function LoginPage() {
             <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-accent animate-pulse-glow" />
           </div>
           <div className="text-center">
-            <h1 className="text-2xl font-bold tracking-tight">GPCG</h1>
-            <p className="text-sm text-text-muted">Gameplay Content Generator</p>
+            <h1 className="text-2xl font-bold tracking-tight">{t("common:appName")}</h1>
+            <p className="text-sm text-text-muted">{t("login:appFullName")}</p>
           </div>
         </div>
 
         {/* Card */}
         <div className="card-premium p-8">
-          <h2 className="mb-1 text-lg font-semibold">Entrar</h2>
+          <h2 className="mb-1 text-lg font-semibold">{t("common:login")}</h2>
           <p className="mb-6 text-sm text-text-muted">
-            Acesse o painel através da Brunointegrations
+            {t("login:subtitle")}
           </p>
 
           <Button
@@ -38,14 +40,14 @@ export function LoginPage() {
           >
             <span className="flex items-center gap-2">
               <LogIn className="h-4 w-4" />
-              Entrar via Brunointegrations
+              {t("login:loginViaSSO")}
               <ArrowRight className="h-4 w-4" />
             </span>
           </Button>
         </div>
 
         <p className="mt-6 text-center text-xs text-text-muted">
-          GPCG · Automação de conteúdo para criadores
+          {t("login:tagline")}
         </p>
       </div>
     </div>

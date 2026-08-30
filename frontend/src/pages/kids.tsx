@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useTranslation, Trans } from "react-i18next";
 import { api } from "@/lib/api";
 import { useLiveData } from "@/hooks/useLiveData";
 import { Badge, Button, Card, Spinner, EmptyState } from "@/components/ui";
@@ -30,44 +31,45 @@ import {
 } from "lucide-react";
 
 const TOPIC_LIBRARY_CATEGORIES = [
-  { value: "animals", label: "Animais" },
-  { value: "science", label: "Ciência" },
-  { value: "space", label: "Espaço" },
-  { value: "dinosaurs", label: "Dinossauros" },
-  { value: "nature", label: "Natureza" },
-  { value: "ocean", label: "Oceano" },
-  { value: "human_body", label: "Corpo Humano" },
-  { value: "history", label: "História" },
-  { value: "geography", label: "Geografia" },
-  { value: "vehicles", label: "Veículos" },
-  { value: "food", label: "Comida" },
-  { value: "colors", label: "Cores" },
-  { value: "numbers", label: "Números" },
-  { value: "curiosity", label: "Curiosidades" },
+  "animals",
+  "science",
+  "space",
+  "dinosaurs",
+  "nature",
+  "ocean",
+  "human_body",
+  "history",
+  "geography",
+  "vehicles",
+  "food",
+  "colors",
+  "numbers",
+  "curiosity",
 ];
 
 type Tab = "media" | "config";
 
 export function KidsPage() {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("media");
 
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Conteúdo Kids</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{t('kids:title')}</h1>
         <p className="mt-1 text-sm text-text-secondary">
-          Gerencie suas mídias e o perfil do canal
+          {t('kids:subtitle')}
         </p>
         <span className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-accent/10 border border-accent/20 px-2 py-0.5 text-[10px] font-medium text-accent">
-          Kids
+          {t('kids:badge')}
         </span>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border">
-        <TabButton active={tab === "media"} onClick={() => setTab("media")} icon={<Film className="h-4 w-4" />} label="Mídias" />
-        <TabButton active={tab === "config"} onClick={() => setTab("config")} icon={<Settings className="h-4 w-4" />} label="Configuração do Canal" />
+        <TabButton active={tab === "media"} onClick={() => setTab("media")} icon={<Film className="h-4 w-4" />} label={t('kids:tab.media')} />
+        <TabButton active={tab === "config"} onClick={() => setTab("config")} icon={<Settings className="h-4 w-4" />} label={t('kids:tab.config')} />
       </div>
 
       {tab === "media" && <MediaLibrarySection />}
@@ -79,6 +81,7 @@ export function KidsPage() {
 // ── Media Library Section ─────────────────────────────────────────────────────
 
 function MediaLibrarySection() {
+  const { t } = useTranslation();
   const { uploads, addUpload, updateUpload, removeUpload } = useUploadStore();
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -131,12 +134,12 @@ function MediaLibrarySection() {
         },
       );
       updateUpload(id, { status: "done", progress: 100 });
-      toast.success(`"${file.name}" enviado com sucesso`);
+      toast.success(t('kids:toast.uploadSuccess', { name: file.name }));
       setTimeout(() => removeUpload(id), 5000);
       await refetch();
     } catch (err: any) {
-      updateUpload(id, { status: "error", error: err.message || "Erro no upload" });
-      toast.error(err.message || `Erro no upload de "${file.name}"`);
+      updateUpload(id, { status: "error", error: err.message || t('kids:toast.uploadError') });
+      toast.error(err.message || t('kids:toast.uploadErrorFile', { name: file.name }));
     }
   };
 
@@ -154,10 +157,10 @@ function MediaLibrarySection() {
   const handleCreateMappingJob = async (assetId: number, filename: string) => {
     try {
       await api.createKidsMappingJob(assetId);
-      toast.success(`Mapeamento solicitado para "${filename}". O worker processará em breve.`);
+      toast.success(t('kids:toast.mappingRequested', { name: filename }));
       await refetch();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao solicitar mapeamento");
+      toast.error(err.message || t('kids:toast.mappingError'));
     }
   };
 
@@ -168,12 +171,12 @@ function MediaLibrarySection() {
         <div className="flex items-start gap-3">
           <Info className="h-5 w-5 text-accent shrink-0 mt-0.5" />
           <div className="text-xs text-text-secondary">
-            <p className="font-medium text-text">Como funciona</p>
+            <p className="font-medium text-text">{t('kids:howItWorks.title')}</p>
             <p className="mt-1">
-              <strong>1.</strong> Envie vídeos e imagens · <strong>2.</strong> Adicione <strong>tags</strong> (ex: dinossauro, floresta) — é assim que o sistema encontra as melhores mídias pra cada ideia · <strong>3.</strong> Vídeos são mapeados automaticamente (VLM analisa cada cena)
+              <Trans i18nKey="kids:howItWorks.steps" components={{ strong: <strong /> }} />
             </p>
             <p className="mt-1 text-text-muted">
-              Mídias sem tags = <strong>gerais</strong> (usadas como fallback pra qualquer vídeo, igual gameplays genéricas nos Games)
+              <Trans i18nKey="kids:howItWorks.fallback" components={{ strong: <strong /> }} />
             </p>
           </div>
         </div>
@@ -203,10 +206,10 @@ function MediaLibrarySection() {
         />
         <Upload className={`mx-auto h-10 w-10 mb-3 ${dragging ? "text-accent" : "text-text-muted"}`} />
         <p className="text-sm font-medium">
-          {hasActiveUploads ? "Enviando mídias..." : "Arraste imagens e vídeos aqui"}
+          {hasActiveUploads ? t('kids:upload.uploading') : t('kids:upload.dropHere')}
         </p>
         <p className="mt-1 text-xs text-text-muted">
-          ou clique para selecionar — PNG, JPEG, WebP, GIF, MP4, WebM, MOV
+          {t('kids:upload.clickHint')}
         </p>
       </div>
 
@@ -214,23 +217,23 @@ function MediaLibrarySection() {
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className="text-xs font-medium text-text-secondary">
-            Tags (separadas por vírgula) — categoriza a mídia
+            {t('kids:upload.tagsLabel')}
           </label>
           <input
             type="text"
             value={tagsInput}
             onChange={(e) => setTagsInput(e.target.value)}
-            placeholder="Ex: dinossauro, floresta, verde — vazio = geral"
+            placeholder={t('kids:upload.tagsPlaceholder')}
             className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
           />
         </div>
         <div>
-          <label className="text-xs font-medium text-text-secondary">Descrição (opcional)</label>
+          <label className="text-xs font-medium text-text-secondary">{t('kids:upload.descLabel')}</label>
           <input
             type="text"
             value={descInput}
             onChange={(e) => setDescInput(e.target.value)}
-            placeholder="Ex: Tiranossauro em floresta"
+            placeholder={t('kids:upload.descPlaceholder')}
             className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
           />
         </div>
@@ -251,7 +254,7 @@ function MediaLibrarySection() {
                 </div>
               </div>
               <span className="text-[10px] text-text-muted flex-shrink-0">
-                {u.status === "done" ? "Concluído" : u.status === "error" ? "Erro" : `${u.progress}%`}
+                {u.status === "done" ? t('kids:uploadStatus.done') : u.status === "error" ? t('kids:uploadStatus.error') : `${u.progress}%`}
               </span>
             </div>
           ))}
@@ -263,7 +266,7 @@ function MediaLibrarySection() {
         <div className="flex items-center gap-3 rounded-xl border border-accent-warm/30 bg-accent-warm/5 px-4 py-3">
           <Loader2 className="h-4 w-4 text-accent-warm animate-spin" />
           <span className="text-sm text-accent-warm">
-            {processingCount} mídia(s) em processamento — a análise leva alguns minutos
+            {t('kids:processingBanner', { count: processingCount })}
           </span>
         </div>
       )}
@@ -274,33 +277,33 @@ function MediaLibrarySection() {
           onClick={() => setFilterKind("")}
           className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${!filterKind ? "bg-accent/10 text-accent border border-accent/30" : "text-text-muted hover:text-text border border-transparent"}`}
         >
-          Todos
+          {t('common:all')}
         </button>
         <button
           onClick={() => setFilterKind("image")}
           className={`flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium transition-colors ${filterKind === "image" ? "bg-accent/10 text-accent border border-accent/30" : "text-text-muted hover:text-text border border-transparent"}`}
         >
-          <ImageIcon className="h-3 w-3" /> Imagens
+          <ImageIcon className="h-3 w-3" /> {t('kids:filter.images')}
         </button>
         <button
           onClick={() => setFilterKind("video")}
           className={`flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium transition-colors ${filterKind === "video" ? "bg-accent/10 text-accent border border-accent/30" : "text-text-muted hover:text-text border border-transparent"}`}
         >
-          <VideoIcon className="h-3 w-3" /> Vídeos
+          <VideoIcon className="h-3 w-3" /> {t('kids:filter.videos')}
         </button>
         <div className="flex-1" />
         <button
           onClick={() => setFilterStatus(filterStatus === "ready" ? "" : "ready")}
           className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${filterStatus === "ready" ? "bg-accent/10 text-accent border border-accent/30" : "text-text-muted hover:text-text border border-transparent"}`}
         >
-          Só prontos
+          {t('kids:filter.readyOnly')}
         </button>
       </div>
 
       {/* Own assets list — same pattern as content.tsx (horizontal cards) */}
       <div>
         <h2 className="mb-4 text-lg font-semibold">
-          Mídias {assets && `(${assets.length})`}
+          {t('kids:media.title')} {assets && `(${assets.length})`}
         </h2>
         {isLoading && !data ? (
           <div className="flex justify-center py-12">
@@ -309,8 +312,8 @@ function MediaLibrarySection() {
         ) : assets.length === 0 ? (
           <EmptyState
             icon={<Film className="h-8 w-8" />}
-            title="Nenhuma mídia na biblioteca"
-            description="Envie imagens e vídeos para a biblioteca do canal. Adicione tags para categorizar — o sistema usa as tags pra encontrar as melhores mídias pra cada ideia."
+            title={t('kids:media.empty.title')}
+            description={t('kids:media.empty.description')}
           />
         ) : (
           <div className="grid gap-3">
@@ -331,7 +334,7 @@ function MediaLibrarySection() {
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Users className="h-4 w-4 text-text-muted" />
-            <h2 className="text-sm font-semibold">Mídias públicas da comunidade</h2>
+            <h2 className="text-sm font-semibold">{t('kids:media.publicTitle')}</h2>
             <Badge variant="default">{publicAssets.length}</Badge>
           </div>
           <div className="grid gap-3">
@@ -353,13 +356,13 @@ function MediaLibrarySection() {
 
 // ── Processing status config (same pattern as content.tsx) ───────────────────
 
-const KIDS_PROCESSING_STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string }> = {
-  uploading: { variant: "info", label: "Enviando" },
-  queued: { variant: "info", label: "Na fila" },
-  processing: { variant: "info", label: "Processando" },
-  mapping: { variant: "info", label: "Mapeando" },
-  ready: { variant: "success", label: "Pronto" },
-  failed: { variant: "error", label: "Falhou" },
+const KIDS_PROCESSING_STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info" }> = {
+  uploading: { variant: "info" },
+  queued: { variant: "info" },
+  processing: { variant: "info" },
+  mapping: { variant: "info" },
+  ready: { variant: "success" },
+  failed: { variant: "error" },
 };
 
 // ── Kids Mapping Timeline (same as content.tsx MappingTimeline) ──────────────
@@ -377,6 +380,7 @@ const KIDS_EVENT_TYPE_COLORS: Record<string, string> = {
 };
 
 function KidsMappingTimeline({ assetId, filename }: { assetId: number; filename: string }) {
+  const { t } = useTranslation();
   const [events, setEvents] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -389,7 +393,7 @@ function KidsMappingTimeline({ assetId, filename }: { assetId: number; filename:
       const res = await api.getKidsAssetEvents(assetId);
       setEvents(res.events || []);
     } catch (e: any) {
-      setError(e.message || "Erro ao carregar eventos");
+      setError(e.message || t('kids:timeline.loadError'));
     } finally {
       setLoading(false);
     }
@@ -402,10 +406,10 @@ function KidsMappingTimeline({ assetId, filename }: { assetId: number; filename:
         onClick={loadEvents}
       >
         <Activity className="h-3.5 w-3.5" />
-        {events === null && !loading && "Ver análise do mapeamento"}
-        {loading && "Carregando..."}
+        {events === null && !loading && t('kids:timeline.viewAnalysis')}
+        {loading && t('common:loading')}
         {error && <span className="text-red-400">{error}</span>}
-        {events !== null && `${events.length} eventos detectados`}
+        {events !== null && t('kids:timeline.eventsDetected', { count: events.length })}
       </div>
 
       {events !== null && events.length > 0 && (
@@ -456,7 +460,7 @@ function KidsMappingTimeline({ assetId, filename }: { assetId: number; filename:
       )}
 
       {events !== null && events.length === 0 && (
-        <p className="mt-2 text-xs text-text-muted">Nenhum evento encontrado.</p>
+        <p className="mt-2 text-xs text-text-muted">{t('kids:timeline.noEvents')}</p>
       )}
     </div>
   );
@@ -475,6 +479,7 @@ function MediaLibraryCard({
   onCreateMappingJob: (assetId: number, filename: string) => void;
   readOnly?: boolean;
 }) {
+  const { t } = useTranslation();
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [tags, setTags] = useState((asset.tags || []).join(", "));
@@ -490,14 +495,14 @@ function MediaLibraryCard({
   const canMap = isReady && asset.media_kind === "video" && (asset.event_count === 0 || asset.event_count === undefined);
 
   const handleDelete = async () => {
-    if (!confirm(`Excluir "${asset.filename}"?`)) return;
+    if (!confirm(t('kids:card.confirmDelete', { name: asset.filename }))) return;
     setDeleting(true);
     try {
       await api.deleteKidsAsset(asset.id);
-      toast.success("Mídia excluída");
+      toast.success(t('kids:card.deleted'));
       await onDeleted();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao excluir");
+      toast.error(err.message || t('kids:card.deleteError'));
     } finally {
       setDeleting(false);
     }
@@ -507,14 +512,14 @@ function MediaLibraryCard({
     setSaving(true);
     try {
       await api.patchKidsAsset(asset.id, {
-        tags: tags.split(",").map((t: string) => t.trim()).filter(Boolean),
+        tags: tags.split(",").map((tag: string) => tag.trim()).filter(Boolean),
         description: desc,
       });
-      toast.success("Mídia atualizada");
+      toast.success(t('kids:card.updated'));
       setEditing(false);
       await onDeleted();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao atualizar");
+      toast.error(err.message || t('kids:card.updateError'));
     } finally {
       setSaving(false);
     }
@@ -523,10 +528,10 @@ function MediaLibraryCard({
   const handleToggleVisibility = async () => {
     try {
       await api.toggleKidsAssetVisibility(asset.id, !asset.is_public);
-      toast.success(`"${asset.filename}" agora é ${!asset.is_public ? "pública" : "privada"}.`);
+      toast.success(t('kids:card.visibilityChanged', { name: asset.filename, visibility: !asset.is_public ? t('kids:card.visibilityPublic') : t('kids:card.visibilityPrivate') }));
       await onDeleted();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao alterar visibilidade");
+      toast.error(err.message || t('kids:card.visibilityError'));
     }
   };
 
@@ -574,7 +579,7 @@ function MediaLibraryCard({
             {/* Event count badge for mapped videos */}
             {isReady && asset.media_kind === "video" && asset.event_count > 0 && (
               <span className="flex items-center gap-1 text-accent">
-                <Activity className="h-3 w-3" /> {asset.event_count} eventos
+                <Activity className="h-3 w-3" /> {t('kids:card.eventCount', { count: asset.event_count })}
               </span>
             )}
             {/* Tags — the primary categorization (like game badge in Games) */}
@@ -585,7 +590,7 @@ function MediaLibraryCard({
               </span>
             ) : (
               <span className="flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[10px] text-text-muted">
-                Geral — sem tags (fallback)
+                {t('kids:card.noTags')}
               </span>
             )}
           </div>
@@ -595,25 +600,25 @@ function MediaLibraryCard({
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <Badge variant={procCfg.variant}>
             {(isProcessing || isMapping) && <Loader2 className="h-3 w-3 animate-spin" />}
-            {procCfg.label}
+            {t(`kids:processingStatus.${asset.processing_status}`)}
           </Badge>
           {readOnly ? (
             <Badge variant="default">
-              <Eye className="h-3 w-3" /> Pública
+              <Eye className="h-3 w-3" /> {t('kids:card.public')}
             </Badge>
           ) : isReady && !editing ? (
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setEditing(true)}
                 className="text-text-muted hover:text-accent transition-colors p-1 rounded"
-                title="Editar tags e descrição"
+                title={t('kids:card.editTagsDesc')}
               >
                 <Tag className="h-4 w-4" />
               </button>
               <button
                 onClick={handleToggleVisibility}
                 className={`transition-colors p-1 rounded ${asset.is_public ? "text-accent" : "text-text-muted hover:text-accent"}`}
-                title={asset.is_public ? "Pública — clique para tornar privada" : "Privada — clique para tornar pública"}
+                title={asset.is_public ? t('kids:card.makePrivate') : t('kids:card.makePublic')}
               >
                 <Eye className="h-4 w-4" />
               </button>
@@ -621,7 +626,7 @@ function MediaLibraryCard({
                 onClick={handleDelete}
                 disabled={deleting}
                 className="text-text-muted hover:text-red-400 transition-colors p-1 rounded"
-                title="Deletar mídia"
+                title={t('kids:card.deleteMedia')}
               >
                 {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               </button>
@@ -650,10 +655,10 @@ function MediaLibraryCard({
             size="sm"
             onClick={() => onCreateMappingJob(asset.id, asset.filename)}
           >
-            <Cpu className="h-3.5 w-3.5" /> Solicitar mapeamento
+            <Cpu className="h-3.5 w-3.5" /> {t('kids:card.requestMapping')}
           </Button>
           <span className="text-xs text-text-muted">
-            Envia para o worker analisar (VLM + ASR)
+            {t('kids:card.requestMappingHint')}
           </span>
         </div>
       )}
@@ -665,22 +670,22 @@ function MediaLibraryCard({
             type="text"
             value={tags}
             onChange={(e) => setTags(e.target.value)}
-            placeholder="tags (vírgula)"
+            placeholder={t('kids:card.tagsPlaceholder')}
             className="w-full rounded border border-border bg-surface px-2 py-1 text-xs focus:border-accent focus:outline-none"
           />
           <input
             type="text"
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
-            placeholder="descrição"
+            placeholder={t('kids:card.descPlaceholder')}
             className="w-full rounded border border-border bg-surface px-2 py-1 text-xs focus:border-accent focus:outline-none"
           />
           <div className="flex gap-1">
             <Button variant="outline" size="sm" className="flex-1 !py-1" onClick={() => setEditing(false)}>
-              Cancelar
+              {t('common:cancel')}
             </Button>
             <Button variant="primary" size="sm" className="flex-1 !py-1" onClick={handleSave} disabled={saving}>
-              {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Salvar"}
+              {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : t('common:save')}
             </Button>
           </div>
         </div>
@@ -715,6 +720,7 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
 // ── Channel Config Section ───────────────────────────────────────────────────
 
 function ChannelConfigSection() {
+  const { t } = useTranslation();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -770,9 +776,9 @@ function ChannelConfigSection() {
           target_duration: kidsMeta.target_duration,
         },
       });
-      toast.success("Perfil editorial salvo");
+      toast.success(t('kids:config.profileSaved'));
     } catch (err: any) {
-      toast.error(err.message || "Erro ao salvar perfil");
+      toast.error(err.message || t('kids:config.profileSaveError'));
     } finally {
       setSavingProfile(false);
     }
@@ -796,10 +802,9 @@ function ChannelConfigSection() {
           <div className="flex items-start gap-3">
             <Brain className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
             <div>
-              <h3 className="text-sm font-semibold text-amber-300">Configure seu canal para começar</h3>
+              <h3 className="text-sm font-semibold text-amber-300">{t('kids:config.onboarding.title')}</h3>
               <p className="text-xs text-text-muted mt-1">
-                Preencha o perfil editorial abaixo para que a IA gere ideias relevantes para o seu canal.
-                Sem isso, a descoberta funciona mas sem direcionamento editorial.
+                {t('kids:config.onboarding.description')}
               </p>
             </div>
           </div>
@@ -812,26 +817,26 @@ function ChannelConfigSection() {
           <div>
             <h2 className="flex items-center gap-2 text-sm font-semibold">
               <Brain className="h-4 w-4 text-accent" />
-              Identidade do Canal
+              {t('kids:config.channelIdentity')}
             </h2>
             <p className="mt-1 text-xs text-text-muted">
-              Define como a IA personaliza ideias e roteiros para o seu canal
+              {t('kids:config.channelIdentityDesc')}
             </p>
           </div>
           <Button size="sm" onClick={handleSaveProfile} disabled={savingProfile}>
-            {savingProfile ? <><Spinner className="h-3.5 w-3.5" /> Salvando...</> : <><Save className="h-3.5 w-3.5" /> Salvar</>}
+            {savingProfile ? <><Spinner className="h-3.5 w-3.5" /> {t('kids:config.saving')}</> : <><Save className="h-3.5 w-3.5" /> {t('common:save')}</>}
           </Button>
         </div>
 
         <div className="space-y-4">
           <div>
             <label className="mb-1 block text-xs font-medium text-text-secondary">
-              Descrição do canal
+              {t('kids:config.channelDescription')}
             </label>
             <textarea
               value={profileForm.channel_description}
               onChange={(e) => setProfileForm({ ...profileForm, channel_description: e.target.value })}
-              placeholder="Ex: Canal educativo infantil sobre ciência, natureza e curiosidades. Vídeos curtos e divertidos para crianças de 6-10 anos."
+              placeholder={t('kids:config.channelDescriptionPlaceholder')}
               rows={3}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
             />
@@ -839,20 +844,20 @@ function ChannelConfigSection() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">Nicho</label>
+              <label className="mb-1 block text-xs font-medium text-text-secondary">{t('kids:config.niche')}</label>
               <input
                 value={profileForm.niche}
                 onChange={(e) => setProfileForm({ ...profileForm, niche: e.target.value })}
-                placeholder="Ex: Ciência e natureza para crianças"
+                placeholder={t('kids:config.nichePlaceholder')}
                 className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">Público-alvo</label>
+              <label className="mb-1 block text-xs font-medium text-text-secondary">{t('kids:config.targetAudience')}</label>
               <input
                 value={profileForm.target_audience}
                 onChange={(e) => setProfileForm({ ...profileForm, target_audience: e.target.value })}
-                placeholder="Ex: Crianças de 6-10 anos e seus pais"
+                placeholder={t('kids:config.targetAudiencePlaceholder')}
                 className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
               />
             </div>
@@ -860,31 +865,31 @@ function ChannelConfigSection() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">Tom de voz</label>
+              <label className="mb-1 block text-xs font-medium text-text-secondary">{t('kids:config.toneOfVoice')}</label>
               <input
                 value={profileForm.tone_of_voice}
                 onChange={(e) => setProfileForm({ ...profileForm, tone_of_voice: e.target.value })}
-                placeholder="Ex: amigável, curioso, divertido"
+                placeholder={t('kids:config.toneOfVoicePlaceholder')}
                 className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">Estilo de narrativa</label>
+              <label className="mb-1 block text-xs font-medium text-text-secondary">{t('kids:config.narrativeStyle')}</label>
               <input
                 value={profileForm.narrative_style}
                 onChange={(e) => setProfileForm({ ...profileForm, narrative_style: e.target.value })}
-                placeholder="Ex: perguntas e respostas, descoberta"
+                placeholder={t('kids:config.narrativeStylePlaceholder')}
                 className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
               />
             </div>
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-text-secondary">Objetivos de conteúdo</label>
+            <label className="mb-1 block text-xs font-medium text-text-secondary">{t('kids:config.contentGoals')}</label>
             <input
               value={profileForm.content_goals}
               onChange={(e) => setProfileForm({ ...profileForm, content_goals: e.target.value })}
-              placeholder="Ex: Educar e entreter, despertar curiosidade científica"
+              placeholder={t('kids:config.contentGoalsPlaceholder')}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
             />
           </div>
@@ -897,35 +902,35 @@ function ChannelConfigSection() {
           <div>
             <h2 className="flex items-center gap-2 text-sm font-semibold">
               <Sparkles className="h-4 w-4 text-accent" />
-              Configuração Kids
+              {t('kids:config.kidsConfig')}
             </h2>
             <p className="mt-1 text-xs text-text-muted">
-              Faixa etária, categorias e duração para a descoberta de ideias
+              {t('kids:config.kidsConfigDesc')}
             </p>
           </div>
           <Button size="sm" onClick={handleSaveProfile} disabled={savingProfile}>
-            {savingProfile ? <><Spinner className="h-3.5 w-3.5" /> Salvando...</> : <><Save className="h-3.5 w-3.5" /> Salvar</>}
+            {savingProfile ? <><Spinner className="h-3.5 w-3.5" /> {t('kids:config.saving')}</> : <><Save className="h-3.5 w-3.5" /> {t('common:save')}</>}
           </Button>
         </div>
 
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">Faixa etária alvo</label>
+              <label className="mb-1 block text-xs font-medium text-text-secondary">{t('kids:config.ageRange')}</label>
               <select
                 value={kidsMeta.age_range}
                 onChange={(e) => setKidsMeta({ ...kidsMeta, age_range: e.target.value })}
                 className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
               >
-                <option value="3-6">3-6 anos</option>
-                <option value="6-10">6-10 anos</option>
-                <option value="7-10">7-10 anos</option>
-                <option value="all">Todas as idades</option>
+                <option value="3-6">{t('kids:config.ageRange3to6')}</option>
+                <option value="6-10">{t('kids:config.ageRange6to10')}</option>
+                <option value="7-10">{t('kids:config.ageRange7to10')}</option>
+                <option value="all">{t('kids:config.ageRangeAll')}</option>
               </select>
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-text-secondary">
-                Duração alvo (segundos): {kidsMeta.target_duration}
+                {t('kids:config.targetDuration', { count: kidsMeta.target_duration })}
               </label>
               <input
                 type="range"
@@ -941,27 +946,27 @@ function ChannelConfigSection() {
 
           <div>
             <label className="mb-2 block text-xs font-medium text-text-secondary">
-              Categorias de interesse (vazio = todas)
+              {t('kids:config.interestCategories')}
             </label>
             <div className="flex flex-wrap gap-2">
               {TOPIC_LIBRARY_CATEGORIES.map((c) => (
                 <button
-                  key={c.value}
+                  key={c}
                   onClick={() => {
                     setKidsMeta((prev) => ({
                       ...prev,
-                      categories: prev.categories.includes(c.value)
-                        ? prev.categories.filter((v) => v !== c.value)
-                        : [...prev.categories, c.value],
+                      categories: prev.categories.includes(c)
+                        ? prev.categories.filter((v) => v !== c)
+                        : [...prev.categories, c],
                     }));
                   }}
                   className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    kidsMeta.categories.includes(c.value)
+                    kidsMeta.categories.includes(c)
                       ? "border-accent bg-accent/10 text-accent"
                       : "border-border bg-surface text-text-muted hover:text-text"
                   }`}
                 >
-                  {c.label}
+                  {t(`kids:category.${c}`)}
                 </button>
               ))}
             </div>

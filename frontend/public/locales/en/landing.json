@@ -1,0 +1,59 @@
+{
+  "appFullName": "Gameplay Content Generator",
+  "hero": {
+    "badge": "Complete content automation for creators",
+    "titlePrefix": "Turn gameplay into",
+    "titleHighlight": "ready-made videos",
+    "titleSuffix": "for YouTube",
+    "description": "Automated short generation: AI gameplay analysis, editorial scripts, TTS narration, subtitles, and publishing straight to YouTube. All in one panel.",
+    "accessPanel": "Access panel",
+    "downloadApp": "Download mobile app"
+  },
+  "features": {
+    "title": "What GPCG does",
+    "analysis": {
+      "title": "Gameplay Analysis",
+      "desc": "VLM + ASR automatically map the best moments from your gameplays. Interest score, transcription, and scene selection."
+    },
+    "scripts": {
+      "title": "AI Scripts",
+      "desc": "Complete editorial pipeline: curiosity, story finding, creative engine, humanization, and script critique. Built-in anti-plagiarism."
+    },
+    "publish": {
+      "title": "YouTube Publishing",
+      "desc": "Per-user OAuth. Automatic upload with AI-generated title, description, tags and thumbnail. Full control over each publication."
+    }
+  },
+  "howItWorks": {
+    "title": "How it works",
+    "step1": { "title": "Upload", "desc": "Send your gameplays via the web panel or mobile app." },
+    "step2": { "title": "Mapping", "desc": "The GPU worker analyzes the gameplay and finds the best clips." },
+    "step3": { "title": "Generation", "desc": "Script, narration, subtitles, and rendering — all automatic." },
+    "step4": { "title": "Publishing", "desc": "Review, edit metadata, and publish straight to YouTube." }
+  },
+  "app": {
+    "badge": "Mobile App",
+    "title": "GPCG in your pocket",
+    "description": "Download the app and manage your videos from anywhere. Access the dashboard, track jobs, upload gameplays, edit metadata, and share on social media — all from your phone.",
+    "features": {
+      "dashboard": "Dashboard with real-time worker status",
+      "upload": "Upload gameplays straight from your phone",
+      "sharing": "Native sharing (Instagram, TikTok, etc.)",
+      "notifications": "Automatic update notifications",
+      "offline": "Works offline (local video cache)"
+    },
+    "downloadApk": "Download APK",
+    "comingSoon": "App coming soon",
+    "updatedOn": "Updated on {{date}}",
+    "androidVersion": "Android 8.0+"
+  },
+  "cta": {
+    "title": "Ready to automate?",
+    "description": "Access the panel and start generating content right now.",
+    "button": "Sign in to GPCG"
+  },
+  "footer": {
+    "tagline": "GPCG · Gameplay Content Generator",
+    "copyright": "© {{year}} Bruno Integrations"
+  }
+}

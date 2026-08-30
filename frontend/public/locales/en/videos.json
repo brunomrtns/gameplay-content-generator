@@ -1,0 +1,79 @@
+{
+  "title": "Videos",
+  "subtitle": "Generated video gallery",
+  "searchPlaceholder": "Search by title...",
+  "empty": {
+    "searchTitle": "No videos found",
+    "searchDescription": "Try another search",
+    "title": "No videos generated yet",
+    "description": "Trigger a generation in the Automation tab to create videos."
+  },
+  "status": {
+    "pending": "Pending",
+    "ready": "Ready",
+    "qa_passed": "QA OK",
+    "qa_failed": "QA Failed",
+    "pending_approval": "Awaiting publication",
+    "published": "Published",
+    "publish_failed": "Publication failed"
+  },
+  "actions": {
+    "openYoutube": "Open on YouTube",
+    "publish": "Publish",
+    "publishYoutube": "Publish to YouTube",
+    "regenerate": "Regenerate video",
+    "delete": "Delete video"
+  },
+  "modal": {
+    "videoNumber": "Video #{{id}}",
+    "edit": "Edit",
+    "titleLabel": "Title",
+    "titlePlaceholder": "Video title",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "Video description",
+    "tagsLabel": "Tags (comma-separated)",
+    "tagsPlaceholder": "gaming, trivia, nintendo",
+    "saving": "Saving...",
+    "idea": "Idea",
+    "source": "Source: {{name}}",
+    "game": "Game",
+    "editorialPlan": "Editorial plan",
+    "generalTopic": "General topic",
+    "aboutGame": "About the game",
+    "humor": "Humor",
+    "noHumor": "No humor",
+    "scriptCritic": "Script critic",
+    "score": "Score: {{score}}",
+    "clipsUsedGameplay": "Gameplay clips used ({{count}})",
+    "clipsUsedImages": "Images used ({{count}})",
+    "script": "Script",
+    "regenerating": "Regenerating...",
+    "publishing": "Publishing to YouTube...",
+    "published": "Published on YouTube",
+    "publishFailed": "Publication failed — try again"
+  },
+  "errors": {
+    "publish": "Failed to publish to YouTube",
+    "saveMeta": "Failed to save metadata",
+    "delete": "Failed to delete video",
+    "regenerate": "Failed to regenerate video"
+  },
+  "delete": {
+    "title": "Delete video?",
+    "description": "This action cannot be undone. The video file and thumbnail will be permanently removed.",
+    "confirm": "Yes, delete"
+  },
+  "release": {
+    "title": "Release clips and idea?",
+    "description": "The {{sourceLabel}} clips and content idea used in this video can be released for use in future videos. Do you want to release them?",
+    "keepUsed": "No, keep them used",
+    "confirm": "Yes, release clips and idea"
+  },
+  "regenerate": {
+    "title": "Regenerate video?",
+    "desc1": "The idea <0>\"{{title}}\"</0> will go back to the <1>end of the ideas queue</1>. You can reorder it before approving generation.",
+    "desc2": "The {{sourceLabel}} clips used in this video will be released and can be reused in the new generation.",
+    "desc3": "The current video <0>will not be deleted</0> — both will coexist in the gallery.",
+    "confirm": "Yes, regenerate"
+  }
+}

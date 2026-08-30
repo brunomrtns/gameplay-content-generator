@@ -1,0 +1,119 @@
+{
+  "header": {
+    "subtitle": "Manage your media and channel profile"
+  },
+  "tabs": {
+    "recordings": "Recordings",
+    "channel": "Channel Identity"
+  },
+  "status": {
+    "discovered": "Discovered",
+    "probing": "Analyzing",
+    "ready": "Ready",
+    "error": "Error",
+    "needs_review": "Review",
+    "duplicate": "Duplicate",
+    "parked": "Parked",
+    "uploading": "Uploading",
+    "uploaded": "Waiting for worker",
+    "waiting_worker": "In queue",
+    "downloading": "Downloading",
+    "downloaded": "Downloaded",
+    "mapping": "Mapping",
+    "mapped": "Mapped",
+    "generating": "Generating video",
+    "finished": "Video ready",
+    "failed": "Failed",
+    "pending": "Pending",
+    "processing": "Processing",
+    "indexed": "Indexed"
+  },
+  "mapping": {
+    "loadError": "Error loading events",
+    "viewAnalysis": "View mapping analysis",
+    "eventsDetected": "{{count}} events detected",
+    "noEvents": "No events found.",
+    "request": "Request mapping",
+    "requestHelp": "Sends to the worker for analysis (VLM + ASR)",
+    "requested": "Mapping requested for \"{{filename}}\". The worker will process it shortly.",
+    "requestError": "Error requesting mapping"
+  },
+  "upload": {
+    "title": "Upload recordings",
+    "dragDrop": "Drag recordings here or click to upload",
+    "formats": "MP4, MKV, MOV, AVI · Automatic analysis after upload",
+    "uploading": "{{count}} file(s) uploading…",
+    "processing": "{{count}} recording(s) processing — analysis takes a few minutes",
+    "success": "\"{{name}}\" uploaded successfully",
+    "error": "Upload error",
+    "errorWithName": "Error uploading \"{{name}}\""
+  },
+  "scan": {
+    "button": "Scan inbox",
+    "scanning": "Scanning...",
+    "found": "{{count}} file(s) found"
+  },
+  "recordings": {
+    "title": "Recordings ({{count}})",
+    "emptyTitle": "No recordings yet",
+    "emptyDescription": "Upload gameplay files or scan the inbox folder to automatically discover recordings."
+  },
+  "delete": {
+    "title": "Delete gameplay",
+    "confirm1": "Are you sure you want to delete \"{{filename}}\"?\n\nThis will remove ALL clips, events, and physical files associated with this gameplay. This action cannot be undone.",
+    "confirm2": "Confirm again? The files on disk will be permanently deleted.",
+    "success": "Gameplay \"{{filename}}\" deleted. Physical files will be removed by the worker.",
+    "error": "Error deleting gameplay"
+  },
+  "visibility": {
+    "nowPublic": "\"{{filename}}\" is now public.",
+    "nowPrivate": "\"{{filename}}\" is now private.",
+    "error": "Error changing visibility",
+    "publicTitle": "Public — click to make private",
+    "privateTitle": "Private — click to make public",
+    "publicLabel": "Public"
+  },
+  "enabled": {
+    "available": "\"{{filename}}\" available for use.",
+    "parked": "\"{{filename}}\" parked.",
+    "error": "Error changing availability",
+    "availableTitle": "Available — click to park",
+    "parkedTitle": "Parked — click to make available"
+  },
+  "game": {
+    "set": "Set game",
+    "change": "Change game",
+    "assigned": "Game set: {{name}}",
+    "assignError": "Error assigning game",
+    "removed": "Game association removed",
+    "removeError": "Error removing game",
+    "modalTitle": "Set Recording Game",
+    "modalSubtitle": "Search by name or alternative name (GTA, Witcher, etc.)"
+  },
+  "community": {
+    "title": "Community public gameplays"
+  },
+  "channel": {
+    "title": "Channel Identity",
+    "subtitle": "Defines how the AI customizes scripts for your channel",
+    "saving": "Saving...",
+    "saved": "Channel profile saved",
+    "saveError": "Error saving profile",
+    "description": "Channel description",
+    "descriptionPlaceholder": "Ex: My channel focuses on competitive FPS match analysis. I want videos with an educational tone, highlighting strategies and decisive moments.",
+    "contentLanguage": "Content language",
+    "contentLanguageHelp": "Language in which scripts, narration, subtitles, and metadata will be generated",
+    "niche": "Niche",
+    "nichePlaceholder": "Ex: Competitive FPS",
+    "targetAudience": "Target audience",
+    "targetAudiencePlaceholder": "Ex: Casual players who want to improve",
+    "toneOfVoice": "Tone of voice",
+    "tonePlaceholder": "Ex: educational, analytical",
+    "narrativeStyle": "Narrative style",
+    "narrativePlaceholder": "Ex: storytelling, direct analysis",
+    "goals": "Channel goals",
+    "goalsPlaceholder": "Ex: Grow as an authority in competitive FPS, educate the audience",
+    "specialRules": "Special rules for the AI",
+    "specialRulesPlaceholder": "Ex: Never use CS:GO slang if the video is about Valorant. Always mention the agent's name."
+  }
+}

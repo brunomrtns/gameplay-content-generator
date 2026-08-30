@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
 import { useDomain } from "@/lib/domain-config";
 import { useLiveData } from "@/hooks/useLiveData";
@@ -29,18 +30,19 @@ import {
 
 const VIDEO_STATUS_CONFIG: Record<
   string,
-  { variant: "default" | "success" | "warning" | "error" | "info"; label: string }
+  { variant: "default" | "success" | "warning" | "error" | "info"; labelKey: string }
 > = {
-  pending: { variant: "default", label: "Pendente" },
-  ready: { variant: "info", label: "Pronto" },
-  qa_passed: { variant: "success", label: "QA OK" },
-  qa_failed: { variant: "error", label: "QA Falhou" },
-  pending_approval: { variant: "warning", label: "Aguardando publicação" },
-  published: { variant: "success", label: "Publicado" },
-  publish_failed: { variant: "error", label: "Publicação falhou" },
+  pending: { variant: "default", labelKey: "videoStatus.pending" },
+  ready: { variant: "info", labelKey: "videoStatus.ready" },
+  qa_passed: { variant: "success", labelKey: "videoStatus.qa_passed" },
+  qa_failed: { variant: "error", labelKey: "videoStatus.qa_failed" },
+  pending_approval: { variant: "warning", labelKey: "videoStatus.pending_approval" },
+  published: { variant: "success", labelKey: "videoStatus.published" },
+  publish_failed: { variant: "error", labelKey: "videoStatus.publish_failed" },
 };
 
 export function DashboardPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { config } = useDomain();
   const { data: dash, isLoading, refetch } = useLiveData(['dashboard'], () => api.getDashboard(), ['job.status_changed', 'video.created', 'automation.status_changed']);
@@ -56,13 +58,13 @@ export function DashboardPage() {
     try {
       if (automationRunning) {
         await api.pauseAutomation();
-        toast.success("Automação pausada. O vídeo atual será concluído.");
+        toast.success(t("dashboard:toast.automationPaused"));
       } else {
         await api.startAutomation();
-        toast.success("Automação iniciada! Vídeos serão produzidos continuamente.");
+        toast.success(t("dashboard:toast.automationStarted"));
       }
     } catch (err: any) {
-      toast.error(err.message || "Erro ao alterar automação");
+      toast.error(err.message || t("dashboard:toast.automationError"));
     } finally {
       setToggling(false);
     }
@@ -84,10 +86,10 @@ export function DashboardPage() {
       try {
         await api.publishVideo(id);
         await refetch();
-        toast.success("Vídeo publicado no YouTube!");
+        toast.success(t("dashboard:toast.videoPublished"));
       } catch (e: any) {
-        setPublishError(e.message || "Falha ao publicar no YouTube");
-        toast.error(e.message || "Falha ao publicar");
+        setPublishError(e.message || t("dashboard:toast.publishFailedYoutube"));
+        toast.error(e.message || t("dashboard:toast.publishFailed"));
       } finally {
         setPublishing(null);
       }
@@ -112,16 +114,16 @@ export function DashboardPage() {
 
   const stats = isKidsDomain
     ? [
-        { label: "Tópicos", value: kids.total_topics, icon: FileText, sub: `${kids.ready_assets} mídias prontas`, color: "text-accent" },
-        { label: "Mídias", value: kids.total_assets, icon: Upload, sub: `${kids.ready_assets} prontas`, color: "text-accent-warm" },
-        { label: "Vídeos produzidos", value: videos.total, icon: VideoIcon, sub: jobs.running > 0 ? "produzindo agora" : "em pausa", color: "text-accent" },
-        { label: "Publicados", value: videos.published, icon: Send, sub: "no YouTube", color: "text-accent-warm" },
+        { label: t("dashboard:stats.topics"), value: kids.total_topics, icon: FileText, sub: t("dashboard:stats.mediaReady", { count: kids.ready_assets }), color: "text-accent" },
+        { label: t("dashboard:stats.media"), value: kids.total_assets, icon: Upload, sub: t("dashboard:stats.mediaReadyShort", { count: kids.ready_assets }), color: "text-accent-warm" },
+        { label: t("dashboard:stats.videosProduced"), value: videos.total, icon: VideoIcon, sub: jobs.running > 0 ? t("dashboard:stats.producingNow") : t("dashboard:stats.paused"), color: "text-accent" },
+        { label: t("dashboard:stats.published"), value: videos.published, icon: Send, sub: t("dashboard:stats.onYoutube"), color: "text-accent-warm" },
       ]
     : [
-        { label: "Gameplays", value: gameplays.total, icon: Film, sub: `${gameplays.ready} prontos`, color: "text-accent" },
-        { label: "Processando", value: gameplays.processing, icon: Loader2, sub: gameplays.processing > 0 ? "em análise" : "tudo ok", color: "text-accent-warm" },
-        { label: "Vídeos produzidos", value: videos.total, icon: VideoIcon, sub: jobs.running > 0 ? "produzindo agora" : "em pausa", color: "text-accent" },
-        { label: "Publicados", value: videos.published, icon: Send, sub: "no YouTube", color: "text-accent-warm" },
+        { label: t("dashboard:stats.gameplays"), value: gameplays.total, icon: Film, sub: t("dashboard:stats.gameplaysReady", { count: gameplays.ready }), color: "text-accent" },
+        { label: t("dashboard:stats.processing"), value: gameplays.processing, icon: Loader2, sub: gameplays.processing > 0 ? t("dashboard:stats.inAnalysis") : t("dashboard:stats.allOk"), color: "text-accent-warm" },
+        { label: t("dashboard:stats.videosProduced"), value: videos.total, icon: VideoIcon, sub: jobs.running > 0 ? t("dashboard:stats.producingNow") : t("dashboard:stats.paused"), color: "text-accent" },
+        { label: t("dashboard:stats.published"), value: videos.published, icon: Send, sub: t("dashboard:stats.onYoutube"), color: "text-accent-warm" },
       ];
 
   return (
@@ -129,8 +131,8 @@ export function DashboardPage() {
       {/* Header com controle da automação */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="mt-1 text-sm text-text-secondary">Sua máquina de produção de conteúdo</p>
+          <h1 className="text-3xl font-bold tracking-tight">{t("dashboard:title")}</h1>
+          <p className="mt-1 text-sm text-text-secondary">{t("dashboard:headerSubtitle")}</p>
           {dash?.channel_domain && (
             <span className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-accent/10 border border-accent/20 px-2 py-0.5 text-[10px] font-medium text-accent">
               {config.name}
@@ -144,11 +146,11 @@ export function DashboardPage() {
           disabled={toggling}
         >
           {toggling ? (
-            <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Aguarde...</>
+            <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> {t("dashboard:automationButton.waiting")}</>
           ) : automationRunning ? (
-            <><Pause className="h-4 w-4" /> Pausar automação</>
+            <><Pause className="h-4 w-4" /> {t("dashboard:automationButton.pause")}</>
           ) : (
-            <><Play className="h-4 w-4" /> Iniciar automação</>
+            <><Play className="h-4 w-4" /> {t("dashboard:automationButton.start")}</>
           )}
         </Button>
       </div>
@@ -196,19 +198,19 @@ export function DashboardPage() {
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-accent" />
-                <span className="text-sm font-medium">{dash?.youtube_channel || "Conectado"}</span>
+                <span className="text-sm font-medium">{dash?.youtube_channel || t("dashboard:youtube.connectedFallback")}</span>
               </div>
-              <Badge variant="success">Conectado</Badge>
-              <p className="text-xs text-text-muted">Vídeos serão publicados automaticamente conforme a automação.</p>
+              <Badge variant="success">{t("dashboard:youtube.connectedBadge")}</Badge>
+              <p className="text-xs text-text-muted">{t("dashboard:youtube.autoPublishDescription")}</p>
             </div>
           ) : (
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <XCircle className="h-4 w-4 text-text-muted" />
-                <span className="text-sm text-text-secondary">Não conectado</span>
+                <span className="text-sm text-text-secondary">{t("dashboard:youtube.notConnectedLabel")}</span>
               </div>
               <Button variant="outline" size="sm" onClick={handleYouTubeConnect} className="w-full">
-                <Youtube className="h-4 w-4" /> Conectar YouTube
+                <Youtube className="h-4 w-4" /> {t("dashboard:youtube.connect")}
               </Button>
             </div>
           )}
@@ -218,25 +220,25 @@ export function DashboardPage() {
         <Card className="lg:col-span-1">
           <div className="flex items-center gap-2 mb-4">
             <Zap className={`h-5 w-5 ${automationRunning ? "text-accent" : "text-text-muted"}`} />
-            <h2 className="text-sm font-semibold">Automação</h2>
+            <h2 className="text-sm font-semibold">{t("dashboard:automation.title")}</h2>
           </div>
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-text-secondary">Status</span>
+              <span className="text-sm text-text-secondary">{t("dashboard:automation.status")}</span>
               <Badge variant={automationRunning ? "success" : "default"}>
                 {automationRunning ? (
-                  <><span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" /> Produzindo</>
+                  <><span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" /> {t("dashboard:automation.producing")}</>
                 ) : (
-                  dash?.automation_status === "paused" ? "Pausada" : "Parada"
+                  dash?.automation_status === "paused" ? t("dashboard:automation.paused") : t("dashboard:automation.stopped")
                 )}
               </Badge>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-text-secondary">Sendo produzido</span>
-              <span className="text-sm font-medium">{jobs.running} {jobs.running === 1 ? "vídeo" : "vídeos"}</span>
+              <span className="text-sm text-text-secondary">{t("dashboard:automation.currentlyProducing")}</span>
+              <span className="text-sm font-medium">{jobs.running} {jobs.running === 1 ? t("dashboard:automation.videoSingular") : t("dashboard:automation.videoPlural")}</span>
             </div>
             <Button variant="ghost" size="sm" className="w-full" onClick={() => navigate("/automation")}>
-              Configurar automação
+              {t("dashboard:automation.configure")}
             </Button>
           </div>
         </Card>
@@ -245,7 +247,7 @@ export function DashboardPage() {
         <Card className="lg:col-span-1">
           <div className="flex items-center gap-2 mb-4">
             <Clock className="h-5 w-5 text-accent-warm" />
-            <h2 className="text-sm font-semibold">Atalhos</h2>
+            <h2 className="text-sm font-semibold">{t("dashboard:quickActions.title")}</h2>
           </div>
           <div className="space-y-2">
             <button
@@ -260,14 +262,14 @@ export function DashboardPage() {
               className="flex w-full items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm transition-all hover:border-border-bright hover:bg-surface-hover"
             >
               <Settings className="h-4 w-4 text-accent" />
-              <span>Configurar produção</span>
+              <span>{t("dashboard:quickActions.configureProduction")}</span>
             </button>
             <button
               onClick={() => navigate("/videos")}
               className="flex w-full items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm transition-all hover:border-border-bright hover:bg-surface-hover"
             >
               <VideoIcon className="h-4 w-4 text-accent" />
-              <span>Ver vídeos produzidos</span>
+              <span>{t("dashboard:quickActions.viewVideos")}</span>
             </button>
           </div>
         </Card>
@@ -276,13 +278,13 @@ export function DashboardPage() {
       {/* Recent videos with actions */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Vídeos produzidos</h2>
+          <h2 className="text-lg font-semibold">{t("dashboard:producedVideos.title")}</h2>
           {recentVideos.length > 0 && (
             <button
               onClick={() => navigate("/videos")}
               className="text-xs text-text-muted hover:text-accent transition-colors"
             >
-              Ver todos →
+              {t("dashboard:producedVideos.viewAllLink")}
             </button>
           )}
         </div>
@@ -290,11 +292,11 @@ export function DashboardPage() {
           <Card>
             <EmptyState
               icon={<VideoIcon className="h-10 w-10" />}
-              title="Nenhum vídeo produzido ainda"
-              description="Inicie a automação para começar a produzir conteúdo continuamente."
+              title={t("dashboard:producedVideos.emptyTitle")}
+              description={t("dashboard:producedVideos.emptyDescription")}
               action={
                 <Button variant="primary" onClick={handleToggleAutomation} disabled={toggling}>
-                  <Play className="h-4 w-4" /> Iniciar automação
+                  <Play className="h-4 w-4" /> {t("dashboard:automationButton.start")}
                 </Button>
               }
             />
@@ -348,7 +350,7 @@ export function DashboardPage() {
                     </div>
                     {/* Actions */}
                     <div className="mt-2 flex items-center justify-between gap-1.5">
-                      <Badge variant={statusCfg.variant}>{statusCfg.label}</Badge>
+                      <Badge variant={statusCfg.variant}>{t(`dashboard:${statusCfg.labelKey}`)}</Badge>
                       <div className="flex items-center gap-1">
                         {isPublished && (
                           <a
@@ -356,7 +358,7 @@ export function DashboardPage() {
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex h-6 w-6 items-center justify-center rounded-lg border border-border text-text-muted transition-all hover:border-red-600/40 hover:text-red-400"
-                            title="Abrir no YouTube"
+                            title={t("dashboard:videoCard.openOnYoutube")}
                           >
                             <ExternalLink className="h-3 w-3" />
                           </a>
@@ -366,14 +368,14 @@ export function DashboardPage() {
                             onClick={() => handlePublish(v.id)}
                             disabled={publishing === v.id}
                             className="flex h-6 items-center gap-1 rounded-lg border border-border px-2 text-[10px] font-medium text-text-muted transition-all hover:border-accent/40 hover:text-accent disabled:opacity-50"
-                            title="Publicar no YouTube"
+                            title={t("dashboard:videoCard.publishOnYoutube")}
                           >
                             {publishing === v.id ? (
                               <Loader2 className="h-3 w-3 animate-spin" />
                             ) : (
                               <Upload className="h-3 w-3" />
                             )}
-                            Publicar
+                            {t("dashboard:videoCard.publish")}
                           </button>
                         )}
                       </div>
@@ -410,7 +412,7 @@ export function DashboardPage() {
             />
             <div className="space-y-3 p-4">
               <h3 className="text-sm font-semibold">
-                {playing.social_title || playing.topic || `Vídeo #${playing.id}`}
+                {playing.social_title || playing.topic || t("dashboard:videoCard.videoFallback", { id: playing.id })}
               </h3>
               {playing.social_description && (
                 <p className="text-xs text-text-secondary line-clamp-3 whitespace-pre-wrap">
@@ -440,7 +442,7 @@ export function DashboardPage() {
                     rel="noopener noreferrer"
                     className="flex items-center gap-1 text-red-400 hover:text-red-300"
                   >
-                    <Youtube className="h-3 w-3" /> Abrir no YouTube
+                    <Youtube className="h-3 w-3" /> {t("dashboard:videoCard.openOnYoutube")}
                   </a>
                 )}
               </div>

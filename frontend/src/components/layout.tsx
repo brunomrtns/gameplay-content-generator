@@ -58,7 +58,7 @@ export function Layout() {
     Icon: ICON_MAP[n.icon] || LayoutDashboard,
   }));
   if (user?.is_admin) {
-    navItems.push({ to: "/admin", label: "Admin", icon: "Shield", Icon: Shield });
+    navItems.push({ to: "/admin", label: "nav.admin", icon: "Shield", Icon: Shield });
   }
 
   const LogoIcon = ICON_MAP[config.theme.logoIcon] || Zap;
@@ -101,7 +101,7 @@ export function Layout() {
                 }
               >
                 <n.Icon className="h-4 w-4" />
-                {n.label}
+                {t(n.label)}
               </NavLink>
             ))}
           </nav>
@@ -112,7 +112,7 @@ export function Layout() {
           {/* Help button — reopens onboarding tour */}
           <button
             onClick={tour.reopen}
-            title="Tutorial"
+            title={t("tutorial")}
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-text-muted hover:text-accent hover:border-accent/30 transition-all"
           >
             <HelpCircle className="h-4 w-4" />
@@ -141,7 +141,7 @@ export function Layout() {
                     <p className="text-xs text-text-muted truncate">{user?.email}</p>
                     {user?.is_admin && (
                       <span className="mt-1 inline-block rounded bg-accent-warm/10 text-accent-warm text-[10px] font-semibold px-1.5 py-0.5 border border-accent-warm/30">
-                        ADMIN
+                        {t("admin")}
                       </span>
                     )}
                   </div>
@@ -161,7 +161,7 @@ export function Layout() {
                         }`}
                       >
                         {currentLang === "pt-BR" && <Check className="h-3 w-3" />}
-                        Português
+                        {t("portuguese")}
                       </button>
                       <button
                         onClick={() => handleLanguageChange("en")}
@@ -172,7 +172,7 @@ export function Layout() {
                         }`}
                       >
                         {currentLang === "en" && <Check className="h-3 w-3" />}
-                        English
+                        {t("english")}
                       </button>
                     </div>
                   </div>
@@ -206,7 +206,7 @@ export function Layout() {
             }
           >
             <n.Icon className="h-3.5 w-3.5" />
-            {n.label}
+            {t(n.label)}
           </NavLink>
         ))}
       </nav>

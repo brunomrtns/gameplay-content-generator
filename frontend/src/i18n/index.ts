@@ -21,6 +21,12 @@ export const NAMESPACES = [
   "errors",
   "dashboard",
   "automation",
+  "admin",
+  "kids",
+  "content",
+  "videos",
+  "login",
+  "landing",
 ] as const;
 
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];

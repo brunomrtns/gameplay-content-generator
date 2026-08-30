@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Zap,
   ArrowRight,
@@ -28,6 +29,7 @@ interface AppVersionInfo {
 }
 
 export function LandingPage() {
+  const { t, i18n } = useTranslation();
   const [appInfo, setAppInfo] = useState<AppVersionInfo | null>(null);
 
   useEffect(() => {
@@ -50,7 +52,7 @@ export function LandingPage() {
     : null;
 
   const releasedDate = appInfo?.released_at
-    ? new Date(appInfo.released_at).toLocaleDateString("pt-BR", {
+    ? new Date(appInfo.released_at).toLocaleDateString(i18n.language, {
         day: "2-digit",
         month: "long",
         year: "numeric",
@@ -68,15 +70,15 @@ export function LandingPage() {
               <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-accent animate-pulse-glow" />
             </div>
             <div>
-              <h1 className="text-base font-bold tracking-tight">GPCG</h1>
+              <h1 className="text-base font-bold tracking-tight">{t("common:appName")}</h1>
               <p className="text-[10px] text-text-muted leading-none">
-                Gameplay Content Generator
+                {t("landing:appFullName")}
               </p>
             </div>
           </div>
           <Button variant="primary" size="sm" onClick={handleLogin}>
             <LogIn className="h-4 w-4" />
-            Entrar
+            {t("common:login")}
           </Button>
         </div>
       </nav>
@@ -87,30 +89,29 @@ export function LandingPage() {
           <div className="flex flex-col items-center text-center gap-6">
             <div className="inline-flex items-center gap-2 rounded-full border border-border bg-surface/50 px-4 py-1.5 text-xs text-text-secondary">
               <Sparkles className="h-3.5 w-3.5 text-accent" />
-              Automação completa de conteúdo para criadores
+              {t("landing:hero.badge")}
             </div>
 
             <h2 className="max-w-3xl text-4xl font-bold tracking-tight md:text-6xl">
-              Transforme gameplay em{" "}
-              <span className="text-accent">vídeos prontos</span> para o YouTube
+              {t("landing:hero.titlePrefix")}{" "}
+              <span className="text-accent">{t("landing:hero.titleHighlight")}</span>{" "}
+              {t("landing:hero.titleSuffix")}
             </h2>
 
             <p className="max-w-2xl text-lg text-text-secondary">
-              Geração automatizada de shorts: análise de gameplay com IA,
-              roteiros editoriais, narração TTS, legendas, e publicação direto
-              no YouTube. Tudo em um painel só.
+              {t("landing:hero.description")}
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 mt-4">
               <Button variant="primary" size="lg" onClick={handleLogin}>
                 <LogIn className="h-4 w-4" />
-                Acessar painel
+                {t("landing:hero.accessPanel")}
                 <ArrowRight className="h-4 w-4" />
               </Button>
               <a href="#download-app">
                 <Button variant="outline" size="lg">
                   <Smartphone className="h-4 w-4" />
-                  Baixar app mobile
+                  {t("landing:hero.downloadApp")}
                 </Button>
               </a>
             </div>
@@ -126,23 +127,23 @@ export function LandingPage() {
       <section className="border-t border-border/50">
         <div className="mx-auto max-w-6xl px-6 py-20">
           <h3 className="mb-12 text-center text-2xl font-bold">
-            O que o GPCG faz
+            {t("landing:features.title")}
           </h3>
           <div className="grid gap-6 md:grid-cols-3">
             <FeatureCard
               icon={<Video className="h-6 w-6 text-accent" />}
-              title="Análise de Gameplay"
-              desc="VLM + ASR mapeiam automaticamente os melhores momentos dos seus gameplays. Score de interesse, transcrição, e seleção de cenas."
+              title={t("landing:features.analysis.title")}
+              desc={t("landing:features.analysis.desc")}
             />
             <FeatureCard
               icon={<Bot className="h-6 w-6 text-accent" />}
-              title="Roteiros com IA"
-              desc="Pipeline editorial completo: curiosidade, story finding, creative engine, humanização, e crítica de script. Anti-plágio integrado."
+              title={t("landing:features.scripts.title")}
+              desc={t("landing:features.scripts.desc")}
             />
             <FeatureCard
               icon={<Youtube className="h-6 w-6 text-accent" />}
-              title="Publicação no YouTube"
-              desc="OAuth por usuário. Upload automático com título, descrição, tags e thumbnail gerados por IA. Controle total de cada publicação."
+              title={t("landing:features.publish.title")}
+              desc={t("landing:features.publish.desc")}
             />
           </div>
         </div>
@@ -152,28 +153,28 @@ export function LandingPage() {
       <section className="border-t border-border/50 bg-surface/30">
         <div className="mx-auto max-w-6xl px-6 py-20">
           <h3 className="mb-12 text-center text-2xl font-bold">
-            Como funciona
+            {t("landing:howItWorks.title")}
           </h3>
           <div className="grid gap-8 md:grid-cols-4">
             <StepCard
               num="1"
-              title="Upload"
-              desc="Envie seus gameplays pelo painel web ou app mobile."
+              title={t("landing:howItWorks.step1.title")}
+              desc={t("landing:howItWorks.step1.desc")}
             />
             <StepCard
               num="2"
-              title="Mapeamento"
-              desc="O worker com GPU analisa o gameplay e encontra os melhores trechos."
+              title={t("landing:howItWorks.step2.title")}
+              desc={t("landing:howItWorks.step2.desc")}
             />
             <StepCard
               num="3"
-              title="Geração"
-              desc="Roteiro, narração, legendas, e renderização — tudo automático."
+              title={t("landing:howItWorks.step3.title")}
+              desc={t("landing:howItWorks.step3.desc")}
             />
             <StepCard
               num="4"
-              title="Publicação"
-              desc="Revise, edite metadados, e publique direto no YouTube."
+              title={t("landing:howItWorks.step4.title")}
+              desc={t("landing:howItWorks.step4.desc")}
             />
           </div>
         </div>
@@ -190,26 +191,24 @@ export function LandingPage() {
             <div className="flex flex-col gap-6">
               <div className="inline-flex w-fit items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-4 py-1.5 text-xs text-accent">
                 <Smartphone className="h-3.5 w-3.5" />
-                App Mobile
+                {t("landing:app.badge")}
               </div>
 
               <h3 className="text-3xl font-bold tracking-tight">
-                GPCG no seu bolso
+                {t("landing:app.title")}
               </h3>
 
               <p className="text-text-secondary">
-                Baixe o app e gerencie seus vídeos de qualquer lugar. Acesse o
-                dashboard, acompanhe jobs, faça upload de gameplays, edite
-                metadados, e compartilhe nas redes sociais — tudo do celular.
+                {t("landing:app.description")}
               </p>
 
               <ul className="flex flex-col gap-3">
                 {[
-                  "Dashboard com status do worker em tempo real",
-                  "Upload de gameplays direto do celular",
-                  "Compartilhamento nativo (Instagram, TikTok, etc.)",
-                  "Notificação automática de atualizações",
-                  "Funciona offline (cache local de vídeos)",
+                  t("landing:app.features.dashboard"),
+                  t("landing:app.features.upload"),
+                  t("landing:app.features.sharing"),
+                  t("landing:app.features.notifications"),
+                  t("landing:app.features.offline"),
                 ].map((feat) => (
                   <li
                     key={feat}
@@ -231,7 +230,7 @@ export function LandingPage() {
                     className="w-fit"
                   >
                     <Download className="h-5 w-5" />
-                    Baixar APK
+                    {t("landing:app.downloadApk")}
                     {appInfo.version && (
                       <span className="ml-1 text-xs opacity-80">
                         v{appInfo.version}
@@ -240,7 +239,7 @@ export function LandingPage() {
                   </Button>
                 ) : (
                   <div className="w-fit rounded-xl border border-border bg-surface px-5 py-3 text-sm text-text-muted">
-                    App disponível em breve
+                    {t("landing:app.comingSoon")}
                   </div>
                 )}
 
@@ -248,8 +247,8 @@ export function LandingPage() {
                 {appInfo?.available && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted">
                     {apkSizeMB && <span>{apkSizeMB} MB</span>}
-                    {releasedDate && <span>Atualizado em {releasedDate}</span>}
-                    <span>Android 8.0+</span>
+                    {releasedDate && <span>{t("landing:app.updatedOn", { date: releasedDate })}</span>}
+                    <span>{t("landing:app.androidVersion")}</span>
                   </div>
                 )}
               </div>
@@ -270,9 +269,9 @@ export function LandingPage() {
                       <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-accent animate-pulse-glow" />
                     </div>
                     <div className="text-center">
-                      <p className="text-lg font-bold tracking-tight">GPCG</p>
+                      <p className="text-lg font-bold tracking-tight">{t("common:appName")}</p>
                       <p className="text-xs text-text-muted">
-                        Gameplay Content Generator
+                        {t("landing:appFullName")}
                       </p>
                     </div>
                     <div className="flex flex-col gap-2 w-full px-6">
@@ -302,14 +301,14 @@ export function LandingPage() {
       <section className="border-t border-border/50">
         <div className="mx-auto max-w-4xl px-6 py-20 text-center">
           <h3 className="mb-4 text-3xl font-bold tracking-tight">
-            Pronto para automatizar?
+            {t("landing:cta.title")}
           </h3>
           <p className="mb-8 text-text-secondary">
-            Acesse o painel e comece a gerar conteúdo agora mesmo.
+            {t("landing:cta.description")}
           </p>
           <Button variant="primary" size="lg" onClick={handleLogin}>
             <LogIn className="h-4 w-4" />
-            Entrar no GPCG
+            {t("landing:cta.button")}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
@@ -321,10 +320,10 @@ export function LandingPage() {
           <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
             <div className="flex items-center gap-2 text-sm text-text-muted">
               <Zap className="h-4 w-4 text-accent" />
-              GPCG · Gameplay Content Generator
+              {t("landing:footer.tagline")}
             </div>
             <p className="text-xs text-text-muted">
-              © {new Date().getFullYear()} Bruno Integrations
+              {t("landing:footer.copyright", { year: new Date().getFullYear() })}
             </p>
           </div>
         </div>

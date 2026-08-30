@@ -1,11 +1,47 @@
 {
   "title": "Painel",
   "subtitle": "Visão geral da sua operação de geração de vídeos",
+  "headerSubtitle": "Sua máquina de produção de conteúdo",
   "stats": {
     "gameplays": "Gameplays",
     "jobs": "Jobs",
     "videos": "Vídeos",
-    "workers": "Workers"
+    "workers": "Workers",
+    "topics": "Tópicos",
+    "media": "Mídias",
+    "processing": "Processando",
+    "videosProduced": "Vídeos produzidos",
+    "published": "Publicados",
+    "mediaReady": "{{count}} mídias prontas",
+    "mediaReadyShort": "{{count}} prontas",
+    "gameplaysReady": "{{count}} prontos",
+    "producingNow": "produzindo agora",
+    "paused": "em pausa",
+    "onYoutube": "no YouTube",
+    "inAnalysis": "em análise",
+    "allOk": "tudo ok"
+  },
+  "videoStatus": {
+    "pending": "Pendente",
+    "ready": "Pronto",
+    "qa_passed": "QA OK",
+    "qa_failed": "QA Falhou",
+    "pending_approval": "Aguardando publicação",
+    "published": "Publicado",
+    "publish_failed": "Publicação falhou"
+  },
+  "toast": {
+    "automationPaused": "Automação pausada. O vídeo atual será concluído.",
+    "automationStarted": "Automação iniciada! Vídeos serão produzidos continuamente.",
+    "automationError": "Erro ao alterar automação",
+    "videoPublished": "Vídeo publicado no YouTube!",
+    "publishFailedYoutube": "Falha ao publicar no YouTube",
+    "publishFailed": "Falha ao publicar"
+  },
+  "automationButton": {
+    "waiting": "Aguarde...",
+    "pause": "Pausar automação",
+    "start": "Iniciar automação"
   },
   "workerStatus": {
     "title": "Status do Worker",
@@ -20,14 +56,43 @@
     "connected": "YouTube conectado",
     "notConnected": "YouTube não conectado",
     "connect": "Conectar YouTube",
-    "disconnect": "Desconectar"
+    "disconnect": "Desconectar",
+    "connectedBadge": "Conectado",
+    "connectedFallback": "Conectado",
+    "notConnectedLabel": "Não conectado",
+    "autoPublishDescription": "Vídeos serão publicados automaticamente conforme a automação."
   },
   "automation": {
     "active": "Automação ativa",
     "inactive": "Automação inativa",
-    "configure": "Configurar automação"
+    "configure": "Configurar automação",
+    "title": "Automação",
+    "status": "Status",
+    "producing": "Produzindo",
+    "paused": "Pausada",
+    "stopped": "Parada",
+    "currentlyProducing": "Sendo produzido",
+    "videoSingular": "vídeo",
+    "videoPlural": "vídeos"
+  },
+  "quickActions": {
+    "title": "Atalhos",
+    "configureProduction": "Configurar produção",
+    "viewVideos": "Ver vídeos produzidos"
   },
   "recentJobs": "Jobs recentes",
   "recentVideos": "Vídeos recentes",
-  "viewAll": "Ver todos"
+  "viewAll": "Ver todos",
+  "producedVideos": {
+    "title": "Vídeos produzidos",
+    "viewAllLink": "Ver todos →",
+    "emptyTitle": "Nenhum vídeo produzido ainda",
+    "emptyDescription": "Inicie a automação para começar a produzir conteúdo continuamente."
+  },
+  "videoCard": {
+    "openOnYoutube": "Abrir no YouTube",
+    "publishOnYoutube": "Publicar no YouTube",
+    "publish": "Publicar",
+    "videoFallback": "Vídeo #{{id}}"
+  }
 }

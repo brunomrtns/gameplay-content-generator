@@ -1,0 +1,219 @@
+{
+  "title": "Kids Content",
+  "subtitle": "Manage your media and channel profile",
+  "badge": "Kids",
+  "tab": {
+    "media": "Media",
+    "config": "Channel Configuration"
+  },
+  "category": {
+    "animals": "Animals",
+    "science": "Science",
+    "space": "Space",
+    "dinosaurs": "Dinosaurs",
+    "nature": "Nature",
+    "ocean": "Ocean",
+    "human_body": "Human Body",
+    "history": "History",
+    "geography": "Geography",
+    "vehicles": "Vehicles",
+    "food": "Food",
+    "colors": "Colors",
+    "numbers": "Numbers",
+    "curiosity": "Curiosities",
+    "general": "General"
+  },
+  "howItWorks": {
+    "title": "How it works",
+    "steps": "<strong>1.</strong> Upload videos and images · <strong>2.</strong> Add <strong>tags</strong> (e.g.: dinosaur, forest) — that's how the system finds the best media for each idea · <strong>3.</strong> Videos are mapped automatically (VLM analyzes each scene)",
+    "fallback": "Media without tags = <strong>general</strong> (used as fallback for any video, like generic gameplays in Games)"
+  },
+  "upload": {
+    "uploading": "Uploading media...",
+    "dropHere": "Drag images and videos here",
+    "clickHint": "or click to select — PNG, JPEG, WebP, GIF, MP4, WebM, MOV",
+    "tagsLabel": "Tags (comma-separated) — categorizes the media",
+    "tagsPlaceholder": "e.g.: dinosaur, forest, green — empty = general",
+    "descLabel": "Description (optional)",
+    "descPlaceholder": "e.g.: Tyrannosaurus in forest"
+  },
+  "uploadStatus": {
+    "done": "Done",
+    "error": "Error"
+  },
+  "processingBanner": "{{count}} media(s) processing — analysis takes a few minutes",
+  "filter": {
+    "images": "Images",
+    "videos": "Videos",
+    "readyOnly": "Ready only"
+  },
+  "media": {
+    "title": "Media",
+    "empty": {
+      "title": "No media in library",
+      "description": "Upload images and videos to the channel library. Add tags to categorize — the system uses tags to find the best media for each idea."
+    },
+    "publicTitle": "Community public media"
+  },
+  "processingStatus": {
+    "uploading": "Uploading",
+    "queued": "Queued",
+    "processing": "Processing",
+    "mapping": "Mapping",
+    "ready": "Ready",
+    "failed": "Failed"
+  },
+  "timeline": {
+    "loadError": "Error loading events",
+    "viewAnalysis": "View mapping analysis",
+    "eventsDetected": "{{count}} events detected",
+    "noEvents": "No events found."
+  },
+  "card": {
+    "confirmDelete": "Delete \"{{name}}\"?",
+    "deleted": "Media deleted",
+    "deleteError": "Error deleting",
+    "updated": "Media updated",
+    "updateError": "Error updating",
+    "visibilityChanged": "\"{{name}}\" is now {{visibility}}.",
+    "visibilityPublic": "public",
+    "visibilityPrivate": "private",
+    "visibilityError": "Error changing visibility",
+    "eventCount": "{{count}} events",
+    "noTags": "General — no tags (fallback)",
+    "public": "Public",
+    "editTagsDesc": "Edit tags and description",
+    "makePrivate": "Public — click to make private",
+    "makePublic": "Private — click to make public",
+    "deleteMedia": "Delete media",
+    "requestMapping": "Request mapping",
+    "requestMappingHint": "Sends to worker for analysis (VLM + ASR)",
+    "tagsPlaceholder": "tags (comma)",
+    "descPlaceholder": "description"
+  },
+  "toast": {
+    "uploadSuccess": "\"{{name}}\" uploaded successfully",
+    "uploadError": "Upload error",
+    "uploadErrorFile": "Error uploading \"{{name}}\"",
+    "mappingRequested": "Mapping requested for \"{{name}}\". The worker will process it shortly.",
+    "mappingError": "Error requesting mapping"
+  },
+  "config": {
+    "profileSaved": "Editorial profile saved",
+    "profileSaveError": "Error saving profile",
+    "saving": "Saving...",
+    "onboarding": {
+      "title": "Set up your channel to get started",
+      "description": "Fill in the editorial profile below so the AI generates relevant ideas for your channel. Without it, discovery works but without editorial direction."
+    },
+    "channelIdentity": "Channel Identity",
+    "channelIdentityDesc": "Defines how the AI personalizes ideas and scripts for your channel",
+    "channelDescription": "Channel description",
+    "channelDescriptionPlaceholder": "e.g.: Educational kids channel about science, nature and curiosities. Short and fun videos for children aged 6-10.",
+    "niche": "Niche",
+    "nichePlaceholder": "e.g.: Science and nature for kids",
+    "targetAudience": "Target audience",
+    "targetAudiencePlaceholder": "e.g.: Children aged 6-10 and their parents",
+    "toneOfVoice": "Tone of voice",
+    "toneOfVoicePlaceholder": "e.g.: friendly, curious, fun",
+    "narrativeStyle": "Narrative style",
+    "narrativeStylePlaceholder": "e.g.: questions and answers, discovery",
+    "contentGoals": "Content goals",
+    "contentGoalsPlaceholder": "e.g.: Educate and entertain, spark scientific curiosity",
+    "kidsConfig": "Kids Configuration",
+    "kidsConfigDesc": "Age range, categories and duration for idea discovery",
+    "ageRange": "Target age range",
+    "ageRange3to6": "3-6 years",
+    "ageRange6to10": "6-10 years",
+    "ageRange7to10": "7-10 years",
+    "ageRangeAll": "All ages",
+    "targetDuration": "Target duration (seconds): {{count}}",
+    "interestCategories": "Interest categories (empty = all)"
+  },
+  "ideas": {
+    "title": "Kids Ideas",
+    "subtitle": "Discover, evaluate and select ideas to produce educational videos",
+    "newIdea": "+ New Idea",
+    "discover": "Discover",
+    "manualTitle": "New Manual Idea",
+    "titlePlaceholder": "Idea title",
+    "descPlaceholder": "Description (optional)",
+    "category": "Category",
+    "creating": "Creating...",
+    "createIdea": "Create Idea",
+    "discoveryTitle": "Idea Discovery",
+    "categoriesLabel": "Categories (empty = all)",
+    "ideasPerCategory": "Ideas per category (AI): {{count}}",
+    "jobQueued": "Job queued...",
+    "empty": "No ideas yet. Click Discover to generate ideas automatically via AI, topic library and seasonal calendar.",
+    "status": {
+      "discovered": "Discovered",
+      "evaluated": "Evaluated",
+      "queued": "Queued",
+      "converted": "Converted",
+      "rejected": "Rejected",
+      "expired": "Expired"
+    },
+    "source": {
+      "ai_ideation": "AI",
+      "topic_library": "Library",
+      "seasonal": "Seasonal",
+      "manual": "Manual"
+    },
+    "stats": {
+      "total": "Total",
+      "inQueue": "In Queue",
+      "evaluated": "Evaluated",
+      "discovered": "Discovered"
+    },
+    "queue": {
+      "title": "Production Queue",
+      "count_one": "{{count}} idea — consumed in order",
+      "count_other": "{{count}} ideas — consumed in order",
+      "reconcileTitle": "Reconcile queue automatically",
+      "reconcile": "Reconcile",
+      "removeFromQueue": "Remove from queue",
+      "hint": "Automation consumes these ideas in order (first = next video). Drag to reorder. Click Reconcile to automatically fill with the best evaluated ideas."
+    },
+    "filter": {
+      "allStatus": "All statuses"
+    },
+    "actions": {
+      "evaluate": "Evaluate",
+      "addToQueueTitle": "Add to production queue",
+      "addToQueue": "+ Queue",
+      "removeFromQueueTitle": "Remove from queue",
+      "inQueue": "In Queue ✓",
+      "produceTitle": "Produce video now",
+      "produce": "Produce",
+      "reject": "Reject"
+    },
+    "toast": {
+      "loadError": "Error loading data",
+      "discoveryQueued": "Job #{{jobId}} queued — the worker will process it",
+      "discoveryError": "Discovery error",
+      "scoreScheduleError": "Error scheduling evaluation",
+      "scoreQueued": "Evaluation queued (job #{{jobId}})",
+      "scoreError": "Error evaluating",
+      "rejected": "Idea rejected",
+      "rejectError": "Error rejecting",
+      "titleRequired": "Title is required",
+      "created": "Idea created",
+      "createError": "Error creating idea",
+      "produced": "Job #{{jobId}} created! Topic #{{topicId}}",
+      "produceError": "Error producing",
+      "addedToQueue": "Added to queue",
+      "addToQueueError": "Error adding to queue",
+      "removedFromQueue": "Removed from queue",
+      "removeFromQueueError": "Error removing",
+      "reconciled": "Queue reconciled",
+      "reconcileError": "Error reconciling",
+      "reorderError": "Error reordering",
+      "discoveryCompleted": "Discovery completed: {{created}} created, {{skipped}} duplicates",
+      "discoveryFailed": "Discovery failed: {{error}}",
+      "unknownError": "unknown error",
+      "scored": "Idea #{{id}} evaluated!",
+      "scoreFailed": "Evaluation of idea #{{id}} failed: {{error}}"
+    }
+  }
+}

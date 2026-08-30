@@ -1,0 +1,32 @@
+{
+  "title": "Administration",
+  "subtitle": "Manage platform users",
+  "accessDenied": {
+    "title": "Access denied",
+    "description": "You must be an administrator to access this page."
+  },
+  "authBanner": {
+    "title": "Authentication via BI Identity",
+    "description": "Users and credentials are managed by the Brunointegrations Identity Service. New users are created automatically on first login via SSO. Here you can activate/deactivate and delete local users."
+  },
+  "usersTitle": "Users",
+  "emptyUsers": "No users",
+  "badge": {
+    "you": "you",
+    "admin": "Admin",
+    "user": "User",
+    "active": "Active",
+    "inactive": "Inactive"
+  },
+  "action": {
+    "deactivate": "Deactivate",
+    "activate": "Activate"
+  },
+  "toast": {
+    "deactivated": "User deactivated",
+    "activated": "User activated",
+    "deleted": "User deleted",
+    "cannotDeleteSelf": "You cannot delete your own user"
+  },
+  "confirmDelete": "Delete user \"{{email}}\"? This action cannot be undone."
+}

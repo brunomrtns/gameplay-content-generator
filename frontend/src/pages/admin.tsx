@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
 import { useLiveData } from "@/hooks/useLiveData";
 import { useQueryClient } from "@tanstack/react-query";
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 
 export function AdminPage() {
+  const { t } = useTranslation();
   const { user: currentUser } = useAuth();
   const queryClient = useQueryClient();
   const { data: users, isLoading } = useLiveData(['users'], () => api.listUsers(), []);
@@ -23,8 +25,8 @@ export function AdminPage() {
       <Card>
         <EmptyState
           icon={<Shield className="h-10 w-10" />}
-          title="Acesso negado"
-          description="Você precisa ser administrador para acessar esta página."
+          title={t('admin:accessDenied.title')}
+          description={t('admin:accessDenied.description')}
         />
       </Card>
     );
@@ -33,7 +35,7 @@ export function AdminPage() {
   const toggleActive = async (u: any) => {
     try {
       await api.updateUser(u.id, { is_active: !u.is_active });
-      toast.success(u.is_active ? "Usuário desativado" : "Usuário ativado");
+      toast.success(u.is_active ? t('admin:toast.deactivated') : t('admin:toast.activated'));
       const updated = await api.listUsers();
       queryClient.setQueryData(['users'], updated);
     } catch (err: any) {
@@ -43,13 +45,13 @@ export function AdminPage() {
 
   const deleteUser = async (u: any) => {
     if (u.id === currentUser?.id) {
-      toast.error("Você não pode excluir seu próprio usuário");
+      toast.error(t('admin:toast.cannotDeleteSelf'));
       return;
     }
-    if (!confirm(`Excluir usuário "${u.email}"? Esta ação não pode ser desfeita.`)) return;
+    if (!confirm(t('admin:confirmDelete', { email: u.email }))) return;
     try {
       await api.deleteUser(u.id);
-      toast.success("Usuário excluído");
+      toast.success(t('admin:toast.deleted'));
       const updated = await api.listUsers();
       queryClient.setQueryData(['users'], updated);
     } catch (err: any) {
@@ -61,8 +63,8 @@ export function AdminPage() {
     <div className="space-y-8 animate-fade-in">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Administração</h1>
-        <p className="mt-1 text-sm text-text-secondary">Gerencie usuários da plataforma</p>
+        <h1 className="text-3xl font-bold tracking-tight">{t('admin:title')}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{t('admin:subtitle')}</p>
       </div>
 
       {/* Info banner */}
@@ -70,11 +72,9 @@ export function AdminPage() {
         <div className="flex items-start gap-3">
           <Shield className="h-5 w-5 text-accent shrink-0 mt-0.5" />
           <div className="text-sm text-text-secondary">
-            <p className="font-medium text-text">Autenticação via BI Identity</p>
+            <p className="font-medium text-text">{t('admin:authBanner.title')}</p>
             <p className="mt-1">
-              Usuários e credenciais são gerenciados pelo Brunointegrations Identity Service.
-              Novos usuários são criados automaticamente no primeiro login via SSO.
-              Aqui você pode ativar/desativar e excluir usuários locais.
+              {t('admin:authBanner.description')}
             </p>
           </div>
         </div>
@@ -83,12 +83,12 @@ export function AdminPage() {
       {/* Users list */}
       <div>
         <h2 className="mb-4 text-lg font-semibold">
-          Usuários {users && `(${users.length})`}
+          {t('admin:usersTitle')} {users && `(${users.length})`}
         </h2>
         {isLoading && !users ? (
           <div className="flex justify-center py-16"><Spinner className="h-8 w-8" /></div>
         ) : !users || users.length === 0 ? (
-          <Card><EmptyState title="Nenhum usuário" /></Card>
+          <Card><EmptyState title={t('admin:emptyUsers')} /></Card>
         ) : (
           <div className="space-y-3">
             {users.map((u: any) => (
@@ -102,24 +102,24 @@ export function AdminPage() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-medium truncate">{u.name || u.email}</p>
-                        {u.id === currentUser?.id && <Badge variant="info">você</Badge>}
+                        {u.id === currentUser?.id && <Badge variant="info">{t('admin:badge.you')}</Badge>}
                       </div>
                       <p className="text-xs text-text-muted truncate">{u.email}</p>
-                      <p className="text-[10px] text-text-muted mt-0.5">Criado em {fmtDate(u.created_at)}</p>
+                      <p className="text-[10px] text-text-muted mt-0.5">{t('common:createdAt')} {fmtDate(u.created_at)}</p>
                     </div>
                   </div>
 
                   {/* Badges */}
                   <div className="flex items-center gap-2">
                     {u.is_admin ? (
-                      <Badge variant="warning"><Shield className="h-3 w-3" /> Admin</Badge>
+                      <Badge variant="warning"><Shield className="h-3 w-3" /> {t('admin:badge.admin')}</Badge>
                     ) : (
-                      <Badge variant="default">Usuário</Badge>
+                      <Badge variant="default">{t('admin:badge.user')}</Badge>
                     )}
                     {u.is_active ? (
-                      <Badge variant="success"><CheckCircle2 className="h-3 w-3" /> Ativo</Badge>
+                      <Badge variant="success"><CheckCircle2 className="h-3 w-3" /> {t('admin:badge.active')}</Badge>
                     ) : (
-                      <Badge variant="error"><XCircle className="h-3 w-3" /> Inativo</Badge>
+                      <Badge variant="error"><XCircle className="h-3 w-3" /> {t('admin:badge.inactive')}</Badge>
                     )}
                   </div>
 
@@ -131,7 +131,7 @@ export function AdminPage() {
                       onClick={() => toggleActive(u)}
                       disabled={u.id === currentUser?.id}
                     >
-                      {u.is_active ? "Desativar" : "Ativar"}
+                      {u.is_active ? t('admin:action.deactivate') : t('admin:action.activate')}
                     </Button>
                     <Button
                       size="sm"

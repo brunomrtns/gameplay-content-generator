@@ -1,0 +1,79 @@
+{
+  "title": "Vídeos",
+  "subtitle": "Galeria de vídeos gerados",
+  "searchPlaceholder": "Buscar por título...",
+  "empty": {
+    "searchTitle": "Nenhum vídeo encontrado",
+    "searchDescription": "Tente outra busca",
+    "title": "Nenhum vídeo gerado ainda",
+    "description": "Dispare uma geração na aba Automação para criar vídeos."
+  },
+  "status": {
+    "pending": "Pendente",
+    "ready": "Pronto",
+    "qa_passed": "QA OK",
+    "qa_failed": "QA Falhou",
+    "pending_approval": "Aguardando publicação",
+    "published": "Publicado",
+    "publish_failed": "Publicação falhou"
+  },
+  "actions": {
+    "openYoutube": "Abrir no YouTube",
+    "publish": "Publicar",
+    "publishYoutube": "Publicar no YouTube",
+    "regenerate": "Regenerar vídeo",
+    "delete": "Deletar vídeo"
+  },
+  "modal": {
+    "videoNumber": "Vídeo #{{id}}",
+    "edit": "Editar",
+    "titleLabel": "Título",
+    "titlePlaceholder": "Título do vídeo",
+    "descriptionLabel": "Descrição",
+    "descriptionPlaceholder": "Descrição do vídeo",
+    "tagsLabel": "Tags (separadas por vírgula)",
+    "tagsPlaceholder": "gaming, curiosidades, nintendo",
+    "saving": "Salvando...",
+    "idea": "Ideia",
+    "source": "Fonte: {{name}}",
+    "game": "Jogo",
+    "editorialPlan": "Plano editorial",
+    "generalTopic": "Tópico geral",
+    "aboutGame": "Sobre o jogo",
+    "humor": "Humor",
+    "noHumor": "Sem humor",
+    "scriptCritic": "Script critic",
+    "score": "Score: {{score}}",
+    "clipsUsedGameplay": "Trechos de gameplay ({{count}})",
+    "clipsUsedImages": "Imagens usadas ({{count}})",
+    "script": "Roteiro",
+    "regenerating": "Regenerando...",
+    "publishing": "Publicando no YouTube...",
+    "published": "Publicado no YouTube",
+    "publishFailed": "Publicação falhou — tente novamente"
+  },
+  "errors": {
+    "publish": "Falha ao publicar no YouTube",
+    "saveMeta": "Falha ao salvar metadados",
+    "delete": "Falha ao deletar vídeo",
+    "regenerate": "Falha ao regenerar vídeo"
+  },
+  "delete": {
+    "title": "Deletar vídeo?",
+    "description": "Esta ação não pode ser desfeita. O arquivo de vídeo e a thumbnail serão removidos permanentemente.",
+    "confirm": "Sim, deletar"
+  },
+  "release": {
+    "title": "Liberar trechos e ideia?",
+    "description": "Os trechos de {{sourceLabel}} e a ideia de conteúdo usados neste vídeo podem ser liberados para uso em vídeos futuros. Deseja liberá-los?",
+    "keepUsed": "Não, manter usados",
+    "confirm": "Sim, liberar trechos e ideia"
+  },
+  "regenerate": {
+    "title": "Regenerar vídeo?",
+    "desc1": "A ideia <0>\"{{title}}\"</0> voltará para o <1>final da fila de ideias</1>. Você poderá reorderá-la antes de aprovar a geração.",
+    "desc2": "Os trechos de {{sourceLabel}} usados neste vídeo serão liberados e poderão ser reutilizados na nova geração.",
+    "desc3": "O vídeo atual <0>não será deletado</0> — os dois coexistirão na galeria.",
+    "confirm": "Sim, regenerar"
+  }
+}
