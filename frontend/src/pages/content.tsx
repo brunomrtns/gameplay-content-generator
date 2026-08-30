@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useLiveData } from "@/hooks/useLiveData";
 import { Badge, Button, Card, Spinner, EmptyState } from "@/components/ui";
@@ -234,6 +235,7 @@ function MappingTimeline({ sourceId, filename }: { sourceId: number; filename: s
 // ── Media Tab (gameplay upload + list) ───────────────────────────────────────
 
 function MediaTab() {
+  const queryClient = useQueryClient();
   const { data: allSources, isLoading, refetch } = useLiveData(['sources'], () => api.listSources(undefined, undefined, true), ['gameplay.status_changed', 'job.created']);
   const { uploads, addUpload, updateUpload, removeUpload } = useUploadStore();
   const [scanning, setScanning] = useState(false);
@@ -319,6 +321,7 @@ function MediaTab() {
     try {
       await api.deleteSource(sourceId);
       toast.success(`Gameplay "${filename}" deletada. Os arquivos físicos serão removidos pelo worker.`);
+      queryClient.invalidateQueries({ queryKey: ['sources'] });
     } catch (err: any) {
       toast.error(err.message || "Erro ao deletar gameplay");
     }

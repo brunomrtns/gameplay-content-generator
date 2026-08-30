@@ -626,6 +626,11 @@ def delete_gameplay_source(
     from gpcg.infrastructure.job_queue import enqueue_job
     enqueue_job(cleanup_job)
 
+    # Publish event so SSE clients invalidate their lists immediately
+    from gpcg.infrastructure.events import publish_gameplay_status_changed, publish_job_created
+    publish_gameplay_status_changed(user.id, source_id, "deleted", source.filename or "")
+    publish_job_created(user.id, cleanup_job.id, cleanup_job.type, cleanup_job.priority)
+
     log.info(
         f"gameplay #{source_id} deleted by user #{user.id} — "
         f"cleanup job #{cleanup_job.id} created for worker"
