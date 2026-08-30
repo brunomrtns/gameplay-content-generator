@@ -1,0 +1,7 @@
+Dashboard: correção de labels de status de vídeo que já existiam na web, mobile estava com labels errados e faltando estados
+Vídeos: correção de labels de status de vídeo que já existiam na web, mobile estava com labels errados e variant incorreto
+Conteúdo: correção de labels de status e processing que já existiam na web, mobile estava com labels errados e faltando estados
+Jobs: correção de labels de stage, type, status e progress que já existiam na web, mobile estava com labels errados e progress sem multiplicar por 100
+Ideias: correção de progress que já existia na web, mobile não multiplicava por 100
+Automação: correção de labels de VIDEO_FORMATS e SUBTITLE_FONTS que já existiam na web, mobile estava com labels simplificados
+Worker Status: correção no mesmo arquivo do Dashboard, labels de status de vídeo alinhados com web
