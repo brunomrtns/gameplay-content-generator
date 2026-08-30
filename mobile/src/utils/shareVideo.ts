@@ -104,11 +104,12 @@ export async function downloadVideo(
 
 /**
  * Open the native share sheet with a video file.
- * Copies metadata to clipboard first, then shares the file.
+ * Copies metadata to clipboard first, then shares ONLY the file.
  *
- * On Android, most social apps (Instagram, TikTok) ignore the text
- * when receiving a video file via share intent. So we copy the text
- * to clipboard first — the user pastes it manually after choosing the app.
+ * On Android, passing text alongside a video file causes some apps
+ * (Instagram, TikTok) to receive the text instead of the video.
+ * So we copy the text to clipboard and share only the file —
+ * the user pastes the text manually after choosing the app.
  */
 export async function shareVideoFile(
   video: VideoShareData,
@@ -116,24 +117,25 @@ export async function shareVideoFile(
 ): Promise<void> {
   const metadataText = buildMetadataText(video);
 
-  // Copy metadata to clipboard
+  // Copy metadata to clipboard — user pastes it manually in the target app
   Clipboard.setString(metadataText);
 
   // Build the file URI for sharing
   const shareUrl =
     Platform.OS === 'android' ? `file://${localPath}` : localPath;
 
+  // Share ONLY the video file — no message field, otherwise Android
+  // apps may pick up the text instead of the video
   await Share.open({
     title: video.social_title || video.topic || 'Vídeo',
     url: shareUrl,
     type: 'video/mp4',
-    message: metadataText,
   });
 }
 
 /**
  * Share a YouTube URL (for already-published videos).
- * Copies metadata to clipboard first.
+ * Copies metadata to clipboard first, then shares only the URL.
  */
 export async function shareYouTubeUrl(video: VideoShareData): Promise<void> {
   const metadataText = buildMetadataText(video);
@@ -141,7 +143,6 @@ export async function shareYouTubeUrl(video: VideoShareData): Promise<void> {
 
   await Share.open({
     title: video.social_title || video.topic || 'Vídeo',
-    message: metadataText,
     url: video.youtube_url!,
   });
 }

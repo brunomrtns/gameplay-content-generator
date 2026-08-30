@@ -31,13 +31,16 @@ import Toast from 'react-native-toast-message';
 import Video from 'react-native-video';
 
 const VIDEO_STATUS_CONFIG: Record<string, { label: string; variant: any }> = {
-  pending_approval: { label: 'Aguardando', variant: 'warning' },
+  pending: { label: 'Pendente', variant: 'default' },
+  ready: { label: 'Pronto', variant: 'info' },
+  qa_passed: { label: 'QA OK', variant: 'success' },
+  qa_failed: { label: 'QA Falhou', variant: 'error' },
+  pending_approval: { label: 'Aguardando publicação', variant: 'warning' },
   published: { label: 'Publicado', variant: 'success' },
-  publish_failed: { label: 'Falha pub', variant: 'error' },
+  publish_failed: { label: 'Publicação falhou', variant: 'error' },
   draft: { label: 'Rascunho', variant: 'default' },
   failed: { label: 'Falhou', variant: 'error' },
   rendering: { label: 'Renderizando', variant: 'info' },
-  pending: { label: 'Pendente', variant: 'default' },
 };
 
 export function DashboardScreen() {

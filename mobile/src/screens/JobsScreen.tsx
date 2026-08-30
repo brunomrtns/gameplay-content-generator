@@ -20,7 +20,7 @@ import { fmtDate } from '../utils/format';
 
 const FILTERS = [
   { value: '', label: 'Todos' },
-  { value: 'queued', label: 'Fila' },
+  { value: 'queued', label: 'Na fila' },
   { value: 'running', label: 'Executando' },
   { value: 'completed', label: 'Concluídos' },
   { value: 'failed', label: 'Falhas' },
@@ -30,44 +30,45 @@ const FILTERS = [
 
 const JOB_TYPE_LABELS: Record<string, string> = {
   mapping: 'Mapeamento',
-  generate_short: 'Vídeo Curto',
+  generate_short: 'Gerar Short',
   curiosity_short: 'Curiosidade',
   kids_generate: 'Vídeo Kids',
 };
 
 const STAGE_LABELS: Record<string, string> = {
   download: 'Download',
-  mapping: 'Mapeamento',
-  content_planning: 'Planejamento',
-  story_finding: 'História',
-  editorial_planning: 'Editorial',
-  creative_engine: 'Criativo',
-  script: 'Roteiro',
-  humanization: 'Humanização',
-  script_review: 'Revisão',
-  tts: 'TTS',
-  gameplay_selection: 'Gameplay',
-  visual_selection: 'Visual',
-  music_selection: 'Música',
-  render_plan: 'Plano Render',
-  render: 'Render',
-  qa: 'QA',
-  metadata_generation: 'Metadata',
-  youtube_upload: 'YouTube',
-  output: 'Output',
+  confirm_download: 'Confirmando download',
+  mapping: 'Mapeando (VLM + ASR)',
+  content_planning: 'Planejando conteúdo',
+  story_finding: 'Encontrando história',
+  editorial_planning: 'Planejamento editorial',
+  creative_engine: 'Motor criativo',
+  script: 'Escrevendo roteiro',
+  humanization: 'Humanizando roteiro',
+  script_review: 'Revisando roteiro',
+  tts: 'Sintetizando voz',
+  gameplay_selection: 'Selecionando cenas',
+  visual_selection: 'Selecionando imagens',
+  music_selection: 'Selecionando música',
+  render_plan: 'Planejando renderização',
+  render: 'Renderizando vídeo',
+  qa: 'Controle de qualidade',
+  metadata_generation: 'Gerando metadados',
+  youtube_upload: 'Enviando ao YouTube',
+  output: 'Finalizando',
   done: 'Concluído',
   presentation: 'Apresentação',
   upload: 'Upload',
   probe: 'Análise',
 };
 
-const STATUS_VARIANT: Record<string, any> = {
-  queued: 'default',
-  running: 'info',
-  completed: 'success',
-  failed: 'error',
-  retrying: 'warning',
-  cancelled: 'default',
+const JOB_STATUS_CONFIG: Record<string, { label: string; variant: any }> = {
+  queued: { label: 'Na fila', variant: 'info' },
+  running: { label: 'Executando', variant: 'info' },
+  completed: { label: 'Concluído', variant: 'success' },
+  failed: { label: 'Falhou', variant: 'error' },
+  retrying: { label: 'Tentando novamente', variant: 'warning' },
+  cancelled: { label: 'Cancelado', variant: 'default' },
 };
 
 export function JobsScreen({ navigation }: { navigation?: any }) {
@@ -141,7 +142,7 @@ export function JobsScreen({ navigation }: { navigation?: any }) {
         renderItem={({ item: job }) => {
           const typeLabel = JOB_TYPE_LABELS[job.type] || job.type;
           const stageLabel = STAGE_LABELS[job.stage] || job.stage || '—';
-          const progress = job.progress != null ? Math.round(Math.min(job.progress, 100)) : 0;
+          const progress = job.progress != null ? Math.round(Math.min(job.progress * 100, 100)) : 0;
           const isRunning = job.status === 'running';
           return (
             <Card padding={spacing.md}>
@@ -162,7 +163,7 @@ export function JobsScreen({ navigation }: { navigation?: any }) {
                     <Text style={styles.jobGame} numberOfLines={1}>{job.game_name}</Text>
                   )}
                 </View>
-                <Badge label={job.status} variant={STATUS_VARIANT[job.status] || 'default'} />
+                <Badge label={(JOB_STATUS_CONFIG[job.status] || { label: job.status }).label} variant={(JOB_STATUS_CONFIG[job.status] || { variant: 'default' }).variant} />
               </View>
 
               {isRunning && (

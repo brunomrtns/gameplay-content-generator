@@ -28,21 +28,26 @@ import Toast from 'react-native-toast-message';
 type Tab = 'media' | 'channel';
 
 const STATUS_CONFIG: Record<string, { label: string; variant: any }> = {
-  discovered: { label: 'Descoberto', variant: 'default' },
+  discovered: { label: 'Descoberto', variant: 'info' },
   probing: { label: 'Analisando', variant: 'info' },
   ready: { label: 'Pronto', variant: 'success' },
   error: { label: 'Erro', variant: 'error' },
+  needs_review: { label: 'Revisão', variant: 'warning' },
+  duplicate: { label: 'Duplicado', variant: 'default' },
 };
 
 const PROCESSING_CONFIG: Record<string, { label: string; variant: any }> = {
   uploading: { label: 'Enviando', variant: 'info' },
-  uploaded: { label: 'Enviado', variant: 'default' },
-  waiting_worker: { label: 'Aguardando worker', variant: 'default' },
+  uploaded: { label: 'Aguardando worker', variant: 'info' },
+  waiting_worker: { label: 'Na fila', variant: 'info' },
   downloading: { label: 'Baixando', variant: 'info' },
-  downloaded: { label: 'Baixado', variant: 'default' },
+  downloaded: { label: 'Baixado', variant: 'info' },
   mapping: { label: 'Mapeando', variant: 'info' },
   mapped: { label: 'Mapeado', variant: 'success' },
   ready: { label: 'Pronto', variant: 'success' },
+  generating: { label: 'Gerando vídeo', variant: 'info' },
+  finished: { label: 'Vídeo pronto', variant: 'success' },
+  failed: { label: 'Falhou', variant: 'error' },
 };
 
 export function ContentScreen() {

@@ -49,14 +49,14 @@ const YOUTUBE_CATEGORIES = [
 ];
 
 const VIDEO_FORMATS = [
-  { value: '9:16', label: '9:16 Vertical' },
-  { value: '16:9', label: '16:9 Horizontal' },
-  { value: '1:1', label: '1:1 Quadrado' },
-  { value: '4:5', label: '4:5 Retrato' },
+  { value: '9:16', label: '9:16 Vertical (Shorts/TikTok)' },
+  { value: '16:9', label: '16:9 Horizontal (YouTube)' },
+  { value: '1:1', label: '1:1 Quadrado (Instagram)' },
+  { value: '4:5', label: '4:5 Retrato (Reels)' },
 ];
 
 const SUBTITLE_FONTS = [
-  { value: '', label: 'Padrão' },
+  { value: '', label: 'Padrão do perfil' },
   { value: 'DejaVuSans-Bold', label: 'DejaVu Sans Bold' },
   { value: 'DejaVuSans', label: 'DejaVu Sans' },
   { value: 'LiberationSans-Bold', label: 'Liberation Sans Bold' },

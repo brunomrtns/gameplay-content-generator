@@ -605,7 +605,7 @@ export function IdeasScreen() {
                   {currentJob.progress > 0 && (
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={styles.progressLabel}>Progresso</Text>
-                      <Text style={styles.progressValue}>{Math.round(Math.min(currentJob.progress, 100))}%</Text>
+                      <Text style={styles.progressValue}>{Math.round(Math.min(currentJob.progress * 100, 100))}%</Text>
                     </View>
                   )}
                 </View>
