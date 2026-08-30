@@ -297,7 +297,7 @@ export function VideosPage() {
 
                     <div className="flex items-center gap-1.5">
                       {/* YouTube link */}
-                      {isPublished && (
+                      {isPublished && v.youtube_url && (
                         <a
                           href={v.youtube_url}
                           target="_blank"

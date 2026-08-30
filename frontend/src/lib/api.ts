@@ -687,10 +687,10 @@ export const api = {
     const qs = new URLSearchParams(clean).toString();
     return request<{ ideas: any[]; total: number }>(`/kids/ideas${qs ? `?${qs}` : ""}`);
   },
-  createKidsIdea: (data: { title: string; description?: string; category?: string; suggested_age_range?: string }) =>
+  createKidsIdea: (data: { title: string; content?: string; description?: string; category?: string; suggested_age_range?: string }) =>
     request<any>("/kids/ideas", { method: "POST", body: JSON.stringify(data) }),
   scoreKidsIdea: (id: number) =>
-    request<any>(`/kids/ideas/${id}/score`, { method: "POST" }),
+    request<{ job_id?: number }>(`/kids/ideas/${id}/score`, { method: "POST" }),
   rejectKidsIdea: (id: number) =>
     request<any>(`/kids/ideas/${id}/reject`, { method: "POST" }),
   convertKidsIdea: (id: number) =>

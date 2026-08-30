@@ -122,8 +122,13 @@ export function KidsIdeasPage() {
   const handleScore = async (id: number) => {
     try {
       const result = await api.scoreKidsIdea(id);
-      setScoring((prev) => ({ ...prev, [id]: result.job_id }));
-      toast.info(`Avaliação na fila (job #${result.job_id})`);
+      const jobId = result.job_id;
+      if (!jobId) {
+        toast.error("Erro ao agendar avaliação");
+        return;
+      }
+      setScoring((prev) => ({ ...prev, [id]: jobId }));
+      toast.info(`Avaliação na fila (job #${jobId})`);
     } catch (err: any) {
       toast.error(err.message || "Erro ao avaliar");
     }
