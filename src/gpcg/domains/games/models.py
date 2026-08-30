@@ -273,8 +273,8 @@ class GameplaySource(Base):
     # Control Plane + Compute Plane: processing lifecycle
     # Tracks the gameplay from upload through mapping to ready-to-use.
     # The VPS only stores the temp file until DOWNLOADED is confirmed.
-    processing_status: Mapped[str] = mapped_column(
-        String(30), default=GameplayProcessingStatus.uploaded.value, index=True
+    processing_status: Mapped[Optional[str]] = mapped_column(
+        String(30), nullable=True, default=GameplayProcessingStatus.uploaded.value, index=True
     )
     downloaded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     downloaded_by_worker: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

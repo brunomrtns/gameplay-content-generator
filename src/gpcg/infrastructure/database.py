@@ -266,7 +266,7 @@ def init_db() -> None:
 
 
 def _drop_old_file_hash_unique(engine) -> None:
-    """Drop the old UNIQUE(file_hash) index on gameplay_sources if it exists.
+    """Handle the old UNIQUE(file_hash) constraint on gameplay_sources.
 
     The model now defines a composite UniqueConstraint(file_hash, user_id),
     but older databases created before that change have a singular
@@ -274,25 +274,67 @@ def _drop_old_file_hash_unique(engine) -> None:
     This blocks re-uploading a file after soft-deleting the previous
     source, because the old row still has the hash even though it's
     marked as deleted.
+
+    SQLite doesn't allow DROP INDEX on sqlite_autoindex (UNIQUE constraint
+    indexes), and doesn't support ALTER COLUMN to make file_hash nullable.
+    We recreate the table with the correct schema (nullable file_hash,
+    composite unique constraint), copy data, and nullify file_hash on
+    soft-deleted rows so re-uploads work.
     """
-    from sqlalchemy import text
-    with engine.connect() as conn:
-        # Find unique indexes on gameplay_sources
-        result = conn.execute(text(
-            "SELECT name FROM pragma_index_list('gameplay_sources') "
-            "WHERE origin = 'u' AND name LIKE 'sqlite_autoindex%'"
-        ))
-        autoindexes = [row[0] for row in result]
-        for idx_name in autoindexes:
-            # Check if this index is on just file_hash (not composite)
-            cols_result = conn.execute(text(
-                f"SELECT name FROM pragma_index_info('{idx_name}')"
+    from sqlalchemy import text, inspect
+
+    inspector = inspect(engine)
+    if "gameplay_sources" not in inspector.get_table_names():
+        return  # table doesn't exist yet — create_all handles it
+
+    columns = inspector.get_columns("gameplay_sources")
+    hash_col = next((c for c in columns if c["name"] == "file_hash"), None)
+    if hash_col is None:
+        return
+
+    # Check if file_hash is already nullable
+    if hash_col.get("nullable", True):
+        # Already nullable — just nullify hashes on deleted rows
+        with engine.begin() as conn:
+            result = conn.execute(text(
+                "UPDATE gameplay_sources SET file_hash = NULL "
+                "WHERE ingestion_status = 'deleted' AND file_hash IS NOT NULL"
             ))
-            cols = [row[0] for row in cols_result]
-            if cols == ["file_hash"]:
-                log.info(f"Dropping old UNIQUE(file_hash) index: {idx_name}")
-                conn.execute(text(f"DROP INDEX IF EXISTS {idx_name}"))
-                conn.commit()
+            if result.rowcount > 0:
+                log.info(f"Nullified file_hash on {result.rowcount} soft-deleted source(s)")
+        return
+
+    # file_hash is NOT NULL — need to recreate the table (SQLite limitation)
+    log.info("Migrating gameplay_sources: making file_hash nullable (SQLite table rebuild)")
+    from gpcg.core.models import Base
+    from gpcg.domains.games.models import GameplaySource
+    with engine.begin() as conn:
+        all_cols = [c["name"] for c in columns]
+        col_list = ", ".join(f'"{c}"' for c in all_cols)
+
+        # Rename old table
+        conn.execute(text("ALTER TABLE gameplay_sources RENAME TO _gameplay_sources_backup"))
+        # Recreate with correct schema (nullable file_hash, composite unique)
+        Base.metadata.create_all(bind=conn, tables=[GameplaySource.__table__])
+        # Copy data back, nullifying file_hash on soft-deleted rows
+        # and COALESCE-ing any NOT NULL columns that might be NULL in old data
+        copy_cols = []
+        for c in all_cols:
+            if c == "file_hash":
+                copy_cols.append(
+                    f'CASE WHEN ingestion_status = \'deleted\' THEN NULL ELSE "{c}" END AS "{c}"'
+                )
+            elif c == "processing_status":
+                copy_cols.append(f'COALESCE("{c}", \'uploaded\') AS "{c}"')
+            else:
+                copy_cols.append(f'"{c}"')
+        copy_list = ", ".join(copy_cols)
+        conn.execute(text(
+            f"INSERT INTO gameplay_sources ({col_list}) "
+            f"SELECT {copy_list} FROM _gameplay_sources_backup"
+        ))
+        conn.execute(text("DROP TABLE _gameplay_sources_backup"))
+    log.info("gameplay_sources migration complete: file_hash is now nullable")
 
 
 def _migrate_story_assets_topic_id_nullable(engine) -> None:
