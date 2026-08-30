@@ -312,10 +312,16 @@ def _drop_old_file_hash_unique(engine) -> None:
         all_cols = [c["name"] for c in columns]
         col_list = ", ".join(f'"{c}"' for c in all_cols)
 
+        # Drop existing indexes (they survive the RENAME and would conflict)
+        indexes = inspector.get_indexes("gameplay_sources")
+        for idx in indexes:
+            conn.execute(text(f"DROP INDEX IF EXISTS {idx['name']}"))
+        # Also drop the autoindex (UNIQUE constraint) — can't drop directly,
+        # but dropping the table (via rename) removes it implicitly.
         # Rename old table
         conn.execute(text("ALTER TABLE gameplay_sources RENAME TO _gameplay_sources_backup"))
         # Recreate with correct schema (nullable file_hash, composite unique)
-        Base.metadata.create_all(bind=conn, tables=[GameplaySource.__table__])
+        Base.metadata.create_all(bind=conn, tables=[GameplaySource.__table__], checkfirst=True)
         # Copy data back, nullifying file_hash on soft-deleted rows
         # and COALESCE-ing any NOT NULL columns that might be NULL in old data
         copy_cols = []

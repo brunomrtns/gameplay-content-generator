@@ -250,6 +250,7 @@ def test_migration_handles_old_not_null_schema():
             "INSERT INTO users (email, is_admin, is_active) VALUES ('test@example.com', 0, 1)"
         ))
         # OLD schema: file_hash NOT NULL with UNIQUE constraint
+        # Also create indexes that exist in production (would conflict with create_all)
         conn.execute(text("""
             CREATE TABLE gameplay_sources (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -295,6 +296,11 @@ def test_migration_handles_old_not_null_schema():
             "ingestion_status, processing_status) "
             "VALUES (1, 'active.mp4', '', 'active_hash_456', 2000, 'discovered', 'ready')"
         ))
+        # Create indexes that exist in production (would conflict with create_all)
+        conn.execute(text("CREATE INDEX ix_gameplay_sources_ingestion_status ON gameplay_sources(ingestion_status)"))
+        conn.execute(text("CREATE INDEX ix_gameplay_sources_filename ON gameplay_sources(filename)"))
+        conn.execute(text("CREATE INDEX ix_gameplay_sources_file_hash ON gameplay_sources(file_hash)"))
+        conn.execute(text("CREATE INDEX ix_gameplay_sources_game_id ON gameplay_sources(game_id)"))
         conn.commit()
 
     # Verify old schema has NOT NULL on file_hash
