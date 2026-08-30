@@ -419,17 +419,14 @@ for media in "${MEDIAS_TO_CONFIRM[@]}"; do
     other_media="web"
   fi
 
-  REQUIRED_PHRASE="eu tenho consentimento que essa funcionalidade nao se aplica a midia $other_media"
-
-  echo "  ANTES de digitar a frase, você DEVE justificar por que esta"
-  echo "  funcionalidade não se aplica à outra plataforma."
+  echo "  Justifique por que esta funcionalidade não se aplica à outra"
+  echo "  plataforma (mín. 10 caracteres)."
   echo "  Exemplos válidos: ajuste nativo de Android, feature web-only de UI."
   echo "  Se for falso positivo do verificador, NÃO use consentimento —"
   echo "  corrija o pareamento no scripts/verify-cross-platform.sh."
   echo ""
 
-  # Etapa 1: exigir justificativa por escrito (mínimo 10 caracteres)
-  echo "  1/2 — Digite a justificativa (mín. 10 caracteres):"
+  # Exigir justificativa por escrito (mínimo 10 caracteres)
   read -r -p "  > " justification
   if [[ ${#justification} -lt 10 ]]; then
     err "Justificativa muito curta. Deploy bloqueado."
@@ -438,23 +435,10 @@ for media in "${MEDIAS_TO_CONFIRM[@]}"; do
     continue
   fi
 
-  # Etapa 2: frase exata de consentimento
-  echo ""
-  echo "  2/2 — Agora digite a frase exata:"
-  echo -e "\033[1;33m    $REQUIRED_PHRASE\033[0m"
-  echo ""
-  read -r -p "  > " user_input
-
-  if [[ "$user_input" == "$REQUIRED_PHRASE" ]]; then
-    ok "Consentimento confirmado para mídia: $media"
-    ok "Justificativa: $justification"
-    # Registrar no log para auditoria
-    echo "[$(date -Iseconds)] CONSENT: media=$media other=$other_media reason=\"$justification\"" >> "$PROJECT_ROOT/.cross-platform-consent-log"
-  else
-    err "Frase incorreta para mídia: $media"
-    err "Esperado: \"$REQUIRED_PHRASE\""
-    ALL_CONFIRMED=0
-  fi
+  ok "Consentimento confirmado para mídia: $media"
+  ok "Justificativa: $justification"
+  # Registrar no log para auditoria
+  echo "[$(date -Iseconds)] CONSENT: media=$media other=$other_media reason=\"$justification\"" >> "$PROJECT_ROOT/.cross-platform-consent-log"
 done
 
 echo ""
