@@ -280,12 +280,45 @@ def _drop_old_file_hash_unique(engine) -> None:
     We recreate the table with the correct schema (nullable file_hash,
     composite unique constraint), copy data, and nullify file_hash on
     soft-deleted rows so re-uploads work.
+
+    CRASH RECOVERY: If a previous migration attempt crashed after
+    renaming the table but before copying data back, the backup table
+    (_gameplay_sources_backup) will exist with data and gameplay_sources
+    will be empty. This function detects that state and restores the data.
     """
     from sqlalchemy import text, inspect
 
     inspector = inspect(engine)
     if "gameplay_sources" not in inspector.get_table_names():
         return  # table doesn't exist yet — create_all handles it
+
+    # ── Crash recovery: check for leftover backup table ──
+    if "_gameplay_sources_backup" in inspector.get_table_names():
+        log.warning("Found _gameplay_sources_backup — recovering from crashed migration")
+        backup_cols = [c["name"] for c in inspector.get_columns("_gameplay_sources_backup")]
+        new_cols = [c["name"] for c in inspector.get_columns("gameplay_sources")]
+        common = [c for c in backup_cols if c in new_cols]
+        col_list = ", ".join(f'"{c}"' for c in common)
+        copy_cols = []
+        for c in common:
+            if c == "file_hash":
+                copy_cols.append(
+                    f'CASE WHEN ingestion_status = \'deleted\' THEN NULL ELSE "{c}" END AS "{c}"'
+                )
+            elif c == "processing_status":
+                copy_cols.append(f'COALESCE("{c}", \'uploaded\') AS "{c}"')
+            else:
+                copy_cols.append(f'"{c}"')
+        copy_list = ", ".join(copy_cols)
+        with engine.begin() as conn:
+            result = conn.execute(text(
+                f"INSERT INTO gameplay_sources ({col_list}) "
+                f"SELECT {copy_list} FROM _gameplay_sources_backup"
+            ))
+            log.info(f"Recovered {result.rowcount} rows from backup table")
+            conn.execute(text("DROP TABLE _gameplay_sources_backup"))
+        # Re-inspect after recovery
+        inspector = inspect(engine)
 
     columns = inspector.get_columns("gameplay_sources")
     hash_col = next((c for c in columns if c["name"] == "file_hash"), None)
@@ -316,8 +349,6 @@ def _drop_old_file_hash_unique(engine) -> None:
         indexes = inspector.get_indexes("gameplay_sources")
         for idx in indexes:
             conn.execute(text(f"DROP INDEX IF EXISTS {idx['name']}"))
-        # Also drop the autoindex (UNIQUE constraint) — can't drop directly,
-        # but dropping the table (via rename) removes it implicitly.
         # Rename old table
         conn.execute(text("ALTER TABLE gameplay_sources RENAME TO _gameplay_sources_backup"))
         # Recreate with correct schema (nullable file_hash, composite unique)

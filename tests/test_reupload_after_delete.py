@@ -353,3 +353,134 @@ def test_migration_handles_old_not_null_schema():
     engine.dispose()
     import shutil
     shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_migration_crash_recovery():
+    """If a previous migration crashed after renaming the table but before
+    copying data back, the backup table exists with data and gameplay_sources
+    is empty. The migration must detect this and restore the data.
+    """
+    tmpdir = tempfile.mkdtemp()
+    db_path = os.path.join(tmpdir, "crash_recovery.db")
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    # Simulate the crashed state: backup table has data, gameplay_sources is empty
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                is_admin BOOLEAN DEFAULT 0,
+                is_active BOOLEAN DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        conn.execute(text("INSERT INTO users (email) VALUES ('test@example.com')"))
+
+        # NEW gameplay_sources table (empty — created by crashed deploy)
+        conn.execute(text("""
+            CREATE TABLE gameplay_sources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                game_id INTEGER,
+                file_path VARCHAR(1024) DEFAULT '',
+                storage_key VARCHAR(500),
+                upload_token VARCHAR(64),
+                filename VARCHAR(255) NOT NULL,
+                file_hash VARCHAR(64),
+                file_size INTEGER DEFAULT 0,
+                capture_source VARCHAR(100),
+                recorded_at DATETIME,
+                duration FLOAT DEFAULT 0.0,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0,
+                fps FLOAT DEFAULT 0.0,
+                codec VARCHAR(50),
+                has_audio BOOLEAN DEFAULT 0,
+                ingestion_status VARCHAR(20) DEFAULT 'discovered',
+                resolution_method VARCHAR(30) DEFAULT 'unknown',
+                resolution_confidence FLOAT DEFAULT 0.0,
+                resolution_notes TEXT,
+                processing_status VARCHAR(30),
+                downloaded_at DATETIME,
+                downloaded_by_worker VARCHAR(100),
+                metadata_json JSON DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                is_public BOOLEAN DEFAULT 0,
+                enabled BOOLEAN DEFAULT 1,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+
+        # Backup table (has the data from before the crash)
+        conn.execute(text("""
+            CREATE TABLE _gameplay_sources_backup (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                filename VARCHAR(255) NOT NULL,
+                file_hash VARCHAR(64),
+                file_size INTEGER DEFAULT 0,
+                file_path VARCHAR(1024) DEFAULT '',
+                ingestion_status VARCHAR(20) DEFAULT 'discovered',
+                processing_status VARCHAR(30),
+                duration FLOAT DEFAULT 0.0,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0,
+                fps FLOAT DEFAULT 0.0,
+                has_audio BOOLEAN DEFAULT 0,
+                resolution_method VARCHAR(30) DEFAULT 'unknown',
+                resolution_confidence FLOAT DEFAULT 0.0,
+                metadata_json JSON DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                is_public BOOLEAN DEFAULT 0,
+                enabled BOOLEAN DEFAULT 1
+            )
+        """))
+        conn.execute(text(
+            "INSERT INTO _gameplay_sources_backup (id, user_id, filename, file_hash, "
+            "file_size, ingestion_status, processing_status) "
+            "VALUES (1, 1, 'video1.mp4', 'hash1', 1000, 'discovered', 'ready')"
+        ))
+        conn.execute(text(
+            "INSERT INTO _gameplay_sources_backup (id, user_id, filename, file_hash, "
+            "file_size, ingestion_status, processing_status) "
+            "VALUES (2, 1, 'video2.mp4', 'hash2', 2000, 'deleted', NULL)"
+        ))
+        conn.commit()
+
+    # Verify pre-state
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM gameplay_sources")).scalar() == 0
+        assert conn.execute(text("SELECT COUNT(*) FROM _gameplay_sources_backup")).scalar() == 2
+
+    # Run the migration — must detect backup and restore
+    from gpcg.infrastructure.database import _drop_old_file_hash_unique
+    _drop_old_file_hash_unique(engine)
+
+    # Verify data was restored
+    with engine.connect() as conn:
+        count = conn.execute(text("SELECT COUNT(*) FROM gameplay_sources")).scalar()
+        assert count == 2, f"Expected 2 rows recovered, got {count}"
+
+        active = conn.execute(text(
+            "SELECT file_hash FROM gameplay_sources WHERE ingestion_status != 'deleted'"
+        )).fetchall()
+        assert len(active) == 1
+        assert active[0][0] == "hash1"
+
+        deleted = conn.execute(text(
+            "SELECT file_hash FROM gameplay_sources WHERE ingestion_status = 'deleted'"
+        )).fetchall()
+        assert len(deleted) == 1
+        assert deleted[0][0] is None
+
+        backup = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='_gameplay_sources_backup'"
+        )).fetchall()
+        assert len(backup) == 0, "Backup table should be dropped after recovery"
+
+    engine.dispose()
+    import shutil
+    shutil.rmtree(tmpdir, ignore_errors=True)
