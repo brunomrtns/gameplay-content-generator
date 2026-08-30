@@ -48,6 +48,7 @@ class ContentPlanningService:
         scope: str = ContentScope.game.value,
         user_id: Optional[int] = None,
         channel_context: str = "",
+        language_context=None,
     ) -> Optional[ContentPlan]:
         """Pick the best unused fact/item and create a ContentPlan.
 
@@ -192,6 +193,7 @@ class ContentPlanningService:
             user_id=user_id,
             format=self.settings.gpcg_default_format,
             target_duration=self.settings.gpcg_default_target_duration,
+            target_language=language_context.language if language_context else "pt-BR",
             topic=(data.get("topic") or "").strip(),
             hook=(data.get("hook") or "").strip(),
             tone=(data.get("tone") or "curious").strip().lower(),
@@ -243,6 +245,7 @@ class ContentPlanningService:
         *,
         user_id: Optional[int] = None,
         channel_context: str = "",
+        language_context=None,
     ) -> Optional[ContentPlan]:
         """Create a ContentPlan from a specific KnowledgeItem.
 
@@ -280,6 +283,7 @@ class ContentPlanningService:
             user_id=user_id,
             format=self.settings.gpcg_default_format,
             target_duration=self.settings.gpcg_default_target_duration,
+            target_language=language_context.language if language_context else "pt-BR",
             metadata_json={
                 "mode": "curiosity_short" if background_game_id else "generate_short",
                 "knowledge_item_id": ki.id,
@@ -319,6 +323,7 @@ class ContentPlanningService:
         *,
         user_id: Optional[int] = None,
         channel_context: str = "",
+        language_context=None,
     ) -> Optional[ContentPlan]:
         """Create a ContentPlan for a general curiosity (not game-specific).
 
@@ -386,6 +391,7 @@ class ContentPlanningService:
                         user_id=user_id,
                         scope=ContentScope.general.value,
                         target_duration=self.settings.gpcg_default_target_duration,
+            target_language=language_context.language if language_context else "pt-BR",
                         metadata={
                             "mode": "curiosity_short",
                             "knowledge_item_id": ki.id,
@@ -481,6 +487,7 @@ class ContentPlanningService:
             user_id=user_id,
             format=self.settings.gpcg_default_format,
             target_duration=self.settings.gpcg_default_target_duration,
+            target_language=language_context.language if language_context else "pt-BR",
             topic=(data.get("topic") or "").strip(),
             hook=(data.get("hook") or "").strip(),
             tone=(data.get("tone") or "curious").strip().lower(),

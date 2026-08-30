@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { colors } from '../theme/colors';
 import { fontSize, fontWeight, radius, spacing } from '../theme/spacing';
@@ -19,6 +21,7 @@ import { useBackHandler } from '../hooks/useBackHandler';
 import Toast from 'react-native-toast-message';
 import { OnboardingModal } from '../components/OnboardingModal';
 import { authApi } from '../api/endpoints';
+import i18n from '../i18n';
 
 const DOMAIN_LABELS: Record<string, string> = {
   games: 'Games',
@@ -37,10 +40,22 @@ interface MoreScreenProps {
 export function MoreScreen({ navigation, user, onLogout }: MoreScreenProps) {
   const queryClient = useQueryClient();
   const { refresh } = useAuth();
+  const { t, i18n: i18nInstance } = useTranslation();
   const [domainModal, setDomainModal] = useState(false);
   const [confirmDomain, setConfirmDomain] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [currentLang, setCurrentLang] = useState(i18nInstance.language);
+
+  const handleLanguageChange = async (lng: string) => {
+    await i18n.changeLanguage(lng);
+    setCurrentLang(lng);
+    try {
+      await AsyncStorage.setItem('gpcg-ui-language', lng);
+    } catch {
+      // Non-fatal — language already changed in UI
+    }
+  };
 
   const { data: domainData } = useQuery({
     queryKey: ['domains'],
@@ -146,6 +161,42 @@ export function MoreScreen({ navigation, user, onLogout }: MoreScreenProps) {
           </View>
           <Icon name="chevron-right" size={24} color={colors.textMuted} />
         </TouchableOpacity>
+
+        {/* Language toggle */}
+        <View style={styles.languageCard}>
+          <View style={styles.domainIcon}>
+            <Icon name="translate" size={24} color={colors.accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.domainLabel}>{t('language')}</Text>
+            <View style={styles.langToggleRow}>
+              <TouchableOpacity
+                style={[
+                  styles.langButton,
+                  currentLang === 'pt-BR' && styles.langButtonActive,
+                ]}
+                onPress={() => handleLanguageChange('pt-BR')}
+              >
+                {currentLang === 'pt-BR' && <Icon name="check" size={14} color={colors.accent} />}
+                <Text style={[styles.langButtonText, currentLang === 'pt-BR' && styles.langButtonTextActive]}>
+                  Português
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.langButton,
+                  currentLang === 'en' && styles.langButtonActive,
+                ]}
+                onPress={() => handleLanguageChange('en')}
+              >
+                {currentLang === 'en' && <Icon name="check" size={14} color={colors.accent} />}
+                <Text style={[styles.langButtonText, currentLang === 'en' && styles.langButtonTextActive]}>
+                  English
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
 
         {/* Menu items */}
         {MENU_ITEMS.map((item) => (
@@ -415,6 +466,44 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.semibold,
     color: colors.text,
     marginTop: 2,
+  },
+  languageCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+  },
+  langToggleRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  langButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceElevated,
+  },
+  langButtonActive: {
+    borderColor: 'rgba(16,185,129,0.4)',
+    backgroundColor: 'rgba(16,185,129,0.08)',
+  },
+  langButtonText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    fontWeight: fontWeight.medium,
+  },
+  langButtonTextActive: {
+    color: colors.accent,
   },
   menuItem: {
     flexDirection: 'row',

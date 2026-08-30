@@ -23,7 +23,7 @@ class ContentCollectMixin:
         job_id = job["id"]
 
         self.update_job_status(job_id, status="running", stage="content_collect", progress=0.1)
-        self.send_status("busy", "Coletando conteúdo (RSS)", job_id=job_id)
+        self.send_status("busy", "Coletando conteúdo (RSS)", job_id=job_id, activity_key="worker.activity.collecting_rss")
 
         from gpcg.application.content_collectors import collect_rss_items
         from gpcg.infrastructure.llm import LLMClient

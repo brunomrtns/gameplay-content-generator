@@ -33,7 +33,7 @@ class CleanupMixin:
         filename = artifacts.get("filename", "")
 
         self.update_job_status(job_id, status="running", stage="cleanup", progress=0.1)
-        self.send_status("busy", f"Limpando gameplay #{source_id}", job_id=job_id)
+        self.send_status("busy", f"Limpando gameplay #{source_id}", job_id=job_id, activity_key="worker.activity.cleaning_gameplay")
 
         deleted_files: list[str] = []
 
@@ -114,7 +114,7 @@ class CleanupMixin:
             return
 
         self.update_job_status(job_id, status="running", stage="cleanup", progress=0.1)
-        self.send_status("busy", f"Limpando storage {old_domain} do usuário #{user_id}", job_id=job_id)
+        self.send_status("busy", f"Limpando storage {old_domain} do usuário #{user_id}", job_id=job_id, activity_key="worker.activity.cleaning_storage")
 
         deleted_files: list[str] = []
         errors: list[str] = []

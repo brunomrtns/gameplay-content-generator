@@ -359,6 +359,8 @@ def get_job_data(
             "content_goals": profile.content_goals,
             "special_rules": profile.special_rules,
             "metadata_json": profile.metadata_json,
+            "target_language": profile.target_language,
+            "prompt_version": profile.prompt_version,
         }
     else:
         data["channel_profile"] = None

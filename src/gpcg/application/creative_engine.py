@@ -61,6 +61,11 @@ class CreativeStyle:
     Each float is 0.0–1.0 and is translated into natural-language
     instructions in the system prompt. New presets can be registered in
     CREATIVE_PRESETS without touching the engine code.
+
+    ``label`` and ``description`` are PT-BR defaults. For multilingual
+    support, ``localized_labels`` and ``localized_descriptions`` provide
+    per-language overrides. Use ``get_localized_label()`` and
+    ``get_localized_description()`` to access them.
     """
 
     name: str
@@ -71,6 +76,15 @@ class CreativeStyle:
     informality: float = 0.8
     creativity: float = 0.8
     description: str = ""
+    # Multilingual: per-language label/description overrides
+    localized_labels: dict = field(default_factory=dict)
+    localized_descriptions: dict = field(default_factory=dict)
+
+    def get_localized_label(self, language: str = "pt-BR") -> str:
+        return self.localized_labels.get(language, self.label)
+
+    def get_localized_description(self, language: str = "pt-BR") -> str:
+        return self.localized_descriptions.get(language, self.description)
 
 
 CREATIVE_PRESETS: dict[str, CreativeStyle] = {
@@ -84,6 +98,8 @@ CREATIVE_PRESETS: dict[str, CreativeStyle] = {
         creativity=0.85,
         description="Humor espontâneo, observações engraçadas do cotidiano, "
         "analogias inesperadas. Sem piadas forçadas.",
+        localized_labels={"en-US": "Brazilian humor"},
+        localized_descriptions={"en-US": "Spontaneous humor, funny everyday observations, unexpected analogies. No forced jokes."},
     ),
     "absurd": CreativeStyle(
         name="absurd",
@@ -95,6 +111,8 @@ CREATIVE_PRESETS: dict[str, CreativeStyle] = {
         creativity=0.95,
         description="Levar as coisas ao extremo lógico. 'Isso não deveria "
         "existir.' Exagero consciente e comparações absurdas.",
+        localized_labels={"en-US": "Absurd"},
+        localized_descriptions={"en-US": "Take things to their logical extreme. 'This shouldn't exist.' Conscious exaggeration and absurd comparisons."},
     ),
     "sarcastic": CreativeStyle(
         name="sarcastic",
@@ -106,6 +124,8 @@ CREATIVE_PRESETS: dict[str, CreativeStyle] = {
         creativity=0.75,
         description="Sarcasmo seco, observações irônicas, tom de 'óbvio que "
         "isso existe'. Não agressivo, apenas cínico.",
+        localized_labels={"en-US": "Sarcastic"},
+        localized_descriptions={"en-US": "Dry sarcasm, ironic observations, 'obviously this exists' tone. Not aggressive, just cynical."},
     ),
     "storytelling": CreativeStyle(
         name="storytelling",
@@ -117,6 +137,8 @@ CREATIVE_PRESETS: dict[str, CreativeStyle] = {
         creativity=0.85,
         description="Contar como uma história. Ritmo de narrativa, build-up, "
         "revelação. Foco no arco da informação.",
+        localized_labels={"en-US": "Storytelling"},
+        localized_descriptions={"en-US": "Tell it like a story. Narrative pacing, build-up, reveal. Focus on the information arc."},
     ),
     "curiosity": CreativeStyle(
         name="curiosity",
@@ -128,6 +150,8 @@ CREATIVE_PRESETS: dict[str, CreativeStyle] = {
         creativity=0.7,
         description="Tom de 'olha isso que louco'. Foco em despertar "
         "curiosidade genuína, sem forçar humor.",
+        localized_labels={"en-US": "Pure curiosity"},
+        localized_descriptions={"en-US": "'Look at this, how crazy' tone. Focus on awakening genuine curiosity, without forcing humor."},
     ),
     "nostalgia": CreativeStyle(
         name="nostalgia",
@@ -139,6 +163,8 @@ CREATIVE_PRESETS: dict[str, CreativeStyle] = {
         creativity=0.75,
         description="Tom de 'lembra disso?'. Apelo à memória afetiva, "
         "saudade de jogos antigos, contexto de época.",
+        localized_labels={"en-US": "Nostalgia"},
+        localized_descriptions={"en-US": "'Remember this?' tone. Appeal to emotional memory, nostalgia for old games, era context."},
     ),
     "dark_humor": CreativeStyle(
         name="dark_humor",
@@ -150,6 +176,8 @@ CREATIVE_PRESETS: dict[str, CreativeStyle] = {
         creativity=0.85,
         description="Humor que beira o inadequado sem cruzar a linha. "
         "Observações ácidas sobre o jogo/realidade.",
+        localized_labels={"en-US": "Dark humor"},
+        localized_descriptions={"en-US": "Humor that borders on inappropriate without crossing the line. Acidic observations about the game/reality."},
     ),
     "high_energy": CreativeStyle(
         name="high_energy",
@@ -161,6 +189,8 @@ CREATIVE_PRESETS: dict[str, CreativeStyle] = {
         creativity=0.9,
         description="Ritmo acelerado, frases curtas, impacto. Estilo "
         "criador de conteúdo explosivo.",
+        localized_labels={"en-US": "High energy"},
+        localized_descriptions={"en-US": "Fast pace, short sentences, impact. Explosive content creator style."},
     ),
 }
 

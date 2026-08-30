@@ -69,6 +69,7 @@ class ScriptService:
         critic_feedback: Optional[str] = None,
         previous_script: Optional[str] = None,
         user_id: Optional[int] = None,
+        language_context=None,
     ) -> Optional[Script]:
         """Generate draft → optimize → final script for a content plan.
 
@@ -112,6 +113,19 @@ class ScriptService:
 
         llm = self.llm or LLMClient()
         s = self.settings
+
+        # ── Language-aware character targets ──────────────────────────────
+        # Mandarin Chinese has ~3.5 chars/sec vs ~13-15 for Latin scripts.
+        # Use language-aware targets when a language_context is provided;
+        # otherwise fall back to config defaults (backward compat).
+        if language_context is not None:
+            from gpcg.i18n.language_context import get_target_char_range
+            lang_min, lang_max = get_target_char_range(
+                plan.target_duration, language_context.language
+            )
+        else:
+            lang_min = s.gpcg_narration_min_chars
+            lang_max = lang_max
 
         # Determine the model to use
         # Priority: creative_plan.model > creative_material model > default
@@ -169,13 +183,13 @@ class ScriptService:
                 # Expand if still too short (same logic as initial generation)
                 max_expand = 3
                 expand_attempt = 0
-                while len(final) < s.gpcg_narration_min_chars and expand_attempt < max_expand:
+                while len(final) < lang_min and expand_attempt < max_expand:
                     expand_attempt += 1
-                    shortfall = s.gpcg_narration_min_chars - len(final)
+                    shortfall = lang_min - len(final)
                     expand_prompt = (
                         f"Current script ({len(final)} chars):\n\n{final}\n\n"
                         f"CRITICAL: This script is {shortfall} characters TOO SHORT. "
-                        f"It MUST be at least {s.gpcg_narration_min_chars} characters for "
+                        f"It MUST be at least {lang_min} characters for "
                         f"~{plan.target_duration}s of narration. "
                         f"EXPAND the script by adding more detail, examples, and depth. "
                         f"DO NOT repeat content — add NEW information, insights, and transitions. "
@@ -202,6 +216,7 @@ class ScriptService:
                     final, all_sources,
                     n=s.gpcg_originality_ngram_size,
                     threshold=s.gpcg_originality_threshold,
+                    language=language_context.language if language_context else "pt-BR",
                 )
                 script = Script(
                     content_plan_id=content_plan_id,
@@ -213,6 +228,7 @@ class ScriptService:
                     originality_score=report.score,
                     originality_report=report.to_dict(),
                     rewrite_count=0,
+                    language=language_context.language if language_context else "pt-BR",
                 )
                 session.add(script)
                 session.flush()
@@ -240,9 +256,9 @@ class ScriptService:
                 f"Energy: {plan.energy}\n"
                 f"Hook idea: {plan.hook}\n"
                 f"Fact to tell: {fact_text}\n"
-                f"Target: {s.gpcg_narration_min_chars}-{s.gpcg_narration_max_chars} characters, "
+                f"Target: {lang_min}-{lang_max} characters, "
                 f"~{plan.target_duration} seconds of TTS narration.\n"
-                f"CRITICAL: The script MUST be at least {s.gpcg_narration_min_chars} characters long. "
+                f"CRITICAL: The script MUST be at least {lang_min} characters long. "
                 f"Do NOT write a short script. Expand with context, examples, and commentary "
                 f"about the fact to fill the time."
             )
@@ -271,9 +287,9 @@ class ScriptService:
         opt_prompt = (
             f"Draft script:\n\n{draft}\n\n"
             f"Optimize for ~{plan.target_duration}s Short, tone={plan.tone}, "
-            f"target {s.gpcg_narration_min_chars}-{s.gpcg_narration_max_chars} characters. "
+            f"target {lang_min}-{lang_max} characters. "
             f"Current length: {len(draft)} chars. "
-            f"{'TOO SHORT — must expand to at least ' + str(s.gpcg_narration_min_chars) + ' chars.' if len(draft) < s.gpcg_narration_min_chars else ''}"
+            f"{'TOO SHORT — must expand to at least ' + str(lang_min) + ' chars.' if len(draft) < lang_min else ''}"
         )
         try:
             opt_data = llm.chat_json(OPTIMIZE_SYSTEM, opt_prompt, temperature=0.4, max_tokens=2500)
@@ -287,9 +303,9 @@ class ScriptService:
         # Choose final (prefer optimized if within char bounds, else draft)
         final = optimized
         char_count = len(final)
-        if char_count < s.gpcg_narration_min_chars or char_count > s.gpcg_narration_max_chars:
+        if char_count < lang_min or char_count > lang_max:
             # Try draft if it's closer
-            if s.gpcg_narration_min_chars <= len(draft) <= s.gpcg_narration_max_chars:
+            if lang_min <= len(draft) <= lang_max:
                 final = draft
                 char_count = len(final)
 
@@ -298,13 +314,13 @@ class ScriptService:
         # dedicated expansion pass to reach at least gpcg_narration_min_chars.
         max_expand_attempts = 3
         expand_attempt = 0
-        while len(final) < s.gpcg_narration_min_chars and expand_attempt < max_expand_attempts:
+        while len(final) < lang_min and expand_attempt < max_expand_attempts:
             expand_attempt += 1
-            shortfall = s.gpcg_narration_min_chars - len(final)
+            shortfall = lang_min - len(final)
             expand_prompt = (
                 f"Current script ({len(final)} chars):\n\n{final}\n\n"
                 f"CRITICAL: This script is {shortfall} characters TOO SHORT. "
-                f"It MUST be at least {s.gpcg_narration_min_chars} characters for "
+                f"It MUST be at least {lang_min} characters for "
                 f"~{plan.target_duration}s of narration. "
                 f"EXPAND the script by adding more detail, examples, and depth. "
                 f"DO NOT repeat content — add NEW information, insights, and transitions. "
@@ -338,7 +354,7 @@ class ScriptService:
         all_sources = list(source_texts)
         if fact_claims:
             all_sources.append(("extracted_facts", " ".join(fact_claims)))
-        report = check_originality(final, all_sources, n=ngram_n, threshold=threshold)
+        report = check_originality(final, all_sources, n=ngram_n, threshold=threshold, language=language_context.language if language_context else "pt-BR")
 
         log.info(
             f"originality check: score={report.score:.1f} overlap={report.max_overlap:.4f} "
@@ -359,7 +375,7 @@ class ScriptService:
                 f"{(dict(source_texts).get(report.matched_source, '')[:1500])}\n\n"
                 f"Matching phrases to avoid:\n{matches_str}\n\n"
                 f"Rewrite COMPLETELY. Same fact, totally different words. "
-                f"Target {s.gpcg_narration_min_chars}-{s.gpcg_narration_max_chars} chars."
+                f"Target {lang_min}-{lang_max} chars."
             )
             try:
                 rw_data = llm.chat_json(REWRITE_SYSTEM, rewrite_prompt, temperature=0.8, max_tokens=1500)
@@ -368,7 +384,7 @@ class ScriptService:
                     final = rewritten
                     char_count = len(final)
                     # Re-check
-                    report = check_originality(final, all_sources, n=ngram_n, threshold=threshold)
+                    report = check_originality(final, all_sources, n=ngram_n, threshold=threshold, language=language_context.language if language_context else "pt-BR")
                     log.info(
                         f"rewrite {rewrite_count}: score={report.score:.1f} "
                         f"overlap={report.max_overlap:.4f}"
@@ -397,6 +413,7 @@ class ScriptService:
             originality_score=report.score,
             originality_report=report.to_dict(),
             rewrite_count=rewrite_count,
+            language=language_context.language if language_context else "pt-BR",
         )
         session.add(script)
         session.flush()
@@ -474,9 +491,9 @@ class ScriptService:
             f"",
             f"FACT TO TELL: {fact_text}",
             f"",
-            f"TARGET: {s.gpcg_narration_min_chars}-{s.gpcg_narration_max_chars} characters, "
+            f"TARGET: {lang_min}-{lang_max} characters, "
             f"~{plan.target_duration} seconds of TTS narration.",
-            f"CRITICAL: The script MUST be at least {s.gpcg_narration_min_chars} characters long.",
+            f"CRITICAL: The script MUST be at least {lang_min} characters long.",
             f"",
         ])
 
@@ -575,7 +592,7 @@ class ScriptService:
             f"REMOVE them entirely. Do NOT replace them with other invented details.",
             f"Commentary and opinions about the fact are OK — invented mechanics are NOT.",
             f"",
-            f"TARGET: {s.gpcg_narration_min_chars}-{s.gpcg_narration_max_chars} characters.",
+            f"TARGET: {lang_min}-{lang_max} characters.",
             f"",
         ]
 

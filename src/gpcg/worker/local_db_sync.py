@@ -600,6 +600,8 @@ def populate_local_db(job_data: dict, db_path: Path, storage_root: Path = None) 
                 content_goals=profile_data.get("content_goals", ""),
                 special_rules=profile_data.get("special_rules", ""),
                 metadata_json=profile_data.get("metadata_json", {}),
+                target_language=profile_data.get("target_language", "pt-BR"),
+                prompt_version=profile_data.get("prompt_version", "v1"),
             ))
         session.flush()
 

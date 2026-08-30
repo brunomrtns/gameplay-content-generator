@@ -97,6 +97,9 @@ def update_channel_profile(
         "tone_of_voice", "narrative_style", "content_goals", "special_rules",
     ]
 
+    # Multilingual fields
+    multilingual_fields = ["target_language", "prompt_version"]
+
     # Structured fields (V2)
     structured_fields = [
         "content_type_affinity", "editorial_keywords", "custom_feeds",
@@ -118,6 +121,11 @@ def update_channel_profile(
         ).first()
         for field in free_text_fields:
             if field in data:
+                setattr(p, field, data[field])
+
+        # Update multilingual fields
+        for field in multilingual_fields:
+            if field in data and data[field]:
                 setattr(p, field, data[field])
 
         # Update metadata_json (Kids-specific fields like kids_age_range, categories, etc.)

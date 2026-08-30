@@ -1,0 +1,22 @@
+{
+  "user_not_found": "User not found",
+  "cannot_delete_self": "Cannot delete yourself",
+  "youtube_already_connected": "YouTube channel already connected.",
+  "youtube_not_connected": "YouTube channel not connected.",
+  "automation_not_found": "Automation not found",
+  "gameplay_not_found": "Gameplay not found",
+  "job_not_found": "Job not found",
+  "invalid_language": "Invalid language",
+  "unsupported_language": "Language not supported by worker",
+  "network_error": "Connection error",
+  "unauthorized": "Unauthorized",
+  "forbidden": "Access denied",
+  "not_found": "Not found",
+  "server_error": "Internal server error",
+  "timeout": "Request timed out",
+  "upload_failed": "Upload failed",
+  "download_failed": "Download failed",
+  "render_failed": "Render failed",
+  "tts_failed": "Voice synthesis failed",
+  "mapping_failed": "Mapping failed"
+}

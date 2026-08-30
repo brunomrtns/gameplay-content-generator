@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
 import { useLiveData } from "@/hooks/useLiveData";
 import { Badge, Card, Spinner, EmptyState } from "@/components/ui";
@@ -14,44 +15,17 @@ import {
   AlertCircle,
 } from "lucide-react";
 
-const JOB_STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string; icon: any }> = {
-  queued: { variant: "info", label: "Na fila", icon: Clock },
-  running: { variant: "info", label: "Executando", icon: Loader2 },
-  completed: { variant: "success", label: "Concluído", icon: CheckCircle2 },
-  failed: { variant: "error", label: "Falhou", icon: XCircle },
-  retrying: { variant: "warning", label: "Tentando novamente", icon: AlertCircle },
-  cancelled: { variant: "default", label: "Cancelado", icon: XCircle },
-};
-
-const JOB_TYPE_LABELS: Record<string, string> = {
-  mapping: "Mapeamento",
-  generate_short: "Gerar Short",
-  curiosity_short: "Curiosidade",
-};
-
-const STAGE_LABELS: Record<string, string> = {
-  download: "Download",
-  confirm_download: "Confirmando download",
-  mapping: "Mapeando (VLM + ASR)",
-  content_planning: "Planejando conteúdo",
-  editorial_planning: "Planejamento editorial",
-  creative_engine: "Motor criativo",
-  script: "Escrevendo roteiro",
-  script_review: "Revisando roteiro",
-  tts: "Sintetizando voz",
-  gameplay_selection: "Selecionando cenas",
-  visual_selection: "Selecionando imagens",
-  music_selection: "Selecionando música",
-  render_plan: "Planejando renderização",
-  render: "Renderizando vídeo",
-  qa: "Controle de qualidade",
-  metadata_generation: "Gerando metadados",
-  youtube_upload: "Enviando ao YouTube",
-  output: "Finalizando",
-  done: "Concluído",
+const JOB_STATUS_CONFIG: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; icon: any }> = {
+  queued: { variant: "info", icon: Clock },
+  running: { variant: "info", icon: Loader2 },
+  completed: { variant: "success", icon: CheckCircle2 },
+  failed: { variant: "error", icon: XCircle },
+  retrying: { variant: "warning", icon: AlertCircle },
+  cancelled: { variant: "default", icon: XCircle },
 };
 
 export function JobsPage() {
+  const { t } = useTranslation();
   const [filter, setFilter] = useState<string>("");
   const { data: jobs, isLoading } = useLiveData(['jobs'], () => api.listJobs(), ['job.status_changed', 'job.created']);
 
@@ -70,19 +44,19 @@ export function JobsPage() {
     <div className="space-y-8 animate-fade-in">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Jobs</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{t('jobs:title')}</h1>
         <p className="mt-1 text-sm text-text-secondary">
-          Fila de processamento — mapeamentos e geração de vídeos
+          {t('jobs:subtitle')}
         </p>
       </div>
 
       {/* Filter tabs */}
       <div className="flex flex-wrap gap-2">
-        <FilterTab active={filter === ""} onClick={() => setFilter("")} label="Todos" count={jobs?.length || 0} />
-        <FilterTab active={filter === "queued"} onClick={() => setFilter("queued")} label="Na fila" count={counts.queued} />
-        <FilterTab active={filter === "running"} onClick={() => setFilter("running")} label="Executando" count={counts.running} />
-        <FilterTab active={filter === "completed"} onClick={() => setFilter("completed")} label="Concluídos" count={counts.completed} />
-        <FilterTab active={filter === "failed"} onClick={() => setFilter("failed")} label="Falhas" count={counts.failed} />
+        <FilterTab active={filter === ""} onClick={() => setFilter("")} label={t('jobs:filter.all')} count={jobs?.length || 0} />
+        <FilterTab active={filter === "queued"} onClick={() => setFilter("queued")} label={t('jobs:filter.queued')} count={counts.queued} />
+        <FilterTab active={filter === "running"} onClick={() => setFilter("running")} label={t('jobs:filter.running')} count={counts.running} />
+        <FilterTab active={filter === "completed"} onClick={() => setFilter("completed")} label={t('jobs:filter.completed')} count={counts.completed} />
+        <FilterTab active={filter === "failed"} onClick={() => setFilter("failed")} label={t('jobs:filter.failed')} count={counts.failed} />
       </div>
 
       {/* Jobs list */}
@@ -92,8 +66,8 @@ export function JobsPage() {
         <Card>
           <EmptyState
             icon={<ListChecks className="h-10 w-10" />}
-            title="Nenhum job"
-            description="Solicite mapeamentos na aba Conteúdo ou inicie a automação para gerar vídeos."
+            title={t('jobs:empty.title')}
+            description={t('jobs:empty.description')}
           />
         </Card>
       ) : (
@@ -102,8 +76,8 @@ export function JobsPage() {
             const cfg = JOB_STATUS_CONFIG[j.status] || JOB_STATUS_CONFIG.queued;
             const StatusIcon = cfg.icon;
             const isRunning = j.status === "running";
-            const typeLabel = JOB_TYPE_LABELS[j.type] || j.type;
-            const stageLabel = STAGE_LABELS[j.stage] || j.stage;
+            const typeLabel = t(`jobs:type.${j.type}`, j.type) as string;
+            const stageLabel = t(`stages:${j.stage}`, j.stage) as string;
             const progress = j.progress != null ? Math.round(j.progress * 100) : 0;
 
             return (
@@ -169,7 +143,7 @@ export function JobsPage() {
                   <div className="shrink-0">
                     <Badge variant={cfg.variant}>
                       <StatusIcon className={`h-3 w-3 ${isRunning ? "animate-spin" : ""}`} />
-                      {cfg.label}
+                      {t(`jobs:status.${j.status}`, j.status) as string}
                     </Badge>
                   </div>
                 </div>

@@ -1,0 +1,1 @@
+# zh-CN prompt pack

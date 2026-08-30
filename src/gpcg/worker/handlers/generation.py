@@ -85,7 +85,7 @@ class GenerationMixin:
             self._download_kids_assets(job_data)
 
         self.update_job_status(job_id, status="running", stage="content_planning", progress=0.05)
-        self.send_status("busy", "Gerando vídeo", job_id=job_id)
+        self.send_status("busy", "Gerando vídeo", job_id=job_id, activity_key="worker.activity.generating_video")
 
         result = run_generation_locally(
             job_data=job_data,
@@ -103,7 +103,7 @@ class GenerationMixin:
         video_path = result.get("video_path")
         if video_path and Path(video_path).exists():
             self.update_job_status(job_id, status="running", stage="output", progress=0.95)
-            self.send_status("busy", "Enviando vídeo", job_id=job_id)
+            self.send_status("busy", "Enviando vídeo", job_id=job_id, activity_key="worker.activity.uploading_video")
             upload_result = self.upload_video(job_id, Path(video_path))
             result["video"]["storage_key"] = upload_result.get("storage_key")
             # Clean up local video after successful upload (HD space is finite)

@@ -228,6 +228,8 @@ class User(Base):
     google_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    # UI language (BCP-47 tag). Content language is ChannelProfile.target_language.
+    ui_language: Mapped[str] = mapped_column(String(10), default="pt-BR")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -360,6 +362,8 @@ class ContentPlan(Base):
 
     format: Mapped[str] = mapped_column(String(30), default="youtube_short")
     target_duration: Mapped[int] = mapped_column(Integer, default=60)
+    # Content language (BCP-47). Frozen from ChannelProfile at plan creation.
+    target_language: Mapped[str] = mapped_column(String(10), default="pt-BR")
     topic: Mapped[str] = mapped_column(Text)
     hook: Mapped[str] = mapped_column(Text)
     tone: Mapped[str] = mapped_column(String(50), default="curious")
@@ -388,6 +392,8 @@ class Script(Base):
     final: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default=ScriptStatus.draft.value)
     char_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Content language (BCP-47). Frozen from ContentPlan at script creation.
+    language: Mapped[str] = mapped_column(String(10), default="pt-BR")
     # Anti-plagiarism: originality score (0-100, higher = more original)
     # Computed by comparing the final script against source documents + fact claims
     # via n-gram overlap. Scripts below 70 trigger an automatic rewrite.
@@ -543,6 +549,9 @@ class Video(Base):
         ForeignKey("knowledge_items.id"), nullable=True, index=True
     )
 
+    # Content language (BCP-47). Frozen from Script/ContentPlan at video creation.
+    language: Mapped[str] = mapped_column(String(10), default="pt-BR")
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     content_plan: Mapped[Optional["ContentPlan"]] = relationship(back_populates="videos")
@@ -611,6 +620,13 @@ class ChannelProfile(Base):
         String(30), default=ContentDomain.games.value, index=True
     )
 
+    # Target content language (BCP-47 tag, e.g. "pt-BR", "en-US").
+    # Determines the language of generated scripts, narration, subtitles, etc.
+    # UI language is User.ui_language (separate concern).
+    target_language: Mapped[str] = mapped_column(String(10), default="pt-BR")
+    # Prompt version for A/B testing and checkpoint compatibility.
+    prompt_version: Mapped[str] = mapped_column(String(20), default="v1")
+
     # Free-form channel description — the "elevator pitch" of the channel.
     channel_description: Mapped[str] = mapped_column(Text, default="")
 
@@ -677,30 +693,40 @@ class ChannelProfile(Base):
     def __repr__(self) -> str:
         return f"<ChannelProfile user={self.user_id} niche={self.niche!r}>"
 
-    def to_prompt_context(self) -> str:
+    def to_prompt_context(self, language_context=None) -> str:
         """Build a natural-language context block for LLM prompts.
 
         This is the text that gets injected into system/user prompts across
         the pipeline so the AI knows the channel's identity and direction.
+
+        When a ``LanguageContext`` is provided, labels are localized and the
+        language directive is prepended.
         """
+        from gpcg.i18n.labels import get_label
+
+        lang = language_context.language if language_context else "pt-BR"
         parts = []
+        if language_context:
+            directive = language_context.language_directive()
+            if directive:
+                parts.append(directive)
         if self.channel_description:
-            parts.append(f"Descrição do canal: {self.channel_description}")
+            parts.append(f"{get_label('channel_description', lang)}: {self.channel_description}")
         if self.niche:
-            parts.append(f"Nicho: {self.niche}")
+            parts.append(f"{get_label('niche', lang)}: {self.niche}")
         if self.target_audience:
-            parts.append(f"Público-alvo: {self.target_audience}")
+            parts.append(f"{get_label('target_audience', lang)}: {self.target_audience}")
         if self.tone_of_voice:
-            parts.append(f"Tom de voz: {self.tone_of_voice}")
+            parts.append(f"{get_label('tone_of_voice', lang)}: {self.tone_of_voice}")
         if self.narrative_style:
-            parts.append(f"Estilo de narrativa: {self.narrative_style}")
+            parts.append(f"{get_label('narrative_style', lang)}: {self.narrative_style}")
         if self.content_goals:
-            parts.append(f"Objetivos: {self.content_goals}")
+            parts.append(f"{get_label('content_goals', lang)}: {self.content_goals}")
         if self.special_rules:
-            parts.append(f"Regras especiais: {self.special_rules}")
+            parts.append(f"{get_label('special_rules', lang)}: {self.special_rules}")
         return "\n".join(parts) if parts else ""
 
-    def to_stage_context(self, stage: str) -> str:
+    def to_stage_context(self, stage: str, language_context=None) -> str:
         """Return channel context relevant to a specific pipeline stage.
 
         Stages:
@@ -709,31 +735,38 @@ class ChannelProfile(Base):
         - editorial_planning: niche, target_audience, tone_of_voice, special_rules
         - script: full context (use to_prompt_context())
         """
+        from gpcg.i18n.labels import get_label
+
+        lang = language_context.language if language_context else "pt-BR"
         parts = []
+        if language_context:
+            directive = language_context.language_directive()
+            if directive:
+                parts.append(directive)
         if stage == "content_planning":
             if self.niche:
-                parts.append(f"Nicho do canal: {self.niche}")
+                parts.append(f"{get_label('niche_channel', lang)}: {self.niche}")
             if self.content_goals:
-                parts.append(f"Objetivos de conteúdo: {self.content_goals}")
+                parts.append(f"{get_label('content_goals_label', lang)}: {self.content_goals}")
             if self.target_audience:
-                parts.append(f"Público-alvo: {self.target_audience}")
+                parts.append(f"{get_label('target_audience', lang)}: {self.target_audience}")
         elif stage == "story_finding":
             if self.tone_of_voice:
-                parts.append(f"Tom de voz: {self.tone_of_voice}")
+                parts.append(f"{get_label('tone_of_voice', lang)}: {self.tone_of_voice}")
             if self.narrative_style:
-                parts.append(f"Estilo narrativo: {self.narrative_style}")
+                parts.append(f"{get_label('narrative_style_label', lang)}: {self.narrative_style}")
         elif stage == "editorial_planning":
             if self.niche:
-                parts.append(f"Nicho do canal: {self.niche}")
+                parts.append(f"{get_label('niche_channel', lang)}: {self.niche}")
             if self.target_audience:
-                parts.append(f"Público-alvo: {self.target_audience}")
+                parts.append(f"{get_label('target_audience', lang)}: {self.target_audience}")
             if self.tone_of_voice:
-                parts.append(f"Tom de voz: {self.tone_of_voice}")
+                parts.append(f"{get_label('tone_of_voice', lang)}: {self.tone_of_voice}")
             if self.special_rules:
-                parts.append(f"Regras especiais: {self.special_rules}")
+                parts.append(f"{get_label('special_rules', lang)}: {self.special_rules}")
         else:
             # Full context for script and other stages
-            return self.to_prompt_context()
+            return self.to_prompt_context(language_context)
 
         return "\n".join(parts) if parts else ""
 
@@ -779,6 +812,10 @@ class KnowledgeChunk(Base):
 
     # Embedding model used (for invalidation if model changes)
     embedding_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Multilingual: language of the chunk content (BCP-47 tag).
+    # Used to filter embeddings by language during RAG retrieval.
+    language: Mapped[str] = mapped_column(String(10), default="pt-BR")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 

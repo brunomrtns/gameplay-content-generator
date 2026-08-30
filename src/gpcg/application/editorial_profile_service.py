@@ -327,6 +327,9 @@ def serialize_profile(profile: ChannelProfile) -> dict[str, Any]:
         "narrative_style": profile.narrative_style,
         "content_goals": profile.content_goals,
         "special_rules": profile.special_rules,
+        # Multilingual
+        "target_language": profile.target_language,
+        "prompt_version": profile.prompt_version,
         # V2 structured
         "content_type_affinity": profile.content_type_affinity or {},
         "editorial_keywords": profile.editorial_keywords or [],

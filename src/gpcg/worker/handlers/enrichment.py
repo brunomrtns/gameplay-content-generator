@@ -27,7 +27,7 @@ class EnrichmentMixin:
             return
 
         self.update_job_status(job_id, status="running", stage="enrichment", progress=0.1)
-        self.send_status("busy", f"Enriquecendo jogo #{game_id}", job_id=job_id)
+        self.send_status("busy", f"Enriquecendo jogo #{game_id}", job_id=job_id, activity_key="worker.activity.enriching_game")
 
         from gpcg.application.game_enrichment import fetch_enrichment_data
         from gpcg.infrastructure.llm import LLMClient

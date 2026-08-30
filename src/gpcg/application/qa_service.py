@@ -72,8 +72,17 @@ class QAService:
         script: Script,
         content_plan: ContentPlan,
         target_duration: int,
+        *,
+        language_context=None,
     ) -> QAResult:
-        """Run technical + AI QA on a generated video."""
+        """Run technical + AI QA on a generated video.
+
+        Args:
+            language_context: Optional LanguageContext. When provided, the AI
+                QA prompt is told which language the script is in so the
+                evaluator can judge language-appropriateness. The QA prompt
+                itself stays in English (the evaluator understands any language).
+        """
         issues: list[QAIssue] = []
         technical: dict = {}
         score = 100.0
@@ -126,7 +135,7 @@ class QAService:
         ai_report: dict = {}
         if self.llm is not None:
             try:
-                ai_report = self._ai_qa(script, content_plan, info)
+                ai_report = self._ai_qa(script, content_plan, info, language_context=language_context)
                 ai_score = float(ai_report.get("score", 80))
                 score = (score + ai_score) / 2  # blend technical + AI
                 for issue in ai_report.get("issues", []):
@@ -161,7 +170,7 @@ class QAService:
             ai_report=ai_report,
         )
 
-    def _ai_qa(self, script: Script, plan: ContentPlan, info) -> dict:
+    def _ai_qa(self, script: Script, plan: ContentPlan, info, *, language_context=None) -> dict:
         """LLM evaluates the script/plan quality (no frame analysis in MVP)."""
         system = """You are a YouTube Shorts quality reviewer. Evaluate the script and metadata
 for a generated Short. You do NOT see the video frames — evaluate the content quality only.
@@ -172,6 +181,20 @@ Return JSON:
   "issues": [{"type": "pacing|hook|coherence|repetition|tone|length", "severity": "low|medium|high", "description": "...", "repair_stage": "script|content_planning|tts|render|none"}],
   "summary": "<brief>"
 }"""
+        # Language directive: tell the evaluator which language the script is
+        # written in so it can judge language-appropriateness. The QA prompt
+        # itself stays in English (the evaluator understands any language).
+        language_directive = ""
+        if language_context is not None:
+            directive = getattr(language_context, "language_directive", None)
+            if callable(directive):
+                language_directive = directive() + "\n"
+            else:
+                lang_name = getattr(language_context, "language", "pt-BR")
+                language_directive = (
+                    f"Evaluate this script written in {lang_name}. "
+                    f"The script should be in {lang_name}.\n"
+                )
         # Build context — game name if game-specific, else curiosity context
         if plan.game is not None:
             context_line = f"Game: {plan.game.canonical_name}\n"
@@ -184,6 +207,7 @@ Return JSON:
             context_line = "Context: General curiosity\n"
 
         prompt = (
+            f"{language_directive}"
             f"{context_line}"
             f"Topic: {plan.topic}\n"
             f"Tone: {plan.tone}\n"

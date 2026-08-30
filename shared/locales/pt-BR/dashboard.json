@@ -1,0 +1,33 @@
+{
+  "title": "Painel",
+  "subtitle": "Visão geral da sua operação de geração de vídeos",
+  "stats": {
+    "gameplays": "Gameplays",
+    "jobs": "Jobs",
+    "videos": "Vídeos",
+    "workers": "Workers"
+  },
+  "workerStatus": {
+    "title": "Status do Worker",
+    "online": "Online",
+    "busy": "Ocupado",
+    "offline": "Offline",
+    "currentActivity": "Atividade atual",
+    "lastHeartbeat": "Último heartbeat",
+    "noWorkers": "Nenhum worker registrado"
+  },
+  "youtube": {
+    "connected": "YouTube conectado",
+    "notConnected": "YouTube não conectado",
+    "connect": "Conectar YouTube",
+    "disconnect": "Desconectar"
+  },
+  "automation": {
+    "active": "Automação ativa",
+    "inactive": "Automação inativa",
+    "configure": "Configurar automação"
+  },
+  "recentJobs": "Jobs recentes",
+  "recentVideos": "Vídeos recentes",
+  "viewAll": "Ver todos"
+}

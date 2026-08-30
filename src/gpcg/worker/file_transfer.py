@@ -45,7 +45,7 @@ class FileTransferMixin:
         local_path.parent.mkdir(parents=True, exist_ok=True)
 
         log.info(f"Downloading gameplay #{source_id} ({filename})...")
-        self.send_status("busy", f"Baixando {filename}", job_id=self._current_job["id"] if self._current_job else None)
+        self.send_status("busy", f"Baixando {filename}", job_id=self._current_job["id"] if self._current_job else None, activity_key="worker.activity.downloading_file")
 
         # Try SCP first (bypasses nginx, much more robust for large files)
         if self._try_scp_download(source, local_path):

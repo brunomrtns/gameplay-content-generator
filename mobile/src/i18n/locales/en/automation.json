@@ -1,0 +1,59 @@
+{
+  "title": "Automation",
+  "subtitle": "Configure automatic video generation",
+  "enabled": "Automation enabled",
+  "disabled": "Automation disabled",
+  "enable": "Enable automation",
+  "disable": "Disable automation",
+  "save": "Save settings",
+  "saved": "Settings saved successfully",
+  "format": {
+    "label": "Video format",
+    "portrait": "9:16 (Portrait)",
+    "landscape": "16:9 (Landscape)",
+    "square": "1:1 (Square)",
+    "vertical45": "4:5 (Vertical)"
+  },
+  "voice": {
+    "label": "Voice",
+    "select": "Select voice",
+    "upload": "Upload voice",
+    "none": "No voice selected"
+  },
+  "subtitles": {
+    "label": "Subtitles",
+    "font": "Font",
+    "size": "Size",
+    "color": "Color",
+    "position": "Position",
+    "uppercase": "Uppercase"
+  },
+  "transitions": {
+    "label": "Transitions",
+    "type": "Transition type",
+    "duration": "Duration"
+  },
+  "creativeStyle": {
+    "label": "Creative style",
+    "humor": "Humor",
+    "absurd": "Absurd",
+    "sarcastic": "Sarcastic",
+    "storytelling": "Storytelling",
+    "curiosity": "Curiosity",
+    "nostalgia": "Nostalgia",
+    "darkHumor": "Dark humor",
+    "highEnergy": "High energy"
+  },
+  "youtube": {
+    "label": "YouTube upload",
+    "autoUpload": "Automatic upload",
+    "title": "Video title",
+    "description": "Description",
+    "tags": "Tags",
+    "visibility": "Visibility",
+    "public": "Public",
+    "unlisted": "Unlisted",
+    "private": "Private"
+  },
+  "preview": "Preview"
+}

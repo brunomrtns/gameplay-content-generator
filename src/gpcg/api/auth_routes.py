@@ -47,6 +47,7 @@ class UserResponse(BaseModel):
     has_youtube: bool = False
     channel_title: Optional[str] = None
     onboarding_completed: bool = False
+    ui_language: str = "pt-BR"
     created_at: str
 
 
@@ -96,6 +97,7 @@ def _user_to_response(user: User, request: Request = None) -> dict:
         "has_youtube": has_yt,
         "channel_title": channel_title,
         "onboarding_completed": user.onboarding_completed,
+        "ui_language": user.ui_language,
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
@@ -225,6 +227,30 @@ async def exchange_token(
 def get_me(user: User = Depends(get_current_user), request: Request = None):
     """Get current user info. Returns local user data augmented with BI admin status."""
     return _user_to_response(user, request)
+
+
+class UpdateUiLanguageRequest(BaseModel):
+    ui_language: str
+
+
+@router.put("/me/ui-language")
+def update_ui_language(
+    req: UpdateUiLanguageRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update the current user's UI language preference."""
+    # Validate that ui_language is a supported language
+    from gpcg.i18n.language_context import is_supported, DEFAULT_LANGUAGE
+    if not is_supported(req.ui_language):
+        from gpcg.i18n.api_messages import get_message
+        raise HTTPException(404, detail=get_message("error.invalid_language", user.ui_language))
+
+    with session_scope() as session:
+        u = session.get(User, user.id)
+        u.ui_language = req.ui_language
+        session.flush()
+        return _user_to_response(u)
 
 
 @router.post("/logout")

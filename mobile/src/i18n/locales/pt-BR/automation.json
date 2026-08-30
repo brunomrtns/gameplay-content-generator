@@ -1,0 +1,59 @@
+{
+  "title": "Automação",
+  "subtitle": "Configure a geração automática de vídeos",
+  "enabled": "Automação ativada",
+  "disabled": "Automação desativada",
+  "enable": "Ativar automação",
+  "disable": "Desativar automação",
+  "save": "Salvar configurações",
+  "saved": "Configurações salvas com sucesso",
+  "format": {
+    "label": "Formato do vídeo",
+    "portrait": "9:16 (Vertical)",
+    "landscape": "16:9 (Horizontal)",
+    "square": "1:1 (Quadrado)",
+    "vertical45": "4:5 (Vertical)"
+  },
+  "voice": {
+    "label": "Voz",
+    "select": "Selecionar voz",
+    "upload": "Enviar voz",
+    "none": "Nenhuma voz selecionada"
+  },
+  "subtitles": {
+    "label": "Legendas",
+    "font": "Fonte",
+    "size": "Tamanho",
+    "color": "Cor",
+    "position": "Posição",
+    "uppercase": "Maiúsculas"
+  },
+  "transitions": {
+    "label": "Transições",
+    "type": "Tipo de transição",
+    "duration": "Duração"
+  },
+  "creativeStyle": {
+    "label": "Estilo criativo",
+    "humor": "Humor",
+    "absurd": "Absurdo",
+    "sarcastic": "Sarcástico",
+    "storytelling": "Narrativa",
+    "curiosity": "Curiosidade",
+    "nostalgia": "Nostalgia",
+    "darkHumor": "Humor negro",
+    "highEnergy": "Alta energia"
+  },
+  "youtube": {
+    "label": "Upload ao YouTube",
+    "autoUpload": "Upload automático",
+    "title": "Título do vídeo",
+    "description": "Descrição",
+    "tags": "Tags",
+    "visibility": "Visibilidade",
+    "public": "Público",
+    "unlisted": "Não listado",
+    "private": "Privado"
+  },
+  "preview": "Pré-visualização"
+}

@@ -3,6 +3,7 @@ import { StatusBar } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import './src/i18n'; // i18n initialization — must run before App
 import { AuthProvider } from './src/hooks/useAuth';
 import { EventsProvider } from './src/hooks/useEvents';
 import { AppNavigator } from './src/navigation/AppNavigator';

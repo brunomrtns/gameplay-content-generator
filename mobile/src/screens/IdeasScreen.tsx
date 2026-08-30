@@ -13,6 +13,7 @@ import {
   Linking,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { useLiveData } from '../hooks/useLiveData';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -66,23 +67,6 @@ const STATUS_BADGE: Record<string, any> = {
   rejected: 'error',
 };
 
-const STAGE_LABELS: Record<string, string> = {
-  download: 'Download',
-  mapping: 'Mapeando (VLM + ASR)',
-  content_planning: 'Planejando conteúdo',
-  editorial_planning: 'Planejamento editorial',
-  creative_engine: 'Motor criativo',
-  script: 'Escrevendo roteiro',
-  script_review: 'Revisando roteiro',
-  tts: 'Sintetizando voz',
-  gameplay_selection: 'Selecionando cenas',
-  render: 'Renderizando vídeo',
-  metadata_generation: 'Gerando metadados',
-  youtube_upload: 'Enviando ao YouTube',
-  output: 'Finalizando',
-  done: 'Concluído',
-};
-
 const AVAILABILITY_LABELS: Record<string, string> = {
   abundant: 'Bastante material',
   partial: 'Material parcial',
@@ -102,6 +86,7 @@ const AVAILABILITY_COLORS: Record<string, any> = {
 // ── Main Screen ──────────────────────────────────────────────────────────────
 
 export function IdeasScreen() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [filterType, setFilterType] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<string>('fresh');
@@ -603,13 +588,13 @@ export function IdeasScreen() {
                             <Badge label={TYPE_LABELS[currentJob.ki_item_type] || currentJob.ki_item_type} variant={TYPE_BADGE[currentJob.ki_item_type] || 'default'} />
                           )}
                           <Text style={styles.processingStage}>
-                            {STAGE_LABELS[currentJob.stage] || currentJob.stage_label || currentJob.stage}
+                            {t(`stages:${currentJob.stage}`, currentJob.stage_label || currentJob.stage) as string}
                           </Text>
                         </View>
                       </>
                     ) : (
                       <Text style={styles.processingItem}>
-                        {STAGE_LABELS[currentJob.stage] || currentJob.stage_label || 'Processando...'}
+                        {t(`stages:${currentJob.stage}`, currentJob.stage_label || 'Processando...') as string}
                       </Text>
                     )}
                   </View>

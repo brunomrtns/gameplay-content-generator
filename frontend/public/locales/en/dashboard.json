@@ -1,0 +1,33 @@
+{
+  "title": "Dashboard",
+  "subtitle": "Overview of your video generation operation",
+  "stats": {
+    "gameplays": "Gameplays",
+    "jobs": "Jobs",
+    "videos": "Videos",
+    "workers": "Workers"
+  },
+  "workerStatus": {
+    "title": "Worker Status",
+    "online": "Online",
+    "busy": "Busy",
+    "offline": "Offline",
+    "currentActivity": "Current activity",
+    "lastHeartbeat": "Last heartbeat",
+    "noWorkers": "No workers registered"
+  },
+  "youtube": {
+    "connected": "YouTube connected",
+    "notConnected": "YouTube not connected",
+    "connect": "Connect YouTube",
+    "disconnect": "Disconnect"
+  },
+  "automation": {
+    "active": "Automation active",
+    "inactive": "Automation inactive",
+    "configure": "Configure automation"
+  },
+  "recentJobs": "Recent jobs",
+  "recentVideos": "Recent videos",
+  "viewAll": "View all"
+}

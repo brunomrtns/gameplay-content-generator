@@ -567,6 +567,7 @@ function ChannelTab() {
     narrative_style: '',
     content_goals: '',
     special_rules: '',
+    target_language: 'pt-BR',
   });
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -586,6 +587,7 @@ function ChannelTab() {
         narrative_style: profile.narrative_style || '',
         content_goals: profile.content_goals || '',
         special_rules: profile.special_rules || '',
+        target_language: profile.target_language || 'pt-BR',
       });
       setLoaded(true);
     }
@@ -613,6 +615,37 @@ function ChannelTab() {
           <View>
             <Text style={styles.label}>Descrição do canal</Text>
             <TextInput style={styles.textArea} value={form.channel_description} onChangeText={(v) => setForm({ ...form, channel_description: v })} placeholder="Ex: Meu canal é focado em análises de partidas competitivas..." placeholderTextColor={colors.textMuted} multiline numberOfLines={3} />
+          </View>
+          <View>
+            <Text style={styles.label}>Idioma do conteúdo</Text>
+            <View style={styles.langRow}>
+              {[
+                { value: 'pt-BR', label: 'Português' },
+                { value: 'en-US', label: 'English' },
+                { value: 'zh-CN', label: '简体中文' },
+                { value: 'zh-TW', label: '繁體中文' },
+                { value: 'zh', label: '普通话' },
+              ].map((lang) => (
+                <TouchableOpacity
+                  key={lang.value}
+                  style={[
+                    styles.langButton,
+                    form.target_language === lang.value && styles.langButtonActive,
+                  ]}
+                  onPress={() => setForm({ ...form, target_language: lang.value })}
+                >
+                  <Text
+                    style={[
+                      styles.langButtonText,
+                      form.target_language === lang.value && styles.langButtonTextActive,
+                    ]}
+                  >
+                    {lang.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.hint}>Idioma em que os roteiros, narração, legendas e metadados serão gerados</Text>
           </View>
           <View>
             <Text style={styles.label}>Nicho</Text>
@@ -763,4 +796,27 @@ const styles = StyleSheet.create({
   eventDesc: { fontSize: fontSize.xs, color: colors.textSecondary, lineHeight: 16 },
   eventScore: { fontSize: 9, color: colors.accent, fontWeight: fontWeight.bold },
   eventMore: { fontSize: 10, color: colors.textMuted, textAlign: 'center', paddingVertical: spacing.xs },
+  // Language selector
+  langRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  langButton: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bg,
+  },
+  langButtonActive: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accent,
+  },
+  langButtonText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    fontWeight: fontWeight.medium,
+  },
+  langButtonTextActive: {
+    color: '#fff',
+    fontWeight: fontWeight.semibold,
+  },
 });

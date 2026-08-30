@@ -54,7 +54,7 @@ class MappingMixin:
         else:
             log.info("Ollama not available — will try L1/L2 only (no VLM)")
 
-        self.send_status("busy", f"Identificando jogo — {source['filename']}")
+        self.send_status("busy", f"Identificando jogo — {source['filename']}", activity_key="worker.activity.identifying_game")
         log.info(f"Running game resolution (L1→L2→L3) for source #{source_id}")
 
         try:
@@ -278,7 +278,7 @@ class MappingMixin:
 
         # Stage 3: Run GameplayAnalyzer locally (or reuse existing analysis)
         self.update_job_status(job_id, status="running", stage="mapping", progress=0.15)
-        self.send_status("busy", f"Mapeando {source['filename']}", job_id=job_id)
+        self.send_status("busy", f"Mapeando {source['filename']}", job_id=job_id, activity_key="worker.activity.mapping_gameplay")
 
         from gpcg.application.gameplay_analyzer import GameplayAnalyzer
         from gpcg.domain.gameplay_events import AnalysisConfig, EventTimeline

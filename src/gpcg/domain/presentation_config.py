@@ -74,6 +74,13 @@ class PresentationConfig:
     auto_min_interesting: float = 0.4
     auto_min_confidence: float = 0.5
 
+    # ── Font override (per-language) ───────────────────────────────────────
+    # Path to a .ttf/.otf font file for the drawtext overlay (thumbnail +
+    # opening). Empty = use the renderer's default font (DejaVuSans-Bold).
+    # Useful for languages whose glyphs aren't covered by the default font
+    # (e.g. CJK, Arabic, Cyrillic).
+    font_file: str = ""
+
     def to_dict(self) -> dict:
         """Serialize to a plain dict for JSON storage."""
         return asdict(self)

@@ -261,6 +261,21 @@ def init_db() -> None:
     # older databases may still have the original UNIQUE(file_hash) which
     # blocks re-uploading a file after soft-deleting the previous source.
     _drop_old_file_hash_unique(engine)
+    # ── Multilingual: language columns ─────────────────────────────────────
+    # User.ui_language — UI language (separate from content language)
+    _ensure_column(engine, "users", "ui_language", "VARCHAR(10) DEFAULT 'pt-BR'")
+    # ChannelProfile.target_language — content language for generated videos
+    _ensure_column(engine, "channel_profiles", "target_language", "VARCHAR(10) DEFAULT 'pt-BR'")
+    # ChannelProfile.prompt_version — for A/B testing and checkpoint compat
+    _ensure_column(engine, "channel_profiles", "prompt_version", "VARCHAR(20) DEFAULT 'v1'")
+    # ContentPlan.target_language — frozen at plan creation
+    _ensure_column(engine, "content_plans", "target_language", "VARCHAR(10) DEFAULT 'pt-BR'")
+    # Script.language — frozen at script creation
+    _ensure_column(engine, "scripts", "language", "VARCHAR(10) DEFAULT 'pt-BR'")
+    # Video.language — frozen at video creation
+    _ensure_column(engine, "videos", "language", "VARCHAR(10) DEFAULT 'pt-BR'")
+    # KnowledgeChunk.language — for language-aware RAG retrieval
+    _ensure_column(engine, "knowledge_chunks", "language", "VARCHAR(10) DEFAULT 'pt-BR'")
     # Seed admin user if not exists (linked to BI Identity by email)
     _seed_admin_user()
 

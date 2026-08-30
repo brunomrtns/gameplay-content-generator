@@ -678,6 +678,7 @@ function ChannelProfileSection() {
     narrative_style: "",
     content_goals: "",
     special_rules: "",
+    target_language: "pt-BR",
   });
 
   useEffect(() => {
@@ -692,6 +693,7 @@ function ChannelProfileSection() {
           narrative_style: p.narrative_style || "",
           content_goals: p.content_goals || "",
           special_rules: p.special_rules || "",
+          target_language: p.target_language || "pt-BR",
         });
       })
       .catch((err) => toast.error(err.message))
@@ -743,6 +745,26 @@ function ChannelProfileSection() {
             rows={3}
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
           />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-medium text-text-secondary">
+            Idioma do conteúdo
+          </label>
+          <select
+            value={form.target_language}
+            onChange={(e) => setForm({ ...form, target_language: e.target.value })}
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+          >
+            <option value="pt-BR">Português (Brasil)</option>
+            <option value="en-US">English (US)</option>
+            <option value="zh-CN">简体中文 (Simplified Chinese)</option>
+            <option value="zh-TW">繁體中文 (Traditional Chinese)</option>
+            <option value="zh">普通话 (Mandarin)</option>
+          </select>
+          <p className="mt-1 text-xs text-text-muted">
+            Idioma em que os roteiros, narração, legendas e metadados serão gerados
+          </p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">

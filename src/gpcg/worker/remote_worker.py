@@ -219,20 +219,28 @@ class RemoteWorker(
         status: str = "online",
         activity: str = "",
         job_id: Optional[int] = None,
+        activity_key: str = "",
     ) -> None:
-        """Send a status update to the VPS."""
+        """Send a status update to the VPS.
+
+        ``activity`` is a human-readable string (PT-BR fallback for backward compat).
+        ``activity_key`` is a stable i18n key that the frontend can localize.
+        """
         self._current_activity = activity or self._current_activity
+        payload = {
+            "status": status,
+            "current_activity": self._current_activity,
+            "current_job_id": job_id,
+            "gpu_usage": _get_gpu_usage(),
+            "cpu_usage": _get_cpu_usage(),
+            "ram_usage": _get_ram_usage(),
+        }
+        if activity_key:
+            payload["activity_key"] = activity_key
         try:
             self.client.post(
                 f"/api/workers/{self.config.worker_id}/status",
-                json={
-                    "status": status,
-                    "current_activity": self._current_activity,
-                    "current_job_id": job_id,
-                    "gpu_usage": _get_gpu_usage(),
-                    "cpu_usage": _get_cpu_usage(),
-                    "ram_usage": _get_ram_usage(),
-                },
+                json=payload,
             )
         except httpx.HTTPError as e:
             log.warning(f"Status update failed: {e}")
@@ -453,7 +461,7 @@ class RemoteWorker(
 
                 # Download
                 try:
-                    self.send_status("busy", f"Sincronizando {filename}")
+                    self.send_status("busy", f"Sincronizando {filename}", activity_key="worker.activity.synchronizing_file")
                     downloaded = self.download_gameplay(gp)
                     self.confirm_download(gp, downloaded)
                     log.info(f"Gameplay sync: downloaded {filename} ({gp.get('file_size', 0)} bytes)")

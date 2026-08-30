@@ -102,7 +102,8 @@ class VideoGenerateAdapter:
     # ── TTS ─────────────────────────────────────────────────────────────────
 
     def synthesize_tts(
-        self, text: str, output_wav: Path, *, voice_path: Optional[str] = None
+        self, text: str, output_wav: Path, *, voice_path: Optional[str] = None,
+        language: str = "pt",
     ) -> TTSResult:
         """Generate TTS narration using video-generate's mature TTS pipeline.
 
@@ -118,6 +119,8 @@ class VideoGenerateAdapter:
             voice_path: Optional absolute path to a voice reference WAV/MP3.
                 If provided, overrides the config default (GPCG_TTS_VOICE).
                 Used for per-job voice selection (uploaded voices).
+            language: TTS language code (e.g. "pt", "en", "es"). Defaults to "pt".
+                Passed through to video-generate's synthesize() function.
         """
         output_wav = Path(output_wav)
         output_wav.parent.mkdir(parents=True, exist_ok=True)
@@ -147,7 +150,7 @@ class VideoGenerateAdapter:
 
             text = {json.dumps(text)}
             voice = {voice_arg!r}
-            language = {self.tts_language!r}
+            language = {language!r}
             out_path = {str(output_wav)!r}
 
             # Use ai_media_core's chunking (same logic video-generate uses)

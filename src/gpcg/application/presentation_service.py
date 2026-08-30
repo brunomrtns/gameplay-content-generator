@@ -65,6 +65,8 @@ class PresentationService:
         config: PresentationConfig,
         scene_dir: Path,
         video_format: str,
+        *,
+        language: str = "pt-BR",
     ) -> PresentationResult:
         """Apply the Presentation Layer.
 
@@ -80,6 +82,8 @@ class PresentationService:
             config: Presentation config.
             scene_dir: The temp scene directory (where scene_NNN.mp4 go).
             video_format: "9:16", "16:9", etc.
+            language: BCP-47 language tag (controls LLM title shortening +
+                stopword selection for thumbnail keyword scoring).
 
         Returns:
             PresentationResult with thumbnail/opening paths.
@@ -102,6 +106,7 @@ class PresentationService:
                     gameplay_source_path=gameplay_source_path,
                     config=config,
                     output_dir=work_dir,
+                    language=language,
                 )
 
             # ── 2. Compose thumbnail with text ──────────────────────────────
@@ -119,6 +124,7 @@ class PresentationService:
                     config=config,
                     output_path=thumb_final,
                     video_format=video_format,
+                    language=language,
                 )
                 if composed:
                     result.thumbnail_path = str(composed)
@@ -129,6 +135,7 @@ class PresentationService:
                 opening_image = self._resolve_opening_image(
                     thumb_result, config, work_dir, session,
                     gameplay_source_id, gameplay_source_path, topic,
+                    language=language,
                 )
 
                 if opening_image:
@@ -146,6 +153,7 @@ class PresentationService:
                         config=config,
                         output_path=scene_000,
                         video_format=video_format,
+                        language=language,
                     )
                     if rendered:
                         result.opening_scene_path = str(rendered)
@@ -224,6 +232,8 @@ class PresentationService:
         gameplay_source_id: Optional[int],
         gameplay_source_path: str,
         topic: str,
+        *,
+        language: str = "pt-BR",
     ) -> Optional[Path]:
         """Resolve the image to use for the opening."""
         if config.opening_image_mode == "same_as_thumbnail":
@@ -251,6 +261,7 @@ class PresentationService:
                 gameplay_source_path=gameplay_source_path,
                 config=opening_config,
                 output_dir=work_dir / "opening",
+                language=language,
             )
             return result.image_path if result else None
 

@@ -1,0 +1,35 @@
+{
+  "title": "Jobs",
+  "subtitle": "Processing queue — mappings and video generation",
+  "filter": {
+    "all": "All",
+    "queued": "Queued",
+    "running": "Running",
+    "completed": "Completed",
+    "failed": "Failed",
+    "retrying": "Retrying",
+    "cancelled": "Cancelled"
+  },
+  "empty": {
+    "title": "No jobs",
+    "description": "Request mappings in the Content tab or start automation to generate videos."
+  },
+  "status": {
+    "queued": "Queued",
+    "running": "Running",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "retrying": "Retrying"
+  },
+  "type": {
+    "mapping": "Mapping",
+    "generation": "Generation",
+    "kids_idea": "Kids Idea",
+    "kids_media": "Kids Media",
+    "knowledge": "Knowledge",
+    "enrichment": "Enrichment",
+    "content_collect": "Content Collection",
+    "cleanup": "Cleanup"
+  }
+}

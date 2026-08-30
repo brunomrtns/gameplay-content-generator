@@ -71,6 +71,57 @@ _DEFAULT_EVENT_TYPE_WEIGHT = 0.6
 # Possible_ prefix events get a small penalty (ambiguous)
 _POSSIBLE_PENALTY = 0.85
 
+# ── Language-aware stopword sets ──────────────────────────────────────────────
+# Used by _extract_keywords to filter out common words from the topic/title.
+# pt-BR keeps the original PT + EN set (topics may mix PT/EN game terms).
+# en uses English-only stopwords. Other languages get a minimal set so
+# keywords aren't over-filtered (better to keep a few stop words than drop
+# meaningful keywords in a language we don't have a list for).
+_STOPWORDS_PT_BR = {
+    # Portuguese
+    "o", "a", "os", "as", "de", "do", "da", "dos", "das", "e", "ou",
+    "em", "no", "na", "nos", "nas", "por", "para", "com", "sem",
+    "que", "se", "como", "mais", "menos", "muito", "pouco",
+    "um", "uma", "uns", "umas", "ao", "aos", "pelo", "pela",
+    # English (topics may mix PT/EN game terms)
+    "the", "a", "an", "in", "on", "at", "of", "to", "for",
+    "and", "or", "with", "without", "that", "this", "is", "are",
+    "was", "were", "be", "been", "being", "have", "has", "had",
+}
+
+_STOPWORDS_EN = {
+    "the", "a", "an", "in", "on", "at", "of", "to", "for",
+    "and", "or", "with", "without", "that", "this", "is", "are",
+    "was", "were", "be", "been", "being", "have", "has", "had",
+    "i", "you", "he", "she", "it", "we", "they", "my", "your",
+    "his", "her", "its", "our", "their", "but", "not", "so", "if",
+}
+
+# Minimal fallback for languages without a dedicated stopword list.
+# Empty set = no filtering (keywords won't be dropped), which is safer
+# than filtering with the wrong language's stopwords.
+_STOPWORDS_OTHER: set[str] = set()
+
+# CJK languages don't use space-separated words, so stopword filtering
+# based on word splitting doesn't apply. Use empty set (no filtering)
+# — the keyword extraction regex \w+ will still match CJK characters.
+_STOPWORDS_CJK: set[str] = set()
+
+# Map BCP-47 base language → stopword set
+_STOPWORD_SETS = {
+    "pt": _STOPWORDS_PT_BR,
+    "en": _STOPWORDS_EN,
+    "zh": _STOPWORDS_CJK,
+    "ja": _STOPWORDS_CJK,
+    "ko": _STOPWORDS_CJK,
+}
+
+
+def _stopwords_for_language(language: str) -> set[str]:
+    """Return the stopword set for a BCP-47 tag (e.g. 'pt-BR' → PT set)."""
+    base = language.split("-")[0].lower()
+    return _STOPWORD_SETS.get(base, _STOPWORDS_OTHER)
+
 
 @dataclass
 class ThumbnailResult:
@@ -113,6 +164,8 @@ class ThumbnailSelector:
         gameplay_source_path: str,
         config: PresentationConfig,
         output_dir: Path,
+        *,
+        language: str = "pt-BR",
     ) -> Optional[ThumbnailResult]:
         """Select a thumbnail image.
 
@@ -123,6 +176,8 @@ class ThumbnailSelector:
             gameplay_source_path: Path to the gameplay video file.
             config: Presentation config.
             output_dir: Where to save the extracted frame.
+            language: BCP-47 language tag. Controls which stopword set is
+                used for keyword extraction in the embedding-fallback path.
 
         Returns:
             ThumbnailResult, or None if selection failed (caller falls back
@@ -139,7 +194,8 @@ class ThumbnailSelector:
             return None
 
         return self._select_auto(
-            session, topic, gameplay_source_id, gameplay_source_path, config, output_dir
+            session, topic, gameplay_source_id, gameplay_source_path, config,
+            output_dir, language=language,
         )
 
     def _select_imported(
@@ -167,6 +223,8 @@ class ThumbnailSelector:
         source_path: str,
         config: PresentationConfig,
         output_dir: Path,
+        *,
+        language: str = "pt-BR",
     ) -> Optional[ThumbnailResult]:
         """Auto-select the best frame using the GameplayEvent index.
 
@@ -206,7 +264,7 @@ class ThumbnailSelector:
 
         # Fallback to keyword matching if no embeddings available
         if semantic_scores is None:
-            topic_keywords = self._extract_keywords(topic)
+            topic_keywords = self._extract_keywords(topic, language=language)
             semantic_scores = {}
             for event in events:
                 semantic_scores[event.id] = self._keyword_score(event, topic_keywords)
@@ -571,23 +629,16 @@ class ThumbnailSelector:
 
         return overlap
 
-    def _extract_keywords(self, text: str) -> set[str]:
+    def _extract_keywords(self, text: str, *, language: str = "pt-BR") -> set[str]:
         """Extract meaningful keywords from a topic/title string.
 
-        Filters out common Portuguese/English stop words and short tokens.
+        Filters out common stop words (selected by language) and short tokens.
+        For pt-BR the original PT + EN stopword set is used (topics may mix
+        PT/EN game terms). For en, English-only stopwords. For other languages
+        a minimal/empty set is used so keywords aren't over-filtered.
         """
         if not text:
             return set()
-        stop_words = {
-            # Portuguese
-            "o", "a", "os", "as", "de", "do", "da", "dos", "das", "e", "ou",
-            "em", "no", "na", "nos", "nas", "por", "para", "com", "sem",
-            "que", "se", "como", "mais", "menos", "muito", "pouco",
-            "um", "uma", "uns", "umas", "ao", "aos", "pelo", "pela",
-            # English
-            "the", "a", "an", "in", "on", "at", "of", "to", "for",
-            "and", "or", "with", "without", "that", "this", "is", "are",
-            "was", "were", "be", "been", "being", "have", "has", "had",
-        }
+        stop_words = _stopwords_for_language(language)
         words = set(re.findall(r"\w+", text.lower()))
         return {w for w in words if len(w) > 2 and w not in stop_words}

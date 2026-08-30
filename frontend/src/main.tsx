@@ -1,6 +1,7 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider, Navigate, Outlet } from "react-router-dom";
+import "@/i18n"; // i18n initialization — must run before App
 import { Layout } from "@/components/layout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LoginPage } from "@/pages/login";

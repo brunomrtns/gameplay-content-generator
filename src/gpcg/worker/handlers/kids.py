@@ -29,7 +29,7 @@ class KidsMixin:
         artifacts = job.get("artifacts") or {}
 
         self.update_job_status(job_id, status="running", stage="discovery", progress=0.1)
-        self.send_status("busy", "Descobrindo ideias Kids", job_id=job_id)
+        self.send_status("busy", "Descobrindo ideias Kids", job_id=job_id, activity_key="worker.activity.kids_discovering_ideas")
 
         # Fetch channel profile from VPS (worker-auth endpoint)
         try:
@@ -271,7 +271,7 @@ class KidsMixin:
             return
 
         self.update_job_status(job_id, status="running", stage="scoring", progress=0.1)
-        self.send_status("busy", f"Avaliando ideia Kids #{idea_id}", job_id=job_id)
+        self.send_status("busy", f"Avaliando ideia Kids #{idea_id}", job_id=job_id, activity_key="worker.activity.kids_evaluating_idea")
 
         # Fetch the idea from VPS (worker-auth endpoint)
         try:
@@ -442,7 +442,7 @@ class KidsMixin:
         file_hash = artifacts.get("file_hash", "")
 
         self.update_job_status(job_id, status="running", stage="download", progress=0.1)
-        self.send_status("busy", f"Processando mídia Kids: {filename}", job_id=job_id)
+        self.send_status("busy", f"Processando mídia Kids: {filename}", job_id=job_id, activity_key="worker.activity.kids_processing_media")
 
         # Download the video from VPS
         kids_dir = self.storage_root / "kids_assets"
@@ -542,7 +542,7 @@ class KidsMixin:
         # analyzer locally (GPU) to produce events that index the video
         # for semantic selection by KidsMediaRetriever.
         self.update_job_status(job_id, status="running", stage="mapping", progress=0.6)
-        self.send_status("busy", f"Mapeando mídia Kids: {filename}", job_id=job_id)
+        self.send_status("busy", f"Mapeando mídia Kids: {filename}", job_id=job_id, activity_key="worker.activity.kids_mapping_media")
 
         # Checkpoint: reuse cached analysis if available
         analysis_cache_path = self.storage_root / "mapped" / f"kids_asset_{asset_id}_analysis.json"

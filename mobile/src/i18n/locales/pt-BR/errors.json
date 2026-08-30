@@ -1,0 +1,22 @@
+{
+  "user_not_found": "Usuário não encontrado",
+  "cannot_delete_self": "Não é possível excluir a si mesmo",
+  "youtube_already_connected": "Canal do YouTube já conectado.",
+  "youtube_not_connected": "Canal do YouTube não conectado.",
+  "automation_not_found": "Automação não encontrada",
+  "gameplay_not_found": "Gameplay não encontrada",
+  "job_not_found": "Job não encontrado",
+  "invalid_language": "Idioma inválido",
+  "unsupported_language": "Idioma não suportado pelo worker",
+  "network_error": "Erro de conexão",
+  "unauthorized": "Não autorizado",
+  "forbidden": "Acesso negado",
+  "not_found": "Não encontrado",
+  "server_error": "Erro interno do servidor",
+  "timeout": "Tempo limite excedido",
+  "upload_failed": "Falha no upload",
+  "download_failed": "Falha no download",
+  "render_failed": "Falha na renderização",
+  "tts_failed": "Falha na síntese de voz",
+  "mapping_failed": "Falha no mapeamento"
+}

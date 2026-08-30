@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { useLiveData } from '../hooks/useLiveData';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -18,60 +19,27 @@ import { colors } from '../theme/colors';
 import { fontSize, fontWeight, radius, spacing } from '../theme/spacing';
 import { fmtDate } from '../utils/format';
 
+const JOB_STATUS_VARIANT: Record<string, any> = {
+  queued: 'info',
+  running: 'info',
+  completed: 'success',
+  failed: 'error',
+  retrying: 'warning',
+  cancelled: 'default',
+};
+
 const FILTERS = [
-  { value: '', label: 'Todos' },
-  { value: 'queued', label: 'Na fila' },
-  { value: 'running', label: 'Executando' },
-  { value: 'completed', label: 'Concluídos' },
-  { value: 'failed', label: 'Falhas' },
-  { value: 'retrying', label: 'Retentando' },
-  { value: 'cancelled', label: 'Cancelados' },
+  { value: '', labelKey: 'jobs:filter.all' },
+  { value: 'queued', labelKey: 'jobs:filter.queued' },
+  { value: 'running', labelKey: 'jobs:filter.running' },
+  { value: 'completed', labelKey: 'jobs:filter.completed' },
+  { value: 'failed', labelKey: 'jobs:filter.failed' },
+  { value: 'retrying', labelKey: 'jobs:filter.retrying' },
+  { value: 'cancelled', labelKey: 'jobs:filter.cancelled' },
 ];
 
-const JOB_TYPE_LABELS: Record<string, string> = {
-  mapping: 'Mapeamento',
-  generate_short: 'Gerar Short',
-  curiosity_short: 'Curiosidade',
-  kids_generate: 'Vídeo Kids',
-};
-
-const STAGE_LABELS: Record<string, string> = {
-  download: 'Download',
-  confirm_download: 'Confirmando download',
-  mapping: 'Mapeando (VLM + ASR)',
-  content_planning: 'Planejando conteúdo',
-  story_finding: 'Encontrando história',
-  editorial_planning: 'Planejamento editorial',
-  creative_engine: 'Motor criativo',
-  script: 'Escrevendo roteiro',
-  humanization: 'Humanizando roteiro',
-  script_review: 'Revisando roteiro',
-  tts: 'Sintetizando voz',
-  gameplay_selection: 'Selecionando cenas',
-  visual_selection: 'Selecionando imagens',
-  music_selection: 'Selecionando música',
-  render_plan: 'Planejando renderização',
-  render: 'Renderizando vídeo',
-  qa: 'Controle de qualidade',
-  metadata_generation: 'Gerando metadados',
-  youtube_upload: 'Enviando ao YouTube',
-  output: 'Finalizando',
-  done: 'Concluído',
-  presentation: 'Apresentação',
-  upload: 'Upload',
-  probe: 'Análise',
-};
-
-const JOB_STATUS_CONFIG: Record<string, { label: string; variant: any }> = {
-  queued: { label: 'Na fila', variant: 'info' },
-  running: { label: 'Executando', variant: 'info' },
-  completed: { label: 'Concluído', variant: 'success' },
-  failed: { label: 'Falhou', variant: 'error' },
-  retrying: { label: 'Tentando novamente', variant: 'warning' },
-  cancelled: { label: 'Cancelado', variant: 'default' },
-};
-
 export function JobsScreen({ navigation }: { navigation?: any }) {
+  const { t } = useTranslation();
   const [filter, setFilter] = useState('');
 
   const { data: jobs, refetch, isRefetching, isLoading } = useLiveData(
@@ -99,8 +67,8 @@ export function JobsScreen({ navigation }: { navigation?: any }) {
           </TouchableOpacity>
         )}
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>Jobs</Text>
-          <Text style={styles.headerSubtitle}>Fila de processamento</Text>
+          <Text style={styles.headerTitle}>{t('jobs:title')}</Text>
+          <Text style={styles.headerSubtitle}>{t('jobs:subtitle')}</Text>
         </View>
       </View>
 
@@ -114,7 +82,7 @@ export function JobsScreen({ navigation }: { navigation?: any }) {
               onPress={() => setFilter(f.value)}
               style={[styles.chip, filter === f.value && styles.chipActive]}
             >
-              <Text style={[styles.chipText, filter === f.value && styles.chipTextActive]}>{f.label}</Text>
+              <Text style={[styles.chipText, filter === f.value && styles.chipTextActive]}>{t(f.labelKey)}</Text>
               <View style={[styles.chipCount, filter === f.value && styles.chipCountActive]}>
                 <Text style={[styles.chipCountText, filter === f.value && styles.chipCountTextActive]}>{count}</Text>
               </View>
@@ -135,13 +103,13 @@ export function JobsScreen({ navigation }: { navigation?: any }) {
             </View>
           ) : (
             <Card>
-              <EmptyState title="Nenhum job" description="Não há jobs nesta categoria." />
+              <EmptyState title={t('jobs:empty.title')} description={t('jobs:empty.description')} />
             </Card>
           )
         }
         renderItem={({ item: job }) => {
-          const typeLabel = JOB_TYPE_LABELS[job.type] || job.type;
-          const stageLabel = STAGE_LABELS[job.stage] || job.stage || '—';
+          const typeLabel = t(`jobs:type.${job.type}`, job.type) as string;
+          const stageLabel = t(`stages:${job.stage}`, job.stage || '—') as string;
           const progress = job.progress != null ? Math.round(Math.min(job.progress * 100, 100)) : 0;
           const isRunning = job.status === 'running';
           return (
@@ -163,7 +131,7 @@ export function JobsScreen({ navigation }: { navigation?: any }) {
                     <Text style={styles.jobGame} numberOfLines={1}>{job.game_name}</Text>
                   )}
                 </View>
-                <Badge label={(JOB_STATUS_CONFIG[job.status] || { label: job.status }).label} variant={(JOB_STATUS_CONFIG[job.status] || { variant: 'default' }).variant} />
+                <Badge label={t(`jobs:status.${job.status}`, job.status) as string} variant={JOB_STATUS_VARIANT[job.status] || 'default'} />
               </View>
 
               {isRunning && (

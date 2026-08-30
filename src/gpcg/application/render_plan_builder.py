@@ -58,6 +58,7 @@ class RenderPlan:
     video_profile: str
     video_format: str
     subtitle_config: Optional[SubtitleConfig]
+    language: str = "pt-BR"
     request_data: dict = field(default_factory=dict)
 
     def cleanup(self) -> None:
@@ -84,6 +85,7 @@ class RenderPlanBuilder:
         *,
         video_format: str = "",
         subtitle_config: Optional[SubtitleConfig] = None,
+        language: str = "pt-BR",
     ) -> RenderPlan:
         """Assemble the render plan. Extracts clips to scene_NNN.mp4 files.
 
@@ -267,6 +269,7 @@ class RenderPlanBuilder:
             "request_id": int(content_plan.id),
             "batch_id": batch_id,
             "video_profile": profile_name,
+            "language": language,
             # Custom profile dict — the adapter will register this in video-generate
             # before calling process_video_request
             "_gpcg_custom_profile": profile_dict,
@@ -286,6 +289,7 @@ class RenderPlanBuilder:
             video_profile=profile_name,
             video_format=fmt,
             subtitle_config=subtitle_config,
+            language=language,
             request_data=request_data,
         )
         log.info(

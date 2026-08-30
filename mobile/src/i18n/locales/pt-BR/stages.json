@@ -1,0 +1,22 @@
+{
+  "content_planning": "Planejando conteúdo",
+  "story_finding": "Encontrando história",
+  "editorial_planning": "Planejamento editorial",
+  "creative_engine": "Motor criativo",
+  "script": "Escrevendo roteiro",
+  "humanization": "Humanizando roteiro",
+  "script_review": "Revisando roteiro",
+  "tts": "Sintetizando voz",
+  "gameplay_selection": "Selecionando cenas",
+  "music_selection": "Selecionando música",
+  "render_plan": "Planejando renderização",
+  "render": "Renderizando vídeo",
+  "qa": "Controle de qualidade",
+  "output": "Finalizando",
+  "metadata_generation": "Gerando metadados",
+  "youtube_upload": "Enviando ao YouTube",
+  "presentation": "Apresentação",
+  "download": "Download",
+  "confirm_download": "Confirmando download",
+  "mapping": "Mapeando (VLM + ASR)"
+}

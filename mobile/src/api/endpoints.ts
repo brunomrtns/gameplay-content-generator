@@ -254,6 +254,8 @@ export interface ChannelProfile {
   description: string;
   domain: string;
   language: string;
+  target_language: string;
+  prompt_version: string;
   [key: string]: any;
 }
 
@@ -633,7 +635,7 @@ export const channelApi = {
   },
 
   async updateProfile(payload: Partial<ChannelProfile>): Promise<void> {
-    await client.patch('/channel/profile', payload);
+    await client.put('/channel/profile', payload);
   },
 };
 

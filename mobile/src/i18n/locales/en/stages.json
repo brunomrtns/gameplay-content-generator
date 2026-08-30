@@ -1,0 +1,22 @@
+{
+  "content_planning": "Planning content",
+  "story_finding": "Finding story",
+  "editorial_planning": "Editorial planning",
+  "creative_engine": "Creative engine",
+  "script": "Writing script",
+  "humanization": "Humanizing script",
+  "script_review": "Reviewing script",
+  "tts": "Synthesizing voice",
+  "gameplay_selection": "Selecting scenes",
+  "music_selection": "Selecting music",
+  "render_plan": "Planning render",
+  "render": "Rendering video",
+  "qa": "Quality control",
+  "output": "Finalizing",
+  "metadata_generation": "Generating metadata",
+  "youtube_upload": "Uploading to YouTube",
+  "presentation": "Presentation",
+  "download": "Download",
+  "confirm_download": "Confirming download",
+  "mapping": "Mapping (VLM + ASR)"
+}

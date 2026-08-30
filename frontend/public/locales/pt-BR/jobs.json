@@ -1,0 +1,35 @@
+{
+  "title": "Jobs",
+  "subtitle": "Fila de processamento — mapeamentos e geração de vídeos",
+  "filter": {
+    "all": "Todos",
+    "queued": "Na fila",
+    "running": "Executando",
+    "completed": "Concluídos",
+    "failed": "Falhas",
+    "retrying": "Retentando",
+    "cancelled": "Cancelados"
+  },
+  "empty": {
+    "title": "Nenhum job",
+    "description": "Solicite mapeamentos na aba Conteúdo ou inicie a automação para gerar vídeos."
+  },
+  "status": {
+    "queued": "Na fila",
+    "running": "Executando",
+    "completed": "Concluído",
+    "failed": "Falhou",
+    "cancelled": "Cancelado",
+    "retrying": "Tentando novamente"
+  },
+  "type": {
+    "mapping": "Mapeamento",
+    "generation": "Geração",
+    "kids_idea": "Ideia Kids",
+    "kids_media": "Mídia Kids",
+    "knowledge": "Conhecimento",
+    "enrichment": "Enriquecimento",
+    "content_collect": "Coleta de Conteúdo",
+    "cleanup": "Limpeza"
+  }
+}

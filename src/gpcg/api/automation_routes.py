@@ -24,6 +24,7 @@ from pathlib import Path
 
 from gpcg.core.models import (
     Automation,
+    ChannelProfile,
     ContentPlan,
     Job,
     JobPriority,
@@ -81,6 +82,7 @@ _CONFIG_SNAPSHOT_FIELDS = (
     "creative_style", "voice",
     "max_clip_uses", "fallback_policy",
     "presentation",  # Presentation Layer config (thumbnail + opening)
+    "language",  # Multilingual: content language (frozen per job for deterministic retry)
 )
 
 
@@ -1120,6 +1122,19 @@ def create_job_from_decision(
         creative_style=config.get("creative_style") or settings.gpcg_creative_engine_style,
     )
     voice_name = config.get("voice", "")
+    # Auto-select voice based on channel profile language when none is set
+    if not voice_name:
+        try:
+            _profile = db.query(ChannelProfile).filter(
+                ChannelProfile.user_id == req.user_id
+            ).first()
+            if _profile and getattr(_profile, "target_language", None):
+                from gpcg.api.routes import _auto_select_voice_for_language
+                auto_voice = _auto_select_voice_for_language(_profile.target_language, settings)
+                if auto_voice:
+                    voice_name = auto_voice
+        except Exception:
+            pass
     voice_path = ""
     if voice_name:
         # REFACTORY_V2: look in user's isolated directory first, then shared root
@@ -1374,6 +1389,21 @@ def create_job_from_automation(user_id: int) -> int | None:
                 creative_style=cfg.get("creative_style") or "",
             )
             voice_name = cfg.get("voice", "")
+            # Auto-select voice based on channel profile language when none is set
+            if not voice_name:
+                from gpcg.config import get_settings
+                settings = get_settings()
+                try:
+                    _prof = db.query(ChannelProfile).filter(
+                        ChannelProfile.user_id == auto.user_id
+                    ).first()
+                    if _prof and getattr(_prof, "target_language", None):
+                        from gpcg.api.routes import _auto_select_voice_for_language
+                        auto_voice = _auto_select_voice_for_language(_prof.target_language, settings)
+                        if auto_voice:
+                            voice_name = auto_voice
+                except Exception:
+                    pass
             voice_path = ""
             if voice_name:
                 from gpcg.config import get_settings
@@ -1388,6 +1418,17 @@ def create_job_from_automation(user_id: int) -> int | None:
             # V3: Build a config snapshot for deterministic retry.
             config_snapshot = _build_config_snapshot(cfg)
 
+            # Multilingual: build GenerationContext from ChannelProfile and
+            # freeze it in job artifacts for deterministic retry/resume.
+            from gpcg.i18n.language_context import GenerationContext
+            _profile = session.query(ChannelProfile).filter(
+                ChannelProfile.user_id == auto.user_id
+            ).first()
+            _gen_ctx = GenerationContext.from_channel_profile(_profile)
+            # Inject language into config_snapshot so downstream services can read it
+            if "language" not in config_snapshot:
+                config_snapshot = {**config_snapshot, "language": _gen_ctx.language}
+
             # V3: Store gameplay preference + reuse override in job artifacts
             # so the generation pipeline can use them during gameplay selection.
             extra_artifacts = {
@@ -1398,6 +1439,7 @@ def create_job_from_automation(user_id: int) -> int | None:
                 "gameplay_source_id": gameplay_source_id,  # null=all sources, source_id=specific
                 "gameplay_selection_mode": "manual" if gameplay_preference else "auto",
                 "config_snapshot": config_snapshot,
+                "generation_context": _gen_ctx.to_dict(),
             }
 
             # If KI has a game_id, create a game-specific short;
@@ -1525,10 +1567,17 @@ def create_job_from_automation(user_id: int) -> int | None:
 
     # Create the job using the editorial decision
     from gpcg.application.generation_service import GenerationService
+    from gpcg.i18n.language_context import GenerationContext
 
     with session_scope() as session:
         auto = session.query(Automation).filter(Automation.user_id == user_id).first()
         config = auto.config or {} if auto else {}
+
+        # Multilingual: build GenerationContext from ChannelProfile
+        _profile = session.query(ChannelProfile).filter(
+            ChannelProfile.user_id == user_id
+        ).first()
+        _gen_ctx = GenerationContext.from_channel_profile(_profile)
 
         service = GenerationService(llm=get_llm())
 
@@ -1557,6 +1606,21 @@ def create_job_from_automation(user_id: int) -> int | None:
         )
         # Voice: resolve filename to path
         voice_name = config.get("voice", "")
+        # Auto-select voice based on channel profile language when none is set
+        if not voice_name:
+            from gpcg.config import get_settings
+            settings = get_settings()
+            try:
+                _prof = session.query(ChannelProfile).filter(
+                    ChannelProfile.user_id == user_id
+                ).first()
+                if _prof and getattr(_prof, "target_language", None):
+                    from gpcg.api.routes import _auto_select_voice_for_language
+                    auto_voice = _auto_select_voice_for_language(_prof.target_language, settings)
+                    if auto_voice:
+                        voice_name = auto_voice
+            except Exception:
+                pass
         voice_path = ""
         if voice_name:
             from gpcg.config import get_settings
@@ -1580,11 +1644,14 @@ def create_job_from_automation(user_id: int) -> int | None:
             # Store editorial decision in artifacts for the content planner
             with session_scope() as s2:
                 j = s2.get(Job, job.id)
+                _snap = _build_config_snapshot(config)
+                _snap = {**_snap, "language": _gen_ctx.language}
                 j.artifacts = {
                     **j.artifacts,
                     "editorial_decision": decision.to_dict(),
                     "fact_id": decision.fact_id,
-                    "config_snapshot": _build_config_snapshot(config),
+                    "config_snapshot": _snap,
+                    "generation_context": _gen_ctx.to_dict(),
                 }
                 s2.flush()
         elif decision.job_type == "curiosity_short" and decision.background_game_id:
@@ -1597,11 +1664,14 @@ def create_job_from_automation(user_id: int) -> int | None:
             # Store editorial decision + config snapshot
             with session_scope() as s2:
                 j = s2.get(Job, job.id)
+                _snap = _build_config_snapshot(config)
+                _snap = {**_snap, "language": _gen_ctx.language}
                 j.artifacts = {
                     **j.artifacts,
                     "editorial_decision": decision.to_dict(),
                     "fact_id": decision.fact_id,
-                    "config_snapshot": _build_config_snapshot(config),
+                    "config_snapshot": _snap,
+                    "generation_context": _gen_ctx.to_dict(),
                 }
                 s2.flush()
         else:

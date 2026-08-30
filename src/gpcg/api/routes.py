@@ -1052,9 +1052,22 @@ def create_generation_job(
     if subtitle_rounded_box is None:
         subtitle_rounded_box = auto_cfg.get("subtitle_rounded_box")
 
-    # Voice: explicit param > automation config > none
+    # Voice: explicit param > automation config > auto-select by language > none
     if not voice:
         voice = auto_cfg.get("voice", "")
+    # Auto-select voice based on channel profile language when none is set
+    if not voice:
+        try:
+            from gpcg.core.models import ChannelProfile
+            _profile = db.query(ChannelProfile).filter(
+                ChannelProfile.user_id == user.id
+            ).first()
+            if _profile and getattr(_profile, "target_language", None):
+                auto_voice = _auto_select_voice_for_language(_profile.target_language, settings)
+                if auto_voice:
+                    voice = auto_voice
+        except Exception:
+            pass
     voice_path = ""
     if voice:
         # REFACTORY_V2: look in user's isolated directory first, then shared root
@@ -1163,6 +1176,19 @@ def create_curiosity_job(
         subtitle_rounded_box = auto_cfg.get("subtitle_rounded_box")
     if not voice:
         voice = auto_cfg.get("voice", "")
+    # Auto-select voice based on channel profile language when none is set
+    if not voice:
+        try:
+            from gpcg.core.models import ChannelProfile
+            _profile = db.query(ChannelProfile).filter(
+                ChannelProfile.user_id == user.id
+            ).first()
+            if _profile and getattr(_profile, "target_language", None):
+                auto_voice = _auto_select_voice_for_language(_profile.target_language, settings)
+                if auto_voice:
+                    voice = auto_voice
+        except Exception:
+            pass
     voice_path = ""
     if voice:
         # REFACTORY_V2: look in user's isolated directory first, then shared root
@@ -1867,12 +1893,68 @@ def regenerate_video(
 # ── Voices (TTS reference audio) ──────────────────────────────────────────────
 
 
+# Built-in system voices with language mapping.
+# These are shared voices available to all users, shipped with GPCG.
+# Users can also upload their own voices via /voices/upload.
+_SYSTEM_VOICES: dict[str, dict] = {
+    "bruno.wav": {"language": "pt-BR", "display_name": "Bruno (Português)"},
+    "voice-en-native.mp3": {"language": "en-US", "display_name": "Native English Voice"},
+    "voice-zh-native.mp3": {"language": "zh-CN", "display_name": "Native Chinese Voice (普通话)"},
+}
+
+
+def _detect_voice_language(filename: str) -> str:
+    """Detect the best content language for a voice file based on its name."""
+    name = filename.lower()
+    if name in _SYSTEM_VOICES:
+        return _SYSTEM_VOICES[name]["language"]
+    # Heuristic: check for language hints in filename
+    if "en" in name or "english" in name or "ingles" in name:
+        return "en-US"
+    if "zh" in name or "chines" in name or "chinese" in name or "mandarin" in name:
+        return "zh-CN"
+    if "es" in name or "spanish" in name or "espanol" in name:
+        return "es-ES"
+    if "fr" in name or "french" in name or "frances" in name:
+        return "fr-FR"
+    return "pt-BR"  # default
+
+
+def _voice_display_name(filename: str) -> str:
+    """Return a human-friendly display name for a voice file."""
+    if filename in _SYSTEM_VOICES:
+        return _SYSTEM_VOICES[filename]["display_name"]
+    # For uploaded voices, use the filename without extension
+    return Path(filename).stem
+
+
+def _auto_select_voice_for_language(language: str, settings) -> str:
+    """Auto-select a system voice that matches the target language.
+
+    Returns the filename of the best matching voice, or empty string if
+    no match is found (caller falls back to default).
+    """
+    base = language.split("-")[0].lower()
+    for filename, meta in _SYSTEM_VOICES.items():
+        voice_lang = meta["language"]
+        voice_base = voice_lang.split("-")[0].lower()
+        if voice_base == base:
+            # Check if the file exists
+            voice_path = settings.voices_dir / filename
+            if voice_path.exists():
+                return filename
+    return ""
+
+
 @router.get("/voices")
 def list_voices(user: User = Depends(get_current_user)):
     """List available TTS voice reference files (uploaded via /voices/upload).
 
     REFACTORY_V2: voices are isolated per user under data/voices/{user_id}/.
     Falls back to the shared root for legacy voices (pre-refactory).
+
+    Built-in system voices are also listed with owner="system" and a
+    ``language`` field indicating which content language they're best for.
     """
     settings = get_settings()
     user_dir = settings.voices_dir / f"user_{user.id}"
@@ -1886,15 +1968,19 @@ def list_voices(user: User = Depends(get_current_user)):
                     "file_size": p.stat().st_size,
                     "file_size_kb": round(p.stat().st_size / 1024, 1),
                     "owner": "self",
+                    "language": _detect_voice_language(p.name),
+                    "display_name": _voice_display_name(p.name),
                 })
-    # Legacy shared voices (root directory) — read-only for backward compat
+    # Built-in system voices (shared root, available to all users)
     for p in sorted(settings.voices_dir.glob("*")):
         if p.is_file() and p.suffix.lower() in (".wav", ".mp3", ".ogg", ".flac", ".m4a"):
             voices.append({
                 "filename": p.name,
                 "file_size": p.stat().st_size,
                 "file_size_kb": round(p.stat().st_size / 1024, 1),
-                "owner": "shared",
+                "owner": "system",
+                "language": _detect_voice_language(p.name),
+                "display_name": _voice_display_name(p.name),
             })
     return voices
 

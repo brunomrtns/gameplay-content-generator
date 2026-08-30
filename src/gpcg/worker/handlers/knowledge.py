@@ -52,7 +52,7 @@ class KnowledgeMixin:
 
         # Stage 1: Download document from VPS
         self.update_job_status(job_id, status="running", stage="download", progress=0.05)
-        self.send_status("busy", f"Baixando documento {filename}", job_id=job_id)
+        self.send_status("busy", f"Baixando documento {filename}", job_id=job_id, activity_key="worker.activity.downloading_document")
         local_path = self.download_document(doc_info)
 
         # Stage 2: Confirm download (checksum verification)
@@ -64,7 +64,7 @@ class KnowledgeMixin:
 
         # Stage 3: Parse + chunk + embed locally
         self.update_job_status(job_id, status="running", stage="knowledge_indexing", progress=0.15)
-        self.send_status("busy", f"Indexando {filename}", job_id=job_id)
+        self.send_status("busy", f"Indexando {filename}", job_id=job_id, activity_key="worker.activity.indexing_document")
 
         from gpcg.infrastructure.document_parser import parse_document, DocumentParseError
         from gpcg.application.knowledge_service import chunk_text, generate_embedding

@@ -64,12 +64,23 @@ def _strip_accents(s: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
 
 
-def _normalize(text: str) -> str:
-    """Normalize for n-gram comparison: lowercase, no accents, no punctuation, single spaces."""
+def _normalize(text: str, *, language: str = "pt-BR") -> str:
+    """Normalize for n-gram comparison: lowercase, no accents, no punctuation, single spaces.
+
+    For Latin-script languages (pt, en, es, fr, de, it), strips accents and
+    keeps only a-z0-9. For CJK/Arabic/Cyrillic, preserves Unicode letters.
+    """
     s = text.lower()
-    s = _strip_accents(s)
-    # Replace any non-alphanumeric with space
-    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    # Only strip accents for Latin scripts (accent stripping is harmful for
+    # languages where diacritics change meaning, e.g. Arabic)
+    latin_scripts = {"pt-BR", "en-US", "es-ES", "es-MX", "fr-FR", "de-DE", "it-IT"}
+    if language in latin_scripts:
+        s = _strip_accents(s)
+        # Replace any non-alphanumeric with space
+        s = re.sub(r"[^a-z0-9\s]", " ", s)
+    else:
+        # For CJK/Arabic/Cyrillic: keep Unicode letters and numbers
+        s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
     # Collapse whitespace
     s = re.sub(r"\s+", " ", s).strip()
     return s
@@ -130,14 +141,14 @@ def _find_longest_common_sequences(
     return matches
 
 
-def compare_texts(script: str, source: str, n: int = 5) -> tuple[float, list[str]]:
+def compare_texts(script: str, source: str, n: int = 5, *, language: str = "pt-BR") -> tuple[float, list[str]]:
     """Compare script vs. a single source text.
 
     Returns (overlap_fraction, longest_matches).
     overlap_fraction = fraction of script n-grams that appear in the source.
     """
-    script_tokens = _tokenize(_normalize(script))
-    source_tokens = _tokenize(_normalize(source))
+    script_tokens = _tokenize(_normalize(script, language=language))
+    source_tokens = _tokenize(_normalize(source, language=language))
 
     if not script_tokens or not source_tokens:
         return 0.0, []
@@ -163,6 +174,8 @@ def check_originality(
     source_texts: Iterable[tuple[str, str]],
     n: int = 5,
     threshold: float = 70.0,
+    *,
+    language: str = "pt-BR",
 ) -> OriginalityReport:
     """Check script originality against multiple source texts.
 
@@ -171,6 +184,7 @@ def check_originality(
         source_texts: Iterable of (source_name, source_text) tuples.
         n: n-gram size (default 5 words).
         threshold: Minimum score to be considered original (default 70).
+        language: BCP-47 tag for language-aware normalization.
 
     Returns:
         OriginalityReport with the worst-case (highest) overlap across all sources.
@@ -193,7 +207,7 @@ def check_originality(
     for name, text in sources:
         if not text or not text.strip():
             continue
-        overlap, matches = compare_texts(script, text, n=n)
+        overlap, matches = compare_texts(script, text, n=n, language=language)
         if overlap > worst_overlap:
             worst_overlap = overlap
             worst_source = name

@@ -67,6 +67,7 @@ class GoogleIntegrationAdapter:
         privacy: Optional[str] = None,
         category_id: Optional[int] = None,
         thumbnail_path: Optional[str] = None,
+        language: str = "pt-BR",
     ) -> UploadResult:
         """Enqueue a YouTube upload and wait for completion.
 
@@ -106,6 +107,7 @@ class GoogleIntegrationAdapter:
             "tags": all_tags,
             "categoryId": cat,
             "privacy": priv,
+            "language": language,
         }
         # Presentation Layer: include thumbnail if available
         if thumbnail_path:

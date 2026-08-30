@@ -21,27 +21,8 @@ export function fmtBytes(bytes: number | undefined | null): string {
   return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
-export function fmtDate(dateStr: string | undefined | null): string {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return '—';
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  if (days === 0) {
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    if (hours === 0) {
-      const mins = Math.floor(diff / (1000 * 60));
-      if (mins < 1) return 'agora';
-      return `${mins}min`;
-    }
-    return `${hours}h`;
-  }
-  if (days === 1) return 'ontem';
-  if (days < 7) return `${days}d`;
-  if (days < 30) return `${Math.floor(days / 7)}sem`;
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-}
+// Locale-aware date formatting (date-fns) — re-exported from date.ts
+export { fmtDate, fmtRelative } from './date';
 
 export function fmtNumber(n: number | undefined | null): string {
   if (!n || n <= 0) return '0';

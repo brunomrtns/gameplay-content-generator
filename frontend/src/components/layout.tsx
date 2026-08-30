@@ -2,9 +2,10 @@ import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import {
   LayoutDashboard, FileText, Settings, Video, Shield, LogOut, ChevronDown,
-  Zap, ListChecks, Lightbulb, Baby, Film, HelpCircle,
+  Zap, ListChecks, Lightbulb, Baby, Film, HelpCircle, Globe, Check,
   type LucideIcon,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { ssoLogout } from "@/lib/api";
@@ -12,6 +13,7 @@ import { useDomain } from "@/lib/domain-config";
 import { Toaster } from "sonner";
 import { UploadIndicator } from "@/components/upload-indicator";
 import { OnboardingTour, useOnboardingTour } from "@/components/onboarding-tour";
+import i18n from "@/i18n";
 
 // Map icon names from domain config to lucide components
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -30,8 +32,26 @@ const ICON_MAP: Record<string, LucideIcon> = {
 export function Layout() {
   const { user, logout } = useAuth();
   const { config } = useDomain();
+  const { t, i18n: i18nInstance } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const tour = useOnboardingTour();
+
+  const currentLang = i18nInstance.language;
+
+  const handleLanguageChange = async (lng: string) => {
+    await i18n.changeLanguage(lng);
+    localStorage.setItem("gpcg-ui-language", lng);
+    // Persist to backend
+    try {
+      await fetch("/api/auth/me/ui-language", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ui_language: lng }),
+      });
+    } catch {
+      // Non-fatal — language already changed in UI
+    }
+  };
 
   const navItems = config.navigation.map((n) => ({
     ...n,
@@ -125,12 +145,43 @@ export function Layout() {
                       </span>
                     )}
                   </div>
+                  {/* Language toggle */}
+                  <div className="px-4 py-3 border-b border-border">
+                    <div className="flex items-center gap-2 mb-2 text-text-muted">
+                      <Globe className="h-4 w-4" />
+                      <span className="text-xs font-medium uppercase tracking-wide">{t("language")}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleLanguageChange("pt-BR")}
+                        className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-all ${
+                          currentLang === "pt-BR"
+                            ? "bg-accent/10 text-accent border border-accent/30"
+                            : "text-text-secondary hover:text-text hover:bg-surface-hover border border-transparent"
+                        }`}
+                      >
+                        {currentLang === "pt-BR" && <Check className="h-3 w-3" />}
+                        Português
+                      </button>
+                      <button
+                        onClick={() => handleLanguageChange("en")}
+                        className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-all ${
+                          currentLang === "en"
+                            ? "bg-accent/10 text-accent border border-accent/30"
+                            : "text-text-secondary hover:text-text hover:bg-surface-hover border border-transparent"
+                        }`}
+                      >
+                        {currentLang === "en" && <Check className="h-3 w-3" />}
+                        English
+                      </button>
+                    </div>
+                  </div>
                   <button
                     onClick={handleLogout}
                     className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-text-secondary hover:bg-surface-hover hover:text-red-400 transition-colors"
                   >
                     <LogOut className="h-4 w-4" />
-                    Sair
+                    {t("logout")}
                   </button>
                 </div>
               </>

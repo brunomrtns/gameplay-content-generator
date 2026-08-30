@@ -402,6 +402,9 @@ class GenerationService:
             cp_context_story = ""
             cp_context_editorial = ""
             cp_user_id = job.artifacts.get("user_id") or job.user_id
+            # Multilingual: build GenerationContext from job artifacts or profile
+            from gpcg.i18n.language_context import GenerationContext
+            gen_ctx = GenerationContext.from_artifacts(job.artifacts)
             if cp_user_id:
                 try:
                     from gpcg.core.models import ChannelProfile
@@ -409,17 +412,21 @@ class GenerationService:
                         ChannelProfile.user_id == cp_user_id
                     ).first()
                     if channel_profile is not None:
-                        channel_context = channel_profile.to_prompt_context()
-                        cp_context_planning = channel_profile.to_stage_context("content_planning")
-                        cp_context_story = channel_profile.to_stage_context("story_finding")
-                        cp_context_editorial = channel_profile.to_stage_context("editorial_planning")
+                        # Rebuild gen_ctx from profile if artifacts didn't have it
+                        if not job.artifacts.get("generation_context"):
+                            gen_ctx = GenerationContext.from_channel_profile(channel_profile)
+                            job.artifacts = {**job.artifacts, "generation_context": gen_ctx.to_dict()}
+                        channel_context = channel_profile.to_prompt_context(gen_ctx)
+                        cp_context_planning = channel_profile.to_stage_context("content_planning", gen_ctx)
+                        cp_context_story = channel_profile.to_stage_context("story_finding", gen_ctx)
+                        cp_context_editorial = channel_profile.to_stage_context("editorial_planning", gen_ctx)
                         job.artifacts = {**job.artifacts, "channel_context": channel_context}
                 except Exception as e:
                     log.warning(f"Could not load channel profile: {e}")
 
         # ── Stage: content_planning ─────────────────────────────────────────
         self._set_stage(job_id, JobStage.content_planning)
-        if self._has_checkpoint(job_id, "content_plan_id"):
+        if self._has_checkpoint(job_id, "content_plan_id", gen_ctx=gen_ctx):
             log.info(f"job #{job_id}: content_planning checkpoint found — skipping")
         with self._session_scope() as session:
             job = session.get(Job, job_id)
@@ -439,12 +446,14 @@ class GenerationService:
                             background_game_id=bg_game_id,
                             user_id=job.user_id,
                             channel_context=cp_context_planning,
+                            language_context=gen_ctx,
                         )
                     else:
                         plan = planner.plan_for_general_curiosity(
                             session, bg_game_id, fact_id=general_fact_id,
                             user_id=job.user_id,
                             channel_context=cp_context_planning,
+                            language_context=gen_ctx,
                         )
                     if plan is None:
                         raise GenerationError(
@@ -462,6 +471,7 @@ class GenerationService:
                             background_game_id=None,
                             user_id=job.user_id,
                             channel_context=cp_context_planning,
+                            language_context=gen_ctx,
                         )
                     else:
                         # Pass editorial fact_id if the editorial strategy picked one,
@@ -480,6 +490,7 @@ class GenerationService:
                             avoid_topics=recent_topics,
                             user_id=job.user_id,
                             channel_context=cp_context_planning,
+                            language_context=gen_ctx,
                         )
                     if plan is None:
                         raise GenerationError(
@@ -526,7 +537,7 @@ class GenerationService:
 
         # ── Stage: script ───────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.script)
-        if self._has_checkpoint(job_id, "script_id"):
+        if self._has_checkpoint(job_id, "script_id", gen_ctx=gen_ctx):
             log.info(f"job #{job_id}: script checkpoint found — skipping")
         else:
             with self._session_scope() as session:
@@ -550,7 +561,7 @@ class GenerationService:
                             ChannelProfile.user_id == user_id
                         ).first()
                         if profile:
-                            channel_context = profile.to_prompt_context()
+                            channel_context = profile.to_prompt_context(gen_ctx)
                     except Exception as e:
                         log.warning(f"Failed to load channel profile for user {user_id}: {e}")
 
@@ -563,6 +574,7 @@ class GenerationService:
                     channel_context=channel_context,
                     knowledge_context="",
                     user_id=job.user_id,
+                    language_context=gen_ctx,
                 )
                 if script is None:
                     raise GenerationError("script generation failed", JobStage.script.value)
@@ -583,7 +595,7 @@ class GenerationService:
 
         # ── Stage: tts ──────────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.tts)
-        if self._has_checkpoint(job_id, "narration_wav", file_check=True):
+        if self._has_checkpoint(job_id, "narration_wav", file_check=True, gen_ctx=gen_ctx):
             log.info(f"job #{job_id}: tts checkpoint found (narration.wav exists) — skipping")
         else:
             # Unload all Ollama models from VRAM before TTS — XTTS needs the full
@@ -664,6 +676,7 @@ class GenerationService:
                     tts_result = vg.synthesize_tts(
                         script.final, narration_wav,
                         voice_path=voice_path,
+                        language=gen_ctx.tts_language,
                     )
                 except VideoGenerateError as e:
                     raise GenerationError(f"TTS failed: {e}", JobStage.tts.value)
@@ -680,7 +693,7 @@ class GenerationService:
         narration_dur = self._get_artifact(job_id, "narration_duration")
         # Read scene_duration from job artifacts (or config default)
         scene_duration = self._get_artifact(job_id, "scene_duration") or self.settings.gpcg_scene_duration
-        _skip_selection = self._has_checkpoint(job_id, "selected_clips")
+        _skip_selection = self._has_checkpoint(job_id, "selected_clips", gen_ctx=gen_ctx)
         with self._session_scope() as session:
             job = session.get(Job, job_id)
 
@@ -856,7 +869,7 @@ class GenerationService:
         # The full metadata (description, tags) is also generated here.
         # Non-fatal: on failure, presentation falls back to topic.
         if self.settings.gpcg_metadata_generation_enabled:
-            self._run_metadata_generation(job_id)
+            self._run_metadata_generation(job_id, gen_ctx=gen_ctx)
 
         # ── Stage: presentation (optional — thumbnail + opening) ─────────────
         # Non-fatal: if the stage fails, the pipeline continues without
@@ -868,7 +881,8 @@ class GenerationService:
         if presentation_config.enabled:
             self._set_stage(job_id, JobStage.presentation)
             self._run_presentation_stage(
-                job_id, script_id, presentation_config, is_curiosity, bg_game_id
+                job_id, script_id, presentation_config, is_curiosity, bg_game_id,
+                gen_ctx=gen_ctx,
             )
 
         # ── Stage: music_selection ──────────────────────────────────────────
@@ -963,13 +977,14 @@ class GenerationService:
                 music_path=Path(music_path_str) if music_path_str else None,
                 video_format=video_format,
                 subtitle_config=subtitle_config,
+                language=gen_ctx.language,
             )
             job.artifacts = {**job.artifacts, "batch_id": rp.batch_id, "scene_dir": str(rp.scene_dir)}
             session.flush()
 
         # ── Stage: render ───────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.render)
-        if self._has_checkpoint(job_id, "video_path", file_check=True):
+        if self._has_checkpoint(job_id, "video_path", file_check=True, gen_ctx=gen_ctx):
             log.info(f"job #{job_id}: render checkpoint found (video file exists) — skipping")
         else:
             with self._session_scope() as session:
@@ -1013,7 +1028,10 @@ class GenerationService:
             job = session.get(Job, job_id)
             plan = session.get(ContentPlan, job.content_plan_id)
             script = session.get(Script, script_id)
-            qa_result = self.qa.evaluate(video_path, script, plan, plan.target_duration)
+            qa_result = self.qa.evaluate(
+                video_path, script, plan, plan.target_duration,
+                language_context=gen_ctx,
+            )
             # V2: extract knowledge_item_id from plan metadata (if content intelligence used)
             plan_meta = plan.metadata_json or {}
             ki_id = plan_meta.get("knowledge_item_id")
@@ -1026,6 +1044,7 @@ class GenerationService:
                 file_path=str(video_path),
                 status=VideoStatus.pending.value,
                 knowledge_item_id=ki_id,  # V2: link video to KnowledgeItem
+                language=gen_ctx.language if gen_ctx else "pt-BR",
             )
             session.add(video)
             session.flush()
@@ -1088,6 +1107,7 @@ class GenerationService:
         config: "PresentationConfig",
         is_curiosity: bool,
         bg_game_id: Optional[int],
+        gen_ctx=None,
     ) -> None:
         """Run the Presentation Layer stage (thumbnail + opening).
 
@@ -1128,6 +1148,7 @@ class GenerationService:
         # We render the opening to a temp path here, and it will be
         # processed as a regular clip (the builder extracts it).
         service = PresentationService()
+        language = getattr(gen_ctx, "language", "pt-BR") if gen_ctx else "pt-BR"
         with self._session_scope() as session:
             result = service.apply(
                 session=session,
@@ -1141,6 +1162,7 @@ class GenerationService:
                 config=config,
                 scene_dir=work_dir,
                 video_format=video_format,
+                language=language,
             )
 
         if not result.success:
@@ -1170,13 +1192,17 @@ class GenerationService:
             f"opening={'yes' if result.opening_scene_path else 'no'}"
         )
 
-    def _run_metadata_generation(self, job_id: int) -> None:
+    def _run_metadata_generation(self, job_id: int, gen_ctx=None) -> None:
         """Generate social metadata (title, description, tags) via LLM.
 
         Uses the MetadataGenerator to produce YouTube-optimized metadata from
         the content plan + script. Stores the result in job.artifacts so
         _run_youtube_upload can use it. Non-fatal: on failure, the upload
         stage falls back to simple topic/script-based metadata.
+
+        Args:
+            gen_ctx: Optional GenerationContext for language-aware metadata
+                (title/description generated in the target language).
         """
         script_id = self._get_artifact(job_id, "script_id")
         if not script_id:
@@ -1198,7 +1224,8 @@ class GenerationService:
             try:
                 model = self.settings.gpcg_metadata_llm_model or None
                 metadata = self.metadata_generator.generate(
-                    plan, script, game, model=model
+                    plan, script, game, model=model,
+                    language_context=gen_ctx,
                 )
                 job.artifacts = {
                     **job.artifacts,
@@ -1225,6 +1252,10 @@ class GenerationService:
         is already rendered and QA-passed). The error is logged and stored
         in artifacts["youtube_upload_error"].
         """
+        # Multilingual: reconstruct GenerationContext from job artifacts
+        from gpcg.i18n.language_context import GenerationContext
+        _artifacts = self._get_all_artifacts(job_id)
+        gen_ctx = GenerationContext.from_artifacts(_artifacts)
         video_path = self._get_artifact(job_id, "video_path")
         script_id = self._get_artifact(job_id, "script_id")
         if not video_path or not script_id:
@@ -1276,6 +1307,7 @@ class GenerationService:
                     tags=tags,
                     user_id=yt_user_id,
                     thumbnail_path=thumb_path,
+                    language=gen_ctx.language if gen_ctx else "pt-BR",
                 )
             except Exception as e:
                 log.error(f"youtube_upload: adapter error: {e}")
@@ -1702,16 +1734,39 @@ class GenerationService:
             job = session.get(Job, job_id)
             return job.artifacts.get(key)
 
-    def _has_checkpoint(self, job_id: int, key: str, file_check: bool = False) -> bool:
+    def _get_all_artifacts(self, job_id: int) -> dict:
+        """Return the full artifacts dict for a job."""
+        with self._session_scope() as session:
+            job = session.get(Job, job_id)
+            return dict(job.artifacts) if job.artifacts else {}
+
+    def _has_checkpoint(self, job_id: int, key: str, file_check: bool = False,
+                        *, gen_ctx=None) -> bool:
         """Check if a stage's artifact already exists (checkpoint/resume).
 
         If file_check=True, also verifies that the artifact value (a file path)
         points to an existing file on disk. This is used for file-based
         artifacts like narration_wav and video_path.
+
+        If gen_ctx (GenerationContext) is provided, validates that the stored
+        generation_context is compatible (same language, prompt_version, etc).
+        Incompatible checkpoints are invalidated to prevent mixing artifacts
+        from different configurations.
         """
         val = self._get_artifact(job_id, key)
         if val is None:
             return False
+        # Multilingual: validate checkpoint compatibility
+        if gen_ctx is not None:
+            stored_ctx = self._get_artifact(job_id, "generation_context") or {}
+            if stored_ctx and not gen_ctx.is_compatible_with(stored_ctx):
+                log.info(
+                    f"checkpoint: {key} exists but generation_context changed "
+                    f"(language={stored_ctx.get('language')}→{gen_ctx.language}, "
+                    f"prompt_version={stored_ctx.get('prompt_version')}→{gen_ctx.prompt_version}) "
+                    f"— will re-run stage"
+                )
+                return False
         if file_check:
             from pathlib import Path
             p = Path(val)

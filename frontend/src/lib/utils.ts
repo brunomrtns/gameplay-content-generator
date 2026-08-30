@@ -16,19 +16,8 @@ export function fmtDuration(seconds: number | null | undefined): string {
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
-/** Format ISO date string into a readable BR date */
-export function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+// Locale-aware date formatting (date-fns) — re-exported from date.ts
+export { fmtDate, fmtRelative } from "./date";
 
 /** Format bytes into human-readable string (KB, MB, GB) */
 export function fmtBytes(bytes: number | null | undefined): string {

@@ -87,6 +87,24 @@ class Settings(BaseSettings):
     gpcg_tts_language: str = "pt"
     gpcg_render_timeout: int = 3600
 
+    # ── Multilingual / i18n ──────────────────────────────────────────────────
+    # Master kill switch. When False, all LanguageContexts default to pt-BR
+    # regardless of ChannelProfile.target_language. Instant rollback.
+    gpcg_multilingual_enabled: bool = False
+    # Default content language (used when ChannelProfile.target_language is empty)
+    gpcg_default_language: str = "pt-BR"
+    # Allowlist of enabled languages. Requests for languages not in this list
+    # fall back to pt-BR.
+    gpcg_multilingual_languages: str = "pt-BR"  # comma-separated
+    # Per-capability flags (allow partial rollout)
+    gpcg_multilingual_tts_enabled: bool = False
+    gpcg_multilingual_prompts_enabled: bool = False
+    gpcg_multilingual_qa_enabled: bool = False
+    # Beta-user allowlist (comma-separated user IDs). Empty = all users.
+    gpcg_multilingual_beta_users: str = ""
+    # TTS engine version (for checkpoint compatibility tracking)
+    gpcg_tts_engine: str = "xtts-v2"
+
     # ── Content defaults ─────────────────────────────────────────────────────
     gpcg_default_format: str = "youtube_short"
     gpcg_default_target_duration: int = 60

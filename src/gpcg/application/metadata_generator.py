@@ -42,6 +42,7 @@ class MetadataGenerator:
         game: Optional[Game] = None,
         *,
         model: str = "",
+        language_context=None,
     ) -> VideoMetadata:
         """Generate optimized metadata for a video.
 
@@ -50,6 +51,9 @@ class MetadataGenerator:
             script: Final script text.
             game: Optional game (for game name in tags/title).
             model: Override LLM model (default: use LLMClient default).
+            language_context: Optional LanguageContext. When provided, the
+                title and description are generated in the target language
+                (instead of the hardcoded pt-BR). Tags can still be in English.
 
         Returns:
             VideoMetadata with title (<=100 chars), description (<=5000 chars),
@@ -59,6 +63,35 @@ class MetadataGenerator:
         script_text = (script.final or "")[:2000]  # Truncate for prompt size
 
         system = METADATA_SYSTEM
+
+        # Language-aware prompt: when a language_context is provided, instruct
+        # the LLM to write the title/description in the target language.
+        # Without a context, preserve the original pt-BR behavior.
+        if language_context is not None:
+            from gpcg.i18n.language_context import get_language_name
+            lang_name = get_language_name(getattr(language_context, "language", "pt-BR"))
+            lang_instruction = (
+                f"Generate (title and description in {lang_name}, tags can be in English):\n"
+                f'1. "title": A catchy title in {lang_name} (max 100 characters). '
+                f"Use the game name if relevant. Include curiosity or emotion. "
+                f"NO clickbait that misleads.\n"
+                f'2. "description": A description in {lang_name} (max 1000 characters). '
+                f"First line = hook. Then 2-3 sentences expanding the topic. "
+                f"End with a call to action and relevant hashtags.\n"
+                f'3. "tags": 8-12 lowercase tags (single words or short phrases), '
+                f"including the game name, topic keywords, and general gaming tags "
+                f'like "gameplay", "gaming".\n\n'
+                f"Respond as JSON: "
+                f'{{"title": "...", "description": "...", "tags": ["tag1", "tag2", ...]}}\n'
+            )
+        else:
+            lang_instruction = (
+                "Generate (title and description in Brazilian Portuguese, tags can be in English):\n"
+                '1. "title": A catchy title in pt-BR (max 100 characters). Use the game name if relevant. Include curiosity or emotion. NO clickbait that misleads.\n'
+                '2. "description": A description in pt-BR (max 1000 characters). First line = hook. Then 2-3 sentences expanding the topic. End with a call to action and relevant hashtags.\n'
+                '3. "tags": 8-12 lowercase tags (single words or short phrases), including the game name, topic keywords, and general gaming tags like "gameplay", "curiosidades", "gaming".\n\n'
+                'Respond as JSON: {"title": "...", "description": "...", "tags": ["tag1", "tag2", ...]}\n'
+            )
 
         prompt = f"""Generate YouTube metadata for this video.
 
@@ -70,13 +103,7 @@ Game: {game_name or 'N/A'}
 Script excerpt:
 {script_text}
 
-Generate (title and description in Brazilian Portuguese, tags can be in English):
-1. "title": A catchy title in pt-BR (max 100 characters). Use the game name if relevant. Include curiosity or emotion. NO clickbait that misleads.
-2. "description": A description in pt-BR (max 1000 characters). First line = hook. Then 2-3 sentences expanding the topic. End with a call to action and relevant hashtags.
-3. "tags": 8-12 lowercase tags (single words or short phrases), including the game name, topic keywords, and general gaming tags like "gameplay", "curiosidades", "gaming".
-
-Respond as JSON: {{"title": "...", "description": "...", "tags": ["tag1", "tag2", ...]}}
-"""
+{lang_instruction}"""
 
         try:
             kw = {"temperature": 0.8, "max_tokens": 1024}
