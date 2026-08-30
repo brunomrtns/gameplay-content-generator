@@ -795,7 +795,7 @@ if [[ "$SHOULD_BUILD_APK" -eq 1 ]]; then
 
       # ── Instalar no celular se conectado via adb ───────────────────────────
       if command -v adb &>/dev/null; then
-        ADB_DEVICES=$(adb devices 2>/dev/null | grep -c 'device$')
+        ADB_DEVICES=$(adb devices 2>/dev/null | grep -c 'device$' || true)
         if [[ "$ADB_DEVICES" -gt 0 ]]; then
           log "  Celular conectado via adb — instalando APK..."
           if adb install -r "$APK_FILE" 2>&1; then
