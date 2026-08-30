@@ -553,6 +553,17 @@ function MediaTab() {
                           </button>
                         </div>
                       )}
+                      {(isProcessing || isMapping) && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleDeleteSource(s.id, s.filename)}
+                            className="text-text-muted hover:text-red-400 transition-colors p-1 rounded"
+                            title="Deletar gameplay"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                   {(isProcessing || isMapping) && (

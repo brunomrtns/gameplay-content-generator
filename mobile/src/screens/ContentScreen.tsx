@@ -301,6 +301,9 @@ function MediaTab() {
                     <Button title="Deletar" size="sm" variant="danger" onPress={() => handleDelete(s)} style={{ marginTop: spacing.sm, alignSelf: 'flex-start' }} />
                   </View>
                 )}
+                {(isProcessing || isMapping) && (
+                  <Button title="Deletar" size="sm" variant="danger" onPress={() => handleDelete(s)} style={{ marginTop: spacing.sm, alignSelf: 'flex-start' }} />
+                )}
 
                 {canMap && (
                   <View style={{ marginTop: spacing.sm }}>
