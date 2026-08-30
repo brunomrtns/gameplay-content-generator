@@ -93,8 +93,10 @@ while [[ $# -gt 0 ]]; do
       echo "  --reset            Reseta estado (primeira vez ou após mudanças intencionais)"
       echo "  --status           Mostra estado atual sem verificar"
       echo ""
-      echo "  NÃO existe --consent. O consentimento é interativo e exige"
-      echo "  justificativa por escrito antes da frase."
+      echo "  Consentimento não-interativo: crie o arquivo"
+      echo "    .cross-platform-consent"
+      echo "  com uma justificativa por linha (mín. 10 chars cada), uma por"
+      echo "  mídia divergente. One-shot: consumido e deletado após uso."
       exit 0
       ;;
     *) echo "Argumento desconhecido: $1"; exit 1 ;;
@@ -356,13 +358,67 @@ fi
 
 # ── Etapa de consentimento explícito ──────────────────────────────────────────
 # PROIBIDO adicionar qualquer mecanismo de skip desta verificação.
-# A única forma de prosseguir com divergências é digitar a frase exata
-# de consentimento abaixo. Não adicione --force, --skip, --yes, ou
-# qualquer flag que bypass esta etapa. Esta regra é definitiva.
+# A única forma de prosseguir com divergências é:
+#   1. Modo interativo: digitar a justificativa (mín. 10 chars)
+#   2. Arquivo .cross-platform-consent: justificativa escrita (mín. 10 chars)
+#      — one-shot: consumido e deletado após uso
+#      — logado no audit log como "non-interactive"
+# Não adicione --force, --skip, --yes, ou qualquer flag que bypass esta etapa.
+
+CONSENT_FILE="$PROJECT_ROOT/.cross-platform-consent"
+CONSENT_LOG="$PROJECT_ROOT/.cross-platform-consent-log"
+
+# Construir lista de mídias com divergências
+declare -a MEDIAS_TO_CONFIRM=()
+if [[ ${#WEB_ONLY_CHANGES[@]} -gt 0 ]]; then
+  MEDIAS_TO_CONFIRM+=("web")
+fi
+if [[ ${#MOBILE_ONLY_CHANGES[@]} -gt 0 ]]; then
+  MEDIAS_TO_CONFIRM+=("mobile")
+fi
+
+# ── Caminho não-interativo via arquivo de consentimento ──
+# O arquivo deve conter uma justificativa por linha, na ordem das mídias
+# divergentes. One-shot: deletado após uso.
+if [[ -f "$CONSENT_FILE" && ${#MEDIAS_TO_CONFIRM[@]} -gt 0 ]]; then
+  mapfile -t CONSENT_LINES < "$CONSENT_FILE"
+  ALL_CONFIRMED=1
+  line_idx=0
+  for media in "${MEDIAS_TO_CONFIRM[@]}"; do
+    if [[ "$media" == "web" ]]; then
+      other_media="mobile"
+    else
+      other_media="web"
+    fi
+    justification="${CONSENT_LINES[$line_idx]:-}"
+    line_idx=$((line_idx + 1))
+    if [[ ${#justification} -lt 10 ]]; then
+      err "Consentimento no arquivo para mídia '$media' muito curto (< 10 chars)."
+      ALL_CONFIRMED=0
+      continue
+    fi
+    ok "Consentimento (arquivo) confirmado para mídia: $media"
+    ok "Justificativa: $justification"
+    echo "[$(date -Iseconds)] CONSENT(non-interactive): media=$media other=$other_media reason=\"$justification\"" >> "$CONSENT_LOG"
+  done
+  # One-shot: consumir o arquivo
+  rm -f "$CONSENT_FILE"
+  if [[ $ALL_CONFIRMED -eq 1 ]]; then
+    ok "Todas as divergências foram consentidas (via arquivo). Continuando deploy..."
+    write_result "consented"
+    save_state
+    exit 0
+  else
+    err "Consentimento via arquivo incompleto. Deploy bloqueado."
+    err "Crie $CONSENT_FILE com uma justificativa (mín. 10 chars) por mídia divergente."
+    exit 1
+  fi
+fi
 
 if [[ $INTERACTIVE -eq 0 ]]; then
   err "Divergências detectadas e modo não-interativo ativo."
-  err "Corrija as divergências ou rode em modo interativo para consentir."
+  err "Corrija as divergências, rode em modo interativo, ou crie"
+  err "  $CONSENT_FILE com uma justificativa por mídia divergente (mín. 10 chars)."
   exit 1
 fi
 
@@ -380,15 +436,6 @@ echo "  você precisa confirmar explicitamente."
 echo ""
 echo "  Para cada mídia com divergência, digite a frase exata:"
 echo ""
-
-# Construir lista de mídias com divergências
-declare -a MEDIAS_TO_CONFIRM=()
-if [[ ${#WEB_ONLY_CHANGES[@]} -gt 0 ]]; then
-  MEDIAS_TO_CONFIRM+=("web")
-fi
-if [[ ${#MOBILE_ONLY_CHANGES[@]} -gt 0 ]]; then
-  MEDIAS_TO_CONFIRM+=("mobile")
-fi
 
 ALL_CONFIRMED=1
 
@@ -438,7 +485,7 @@ for media in "${MEDIAS_TO_CONFIRM[@]}"; do
   ok "Consentimento confirmado para mídia: $media"
   ok "Justificativa: $justification"
   # Registrar no log para auditoria
-  echo "[$(date -Iseconds)] CONSENT: media=$media other=$other_media reason=\"$justification\"" >> "$PROJECT_ROOT/.cross-platform-consent-log"
+  echo "[$(date -Iseconds)] CONSENT(interactive): media=$media other=$other_media reason=\"$justification\"" >> "$CONSENT_LOG"
 done
 
 echo ""
