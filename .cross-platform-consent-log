@@ -1,0 +1,1 @@
+[2026-08-30T00:52:48-03:00] CONSENT(non-interactive): media=web other=mobile reason="Mobile já invalida gameplays após upload na linha 103 do ContentScreen.tsx. Mudança web apenas alinha com o que mobile já fazia."

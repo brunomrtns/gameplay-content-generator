@@ -380,6 +380,12 @@ fi
 # ── Caminho não-interativo via arquivo de consentimento ──
 # O arquivo deve conter uma justificativa por linha, na ordem das mídias
 # divergentes. One-shot: deletado após uso.
+# PROTEÇÃO CONTRA ABUSO: se o mesmo par de arquivos já foi consentido
+# via arquivo 3+ vezes no log de auditoria, o consentimento via arquivo
+# é recusado — só passa no modo interativo. Isso impede usar o arquivo
+# como atalho recorrente em vez de corrigir o pareamento.
+MAX_FILE_CONSENTS=3
+
 if [[ -f "$CONSENT_FILE" && ${#MEDIAS_TO_CONFIRM[@]} -gt 0 ]]; then
   mapfile -t CONSENT_LINES < "$CONSENT_FILE"
   ALL_CONFIRMED=1
@@ -387,8 +393,10 @@ if [[ -f "$CONSENT_FILE" && ${#MEDIAS_TO_CONFIRM[@]} -gt 0 ]]; then
   for media in "${MEDIAS_TO_CONFIRM[@]}"; do
     if [[ "$media" == "web" ]]; then
       other_media="mobile"
+      changed_files=("${WEB_ONLY_CHANGES[@]}")
     else
       other_media="web"
+      changed_files=("${MOBILE_ONLY_CHANGES[@]}")
     fi
     justification="${CONSENT_LINES[$line_idx]:-}"
     line_idx=$((line_idx + 1))
@@ -397,9 +405,43 @@ if [[ -f "$CONSENT_FILE" && ${#MEDIAS_TO_CONFIRM[@]} -gt 0 ]]; then
       ALL_CONFIRMED=0
       continue
     fi
+
+    # Verificar histórico de consentimentos via arquivo para os mesmos arquivos
+    repeat_count=0
+    if [[ -f "$CONSENT_LOG" ]]; then
+      for item in "${changed_files[@]}"; do
+        IFS='|' read -r cat wfile mfile <<< "$item"
+        # Contar quantas vezes este arquivo apareceu em consentimentos não-interativos
+        count=$(grep -c "non-interactive.*$wfile\|non-interactive.*$mfile" "$CONSENT_LOG" 2>/dev/null || echo 0)
+        if [[ "$count" -gt "$repeat_count" ]]; then
+          repeat_count=$count
+        fi
+      done
+    fi
+
+    if [[ "$repeat_count" -ge "$MAX_FILE_CONSENTS" ]]; then
+      err "ABUSO DETECTADO: O par de arquivos para mídia '$media' já foi"
+      err "consentido via arquivo $repeat_count vezes. Limite: $MAX_FILE_CONSENTS."
+      err "Corrija o pareamento em verify-cross-platform.sh OU consenta"
+      err "interativamente. O atalho via arquivo foi bloqueado para este par."
+      ALL_CONFIRMED=0
+      continue
+    fi
+
+    if [[ "$repeat_count" -ge 1 ]]; then
+      warn "Este par já foi consentido via arquivo $repeat_count vez(es)."
+      warn "Limite de $MAX_FILE_CONSENTS antes de bloquear. Considere corrigir o pareamento."
+    fi
+
     ok "Consentimento (arquivo) confirmado para mídia: $media"
     ok "Justificativa: $justification"
-    echo "[$(date -Iseconds)] CONSENT(non-interactive): media=$media other=$other_media reason=\"$justification\"" >> "$CONSENT_LOG"
+    # Log com os arquivos para permitir detecção de abuso
+    files_str=""
+    for item in "${changed_files[@]}"; do
+      IFS='|' read -r cat wfile mfile <<< "$item"
+      files_str="$files_str $wfile"
+    done
+    echo "[$(date -Iseconds)] CONSENT(non-interactive): media=$media other=$other_media files=\"$files_str\" reason=\"$justification\"" >> "$CONSENT_LOG"
   done
   # One-shot: consumir o arquivo
   rm -f "$CONSENT_FILE"
