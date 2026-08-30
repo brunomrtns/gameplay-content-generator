@@ -36,10 +36,14 @@ from gpcg.application.ingestion_service import IngestionService
 from gpcg.config import get_settings
 from gpcg.domain.game_repository import get_or_create, list_all
 from gpcg.core.models import (
+    ChannelProfile,
+    ContentDomain,
     ContentPlan,
     Document,
     Fact,
     Job,
+    JobPriority,
+    JobStage,
     JobStatus,
     JobType,
     KnowledgeItem,
@@ -48,6 +52,7 @@ from gpcg.core.models import (
     User,
     Video,
     VideoStatus,
+    WorkerCapability,
 )
 from gpcg.domains.games.models import (
     Game,
@@ -353,12 +358,13 @@ def upload_gameplay(
     """Upload a gameplay recording file for the current user.
 
     Saves the file to temp_uploads/ (VPS temporary storage) and creates a
-    GameplaySource record with processing_status=uploaded. The file stays
-    on the VPS only until a worker downloads it (then it's deleted).
-
-    A mapping job can be created separately via /api/gameplays/{id}/create-mapping-job.
+    GameplaySource record. A mapping job is auto-created so the worker
+    picks it up immediately — no need for the user to click
+    "Solicitar mapeamento" manually.
     """
     import hashlib
+    import secrets as _secrets
+    import uuid as _uuid
     from gpcg.config import get_settings
     from gpcg.domains.games.models import GameplayProcessingStatus
 
@@ -412,8 +418,9 @@ def upload_gameplay(
     # storage_key is relative to temp_uploads_dir — opaque to the application
     storage_key = f"user_{user.id}/{safe_name}"
 
-    # Create source record
+    # Create source record + auto-create mapping job (same as chunked upload)
     with session_scope() as session:
+        token = _secrets.token_urlsafe(32)
         source = GameplaySource(
             user_id=user.id,
             file_path=str(file_path),
@@ -422,26 +429,68 @@ def upload_gameplay(
             file_hash=file_hash,
             file_size=file_size,
             ingestion_status=IngestionStatus.discovered.value,
-            processing_status=GameplayProcessingStatus.uploaded.value,
+            processing_status=GameplayProcessingStatus.waiting_worker.value,
+            upload_token=token,
         )
         session.add(source)
         session.flush()
+        source_id = source.id
 
-        # Trigger async probing (lightweight: FFprobe for media metadata only.
-        # Heavy analysis (VLM, ASR) is done by the worker, not the VPS.)
-        try:
-            svc = IngestionService()
-            svc._ingest_file(file_path, user_id=user.id)
-        except Exception:
-            pass  # Non-fatal — probing happens in background or on next scan
+        # Determine domain from channel profile
+        _domain = ContentDomain.games.value
+        _profile = session.query(ChannelProfile).filter(
+            ChannelProfile.user_id == user.id
+        ).first()
+        if _profile:
+            _domain = _profile.domain
 
-        return {
-            "id": source.id,
-            "filename": source.filename,
-            "processing_status": source.processing_status,
-            "ingestion_status": source.ingestion_status,
-            "file_size": source.file_size,
-        }
+        # Create mapping job so the worker picks it up immediately
+        job = Job(
+            job_uuid=str(_uuid.uuid4()),
+            type=JobType.mapping.value,
+            status=JobStatus.queued.value,
+            stage=JobStage.download.value,
+            domain=_domain,
+            gameplay_source_id=source.id,
+            user_id=source.user_id,
+            game_id=source.game_id,
+            priority=JobPriority.normal.value,
+            required_capabilities=[WorkerCapability.mapping.value],
+            artifacts={},
+        )
+        session.add(job)
+        session.flush()
+        job_id = job.id
+        _source = source
+        _job = job
+
+    # Publish events + enqueue after commit
+    from gpcg.infrastructure.events import (
+        publish_gameplay_status_changed,
+        publish_job_created,
+    )
+    publish_gameplay_status_changed(
+        user.id, _source.id, _source.processing_status, _source.filename,
+    )
+    publish_job_created(user.id, _job.id, _job.type, _job.priority)
+    from gpcg.infrastructure.job_queue import enqueue_job
+    enqueue_job(_job)
+
+    # Trigger async probing (lightweight: FFprobe for media metadata only.
+    # Heavy analysis (VLM, ASR) is done by the worker, not the VPS.)
+    try:
+        svc = IngestionService()
+        svc._ingest_file(file_path, user_id=user.id)
+    except Exception:
+        pass  # Non-fatal — probing happens in background or on next scan
+
+    return {
+        "id": source_id,
+        "filename": filename,
+        "processing_status": GameplayProcessingStatus.waiting_worker.value,
+        "ingestion_status": IngestionStatus.discovered.value,
+        "file_size": file_size,
+    }
 
 
 @router.patch("/gameplays/{source_id}/visibility")
