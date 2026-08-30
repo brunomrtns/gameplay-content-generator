@@ -401,10 +401,11 @@ def upload_gameplay(
 
     file_hash = hasher.hexdigest()
 
-    # Check for duplicates
+    # Check for duplicates (skip soft-deleted — allows re-upload after delete)
     existing = db.query(GameplaySource).filter(
         GameplaySource.user_id == user.id,
         GameplaySource.file_hash == file_hash,
+        GameplaySource.ingestion_status != IngestionStatus.deleted.value,
     ).first()
     if existing:
         tmp_path.unlink(missing_ok=True)

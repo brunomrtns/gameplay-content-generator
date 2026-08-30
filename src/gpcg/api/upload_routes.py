@@ -136,11 +136,14 @@ def init_upload(
     _cleanup_stale()
 
     # Early dedup check if client provided a hash
+    # Skip soft-deleted sources — the user may have deleted a failed
+    # upload and wants to re-upload the same file.
     if file_hash:
         with session_scope() as session:
             existing = session.query(GameplaySource).filter(
                 GameplaySource.user_id == user.id,
                 GameplaySource.file_hash == file_hash,
+                GameplaySource.ingestion_status != IngestionStatus.deleted.value,
             ).first()
             if existing:
                 return {"duplicate": True, "source_id": existing.id}
@@ -296,9 +299,11 @@ def complete_upload(
         file_hash = hasher.hexdigest()
 
     # Dedup check (server-side hash is authoritative)
+    # Skip soft-deleted sources — allows re-upload after deleting a failed entry.
     existing = db.query(GameplaySource).filter(
         GameplaySource.user_id == user.id,
         GameplaySource.file_hash == file_hash,
+        GameplaySource.ingestion_status != IngestionStatus.deleted.value,
     ).first()
     if existing:
         assembling_path.unlink(missing_ok=True)
