@@ -125,7 +125,7 @@ class ScriptService:
             )
         else:
             lang_min = s.gpcg_narration_min_chars
-            lang_max = lang_max
+            lang_max = s.gpcg_narration_max_chars
 
         # Determine the model to use
         # Priority: creative_plan.model > creative_material model > default
@@ -161,7 +161,8 @@ class ScriptService:
         # ── Revision pass (critic feedback) ────────────────────────────────
         if critic_feedback and previous_script:
             revision_prompt = self._build_revision_prompt(
-                plan, fact_text, previous_script, critic_feedback, creative_plan, s
+                plan, fact_text, previous_script, critic_feedback, creative_plan, s,
+                lang_min=lang_min, lang_max=lang_max,
             )
             # Inject channel context + knowledge into revision
             if channel_block or knowledge_block:
@@ -245,6 +246,7 @@ class ScriptService:
             draft_prompt = self._build_plan_draft_prompt(
                 plan, fact_text, creative_plan, s, story_concept=story_concept,
                 channel_block=channel_block, knowledge_block=knowledge_block,
+                lang_min=lang_min, lang_max=lang_max,
             )
         else:
             draft_system = DRAFT_SYSTEM
@@ -454,6 +456,8 @@ class ScriptService:
         story_concept: Optional[StoryConcept] = None,
         channel_block: str = "",
         knowledge_block: str = "",
+        lang_min: int = 800,
+        lang_max: int = 1200,
     ) -> str:
         """Build the draft prompt oriented by the VideoCreativePlan.
 
@@ -573,6 +577,9 @@ class ScriptService:
         critic_feedback: str,
         creative_plan: Optional[VideoCreativePlan],
         s,
+        *,
+        lang_min: int = 800,
+        lang_max: int = 1200,
     ) -> str:
         """Build the revision prompt using the critic's feedback."""
         parts = [
