@@ -812,6 +812,18 @@ class GenerationService:
                         f"no gameplay assets available for '{bg_name}' — define clips first",
                         JobStage.gameplay_selection.value,
                     )
+                # V5: Detect source fallback — if the user chose a specific source
+                # but the clips came from a different one, record it for transparency.
+                if gameplay_source_id is not None:
+                    clip_source_ids = {c.source_id for c in clips if c.source_id is not None}
+                    if clip_source_ids and gameplay_source_id not in clip_source_ids:
+                        job.artifacts["gameplay_source_fallback"] = True
+                        job.artifacts["gameplay_source_fallback_from"] = gameplay_source_id
+                        job.artifacts["gameplay_source_fallback_to"] = list(clip_source_ids)
+                        log.warning(
+                            f"gameplay source fallback: user chose source #{gameplay_source_id} "
+                            f"but clips came from {clip_source_ids} (original source was exhausted)"
+                        )
                 # Stash clip info (asset ids + ranges + scene_index) for the plan builder
                 # V2: also include source_id for clip usage tracking
                 # V3: include event_id + selection_reason + usage_count for auditability
@@ -837,6 +849,14 @@ class GenerationService:
                     "reuse_override": reuse_override,
                 }
                 session.flush()
+
+        # ── Stage: metadata_generation (early — needed for presentation title) ──
+        # Generate social_title BEFORE the presentation stage so the opening
+        # clip and thumbnail show the actual video title, not the idea/topic.
+        # The full metadata (description, tags) is also generated here.
+        # Non-fatal: on failure, presentation falls back to topic.
+        if self.settings.gpcg_metadata_generation_enabled:
+            self._run_metadata_generation(job_id)
 
         # ── Stage: presentation (optional — thumbnail + opening) ─────────────
         # Non-fatal: if the stage fails, the pipeline continues without
@@ -1035,11 +1055,9 @@ class GenerationService:
                     log.warning(f"Failed to record KI usage for #{ki_id}: {e}")
             session.flush()
 
-        # ── Stage: metadata_generation (optional — LLM-generated social metadata)
+        # ── Stage: metadata_generation was already run before presentation ──
+        # (social_title is needed for the opening clip). Skip re-running here.
         qa_passed = self._get_artifact(job_id, "qa_passed")
-        if qa_passed and self.settings.gpcg_metadata_generation_enabled:
-            self._set_stage(job_id, JobStage.metadata_generation)
-            self._run_metadata_generation(job_id)
 
         # ── Stage: youtube_upload (optional — auto-upload to YouTube) ──────
         if qa_passed and self.settings.gpcg_youtube_upload_enabled:

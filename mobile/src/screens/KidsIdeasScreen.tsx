@@ -137,12 +137,17 @@ export function KidsIdeasScreen({ navigation }: { navigation?: any }) {
   const handleScore = async (id: number) => {
     try {
       const result = await kidsApi.scoreIdea(id);
-      setScoring((prev) => ({ ...prev, [id]: result.job_id }));
-      Toast.show({ type: 'info', text1: `Avaliação na fila (job #${result.job_id})` });
+      const jobId = result.job_id;
+      if (!jobId) {
+        Toast.show({ type: 'error', text1: 'Erro ao agendar avaliação' });
+        return;
+      }
+      setScoring((prev) => ({ ...prev, [id]: jobId }));
+      Toast.show({ type: 'info', text1: `Avaliação na fila (job #${jobId})` });
       // Poll for completion
       const pollJob = async () => {
         try {
-          const job = await jobsApi.get(result.job_id);
+          const job = await jobsApi.get(jobId);
           if (job.status === 'completed') {
             Toast.show({ type: 'success', text1: 'Ideia avaliada' });
             setScoring((prev) => ({ ...prev, [id]: null }));
@@ -194,6 +199,7 @@ export function KidsIdeasScreen({ navigation }: { navigation?: any }) {
     try {
       await kidsApi.createIdea({
         title: newTitle.trim(),
+        content: newDesc.trim(),
         description: newDesc.trim(),
         category: newCategory,
       });

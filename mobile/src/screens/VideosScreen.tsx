@@ -269,7 +269,7 @@ export function VideosScreen() {
                       title="YouTube"
                       size="sm"
                       variant="outline"
-                      onPress={() => Linking.openURL(v.youtube_url)}
+                      onPress={() => v.youtube_url && Linking.openURL(v.youtube_url)}
                     />
                   )}
                   {canPublish && (

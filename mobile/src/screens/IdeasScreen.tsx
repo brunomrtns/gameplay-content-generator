@@ -17,6 +17,7 @@ import { useLiveData } from '../hooks/useLiveData';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { knowledgeApi, catalogApi } from '../api/endpoints';
+import type { KnowledgeItem, GameAvailability, GameplaySourceInfo, CatalogGame } from '../api/endpoints';
 import { Card, Badge, Button, Spinner, EmptyState } from '../components/ui';
 import { colors } from '../theme/colors';
 import { fontSize, fontWeight, radius, spacing } from '../theme/spacing';
@@ -40,6 +41,18 @@ const TYPE_BADGE: Record<string, any> = {
   fact: 'success',
   manual: 'default',
 };
+
+/** Shorten a gameplay source filename for display in badges/tags.
+ *  Removes extension, truncates long names at a reasonable length. */
+function shortSourceName(filename: string | null | undefined, maxLen: number = 30): string {
+  if (!filename) return 'Gameplay';
+  let name = filename.replace(/\.[^.]+$/, '');
+  name = name.replace(/\s*[｜|].*$/, '').replace(/\s*\[[^\]]*\]\s*$/, '').trim();
+  if (name.length > maxLen) {
+    name = name.slice(0, maxLen - 1).trim() + '…';
+  }
+  return name || 'Gameplay';
+}
 
 const STATUS_LABELS: Record<string, string> = {
   fresh: 'Disponível',
@@ -101,22 +114,22 @@ export function IdeasScreen() {
   const [manualTitle, setManualTitle] = useState('');
   const [manualContent, setManualContent] = useState('');
   const [creating, setCreating] = useState(false);
-  const [queueModalItem, setQueueModalItem] = useState<any | null>(null);
+  const [queueModalItem, setQueueModalItem] = useState<KnowledgeItem | null>(null);
   const [selectedGameplay, setSelectedGameplay] = useState<number | null>(null);
   const [selectedReuseOverride, setSelectedReuseOverride] = useState<string | null>(null);
-  const [availableSources, setAvailableSources] = useState<any[]>([]);
+  const [availableSources, setAvailableSources] = useState<GameplaySourceInfo[]>([]);
   const [selectedSource, setSelectedSource] = useState<number | null>(null);
   const [loadingSources, setLoadingSources] = useState(false);
-  const [editQueueItem, setEditQueueItem] = useState<any | null>(null);
+  const [editQueueItem, setEditQueueItem] = useState<KnowledgeItem | null>(null);
   const [editGameplay, setEditGameplay] = useState<number | null>(null);
-  const [editSources, setEditSources] = useState<any[]>([]);
+  const [editSources, setEditSources] = useState<GameplaySourceInfo[]>([]);
   const [editSelectedSource, setEditSelectedSource] = useState<number | null>(null);
   const [editLoadingSources, setEditLoadingSources] = useState(false);
   const [showFocusModal, setShowFocusModal] = useState(false);
   const [focusType, setFocusType] = useState<'game' | 'topic' | 'game+topic'>('game');
   const [focusGameSearch, setFocusGameSearch] = useState('');
-  const [focusGameResults, setFocusGameResults] = useState<any[]>([]);
-  const [focusSelectedGame, setFocusSelectedGame] = useState<any | null>(null);
+  const [focusGameResults, setFocusGameResults] = useState<CatalogGame[]>([]);
+  const [focusSelectedGame, setFocusSelectedGame] = useState<CatalogGame | null>(null);
   const [focusTopic, setFocusTopic] = useState('');
   const [focusItemTypes, setFocusItemTypes] = useState<string[]>([]);
   const [focusSaving, setFocusSaving] = useState(false);
@@ -137,15 +150,15 @@ export function IdeasScreen() {
         min_score: minScore > 0 ? minScore : undefined,
         game_id: filterGameId ?? undefined,
       });
-      let allItems: any[] = res.items || [];
+      let allItems: KnowledgeItem[] = res.items || [];
       // Client-side: filter by gameplay availability
       if (onlyWithGameplay && availabilityData?.games) {
         const gamesWithGameplay = new Set(
-          (availabilityData.games as any[])
-            .filter((g: any) => g.availability !== 'none' && g.availability !== 'reuse_only')
-            .map((g: any) => g.game_id),
+          (availabilityData.games as GameAvailability[])
+            .filter((g: GameAvailability) => g.availability !== 'none' && g.availability !== 'reuse_only')
+            .map((g: GameAvailability) => g.game_id),
         );
-        allItems = allItems.filter((i: any) => !i.game_id || gamesWithGameplay.has(i.game_id));
+        allItems = allItems.filter((i: KnowledgeItem) => !i.game_id || gamesWithGameplay.has(i.game_id));
       }
       // Client-side: filter by search text
       if (searchText.trim()) {
@@ -441,7 +454,7 @@ export function IdeasScreen() {
     if (focus) {
       setFocusType(focus.type || 'game');
       if (focus.game_id) {
-        setFocusSelectedGame({ id: focus.game_id, name: focus.game_name });
+        setFocusSelectedGame({ id: focus.game_id, name: focus.game_name || '' });
         setFocusGameSearch(focus.game_name || '');
       }
       if (focus.topic) setFocusTopic(focus.topic);
@@ -547,7 +560,7 @@ export function IdeasScreen() {
                     <Text style={styles.focusLabel}>Foco de coleta ativo</Text>
                     <Text style={styles.focusValue} numberOfLines={1}>
                       {focusLabel(focus)}
-                      {focus.item_types?.length > 0 && ` (${focus.item_types.join(', ')})`}
+                      {(focus.item_types?.length ?? 0) > 0 && ` (${(focus.item_types || []).join(', ')})`}
                     </Text>
                   </View>
                   <TouchableOpacity onPress={openFocusModal} style={styles.focusBtn}>
@@ -758,10 +771,14 @@ export function IdeasScreen() {
 
             <Text style={styles.modalLabel}>Gameplay de fundo</Text>
             <View style={styles.pickerWrap}>
-              {[
-                { id: null, name: 'Automático (sistema escolhe)' },
-                ...availability,
-              ].map((g) => (
+              {([
+                { id: null as number | null, name: 'Automático (sistema escolhe)', availability: '' },
+                ...availability.map((g: GameAvailability) => ({
+                  id: g.game_id as number | null,
+                  name: g.game_name,
+                  availability: g.availability,
+                })),
+              ] as { id: number | null; name: string; availability: string }[]).map((g) => (
                 <TouchableOpacity
                   key={g.id ?? 'auto'}
                   style={[
@@ -824,6 +841,33 @@ export function IdeasScreen() {
                         Nenhuma gameplay individual tem 2 min livre — o sistema usará todas automaticamente.
                       </Text>
                     )}
+                    {selectedSource && (() => {
+                      const src = availableSources.find((s) => s.source_id === selectedSource);
+                      if (!src) return null;
+                      const freeMin = Math.floor(src.free_seconds / 60);
+                      const freeSec = Math.floor(src.free_seconds % 60);
+                      const isLow = src.free_seconds < 180;
+                      const isVeryLow = src.free_seconds < 120;
+                      if (!isLow) return null;
+                      return (
+                        <View style={{
+                          marginTop: 8,
+                          padding: 8,
+                          borderRadius: 8,
+                          borderWidth: 1,
+                          borderColor: isVeryLow ? 'rgba(239,68,68,0.3)' : 'rgba(245,158,11,0.3)',
+                          backgroundColor: isVeryLow ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)',
+                        }}>
+                          <Text style={{
+                            fontSize: 11,
+                            color: isVeryLow ? '#fca5a5' : '#fcd34d',
+                          }}>
+                            {isVeryLow ? '⚠' : '⚠'} Apenas {freeMin}:{freeSec.toString().padStart(2, '0')} de material livre.{'\n'}
+                            Pode acabar antes da sua vez na fila — se isso acontecer, o sistema usará outra gameplay do mesmo jogo automaticamente.
+                          </Text>
+                        </View>
+                      );
+                    })()}
                   </>
                 )}
               </View>
@@ -893,10 +937,14 @@ export function IdeasScreen() {
 
             <Text style={styles.modalLabel}>Gameplay de fundo</Text>
             <View style={styles.pickerWrap}>
-              {[
-                { id: null, name: 'Automático (sistema escolhe)' },
-                ...availability,
-              ].map((g) => (
+              {([
+                { id: null as number | null, name: 'Automático (sistema escolhe)', availability: '' },
+                ...availability.map((g: GameAvailability) => ({
+                  id: g.game_id as number | null,
+                  name: g.game_name,
+                  availability: g.availability,
+                })),
+              ] as { id: number | null; name: string; availability: string }[]).map((g) => (
                 <TouchableOpacity
                   key={g.id ?? 'auto'}
                   style={[styles.pickerOption, editGameplay === g.id && styles.pickerOptionActive]}
@@ -1155,10 +1203,10 @@ function QueueCard({
   onRemove,
   onEditGame,
 }: {
-  item: any;
+  item: KnowledgeItem;
   index: number;
   total: number;
-  availability: any[];
+  availability: GameAvailability[];
   onMoveUp: () => void;
   onMoveDown: () => void;
   onRemove: () => void;
@@ -1205,6 +1253,22 @@ function QueueCard({
           )}
           {item.reuse_override === 'skip' && (
             <Badge label="Aguardar" variant="error" />
+          )}
+          {item.gameplay_source_id && (
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: 6,
+              paddingVertical: 2,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: 'rgba(168,85,247,0.3)',
+              backgroundColor: 'rgba(168,85,247,0.1)',
+            }}>
+              <Text style={{ fontSize: 10, color: '#c084fc' }} numberOfLines={1}>
+                🎮 {shortSourceName(item.gameplay_source_filename)}
+              </Text>
+            </View>
           )}
         </View>
         <Text style={styles.queueItemTitle} numberOfLines={1}>{item.title}</Text>
@@ -1504,7 +1568,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
-    alignSelf: 'flex-start' as const,
+    alignSelf: 'flex-start',
   },
   gameplayToggleActive: {
     borderColor: colors.accent + '60',
@@ -1512,7 +1576,7 @@ const styles = StyleSheet.create({
   },
   gameplayToggleText: {
     fontSize: fontSize.xs,
-    fontWeight: fontWeight.medium as const,
+    fontWeight: fontWeight.medium,
     color: colors.textMuted,
   },
   gameplayToggleTextActive: {

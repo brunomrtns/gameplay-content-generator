@@ -23,6 +23,7 @@ interface KnowledgeItem {
   gameplay_preference?: number | null;
   reuse_override?: string | null;
   gameplay_source_id?: number | null;
+  gameplay_source_filename?: string | null;
 }
 
 interface Stats {
@@ -66,6 +67,20 @@ const STATUS_LABELS: Record<string, string> = {
   used: "Usado",
   rejected: "Rejeitado",
 };
+
+/** Shorten a gameplay source filename for display in badges/tags.
+ *  Removes extension, truncates long names at a reasonable length. */
+function shortSourceName(filename: string | null | undefined, maxLen: number = 30): string {
+  if (!filename) return "Gameplay";
+  // Remove extension
+  let name = filename.replace(/\.[^.]+$/, "");
+  // Remove common video site prefixes/suffixes (YouTube IDs in brackets, etc.)
+  name = name.replace(/\s*[｜|].*$/, "").replace(/\s*\[[^\]]*\]\s*$/, "").trim();
+  if (name.length > maxLen) {
+    name = name.slice(0, maxLen - 1).trim() + "…";
+  }
+  return name || "Gameplay";
+}
 
 const STATUS_COLORS: Record<string, string> = {
   fresh: "bg-green-500/20 text-green-300 border-green-500/30",
@@ -944,8 +959,8 @@ export function IdeasPage() {
                     )}
                     {/* V4: Show specific source badge if set */}
                     {item.gameplay_source_id && (
-                      <span className="rounded-full border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-xs font-medium text-purple-300">
-                        Source #{item.gameplay_source_id}
+                      <span className="rounded-full border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-xs font-medium text-purple-300" title={item.gameplay_source_filename || `Source #${item.gameplay_source_id}`}>
+                        🎮 {shortSourceName(item.gameplay_source_filename)}
                       </span>
                     )}
                     {!item.gameplay_preference && !item.game_id && (
@@ -1235,9 +1250,28 @@ export function IdeasPage() {
                       ))}
                     </select>
                     {availableSources.length > 0 ? (
-                      <p className="text-xs text-text-muted mt-1">
-                        Restringe os cortes a uma única gameplay. O padrão usa todas as gameplays do jogo, com mais variedade de cenas.
-                      </p>
+                      <>
+                        <p className="text-xs text-text-muted mt-1">
+                          Restringe os cortes a uma única gameplay. O padrão usa todas as gameplays do jogo, com mais variedade de cenas.
+                        </p>
+                        {selectedSource && (() => {
+                          const src = availableSources.find((s) => s.source_id === selectedSource);
+                          if (!src) return null;
+                          const freeMin = Math.floor(src.free_seconds / 60);
+                          const freeSec = Math.floor(src.free_seconds % 60);
+                          const isLow = src.free_seconds < 180; // < 3 min
+                          const isVeryLow = src.free_seconds < 120; // < 2 min
+                          if (!isLow) return null;
+                          return (
+                            <div className={`mt-2 rounded-lg border p-2.5 ${isVeryLow ? "border-red-500/30 bg-red-500/10" : "border-amber-500/30 bg-amber-500/10"}`}>
+                              <p className={`text-xs ${isVeryLow ? "text-red-300" : "text-amber-300"}`}>
+                                {isVeryLow ? "⚠" : "⚠"} Apenas {freeMin}:{freeSec.toString().padStart(2, "0")} de material livre.
+                                {" "}Pode acabar antes da sua vez na fila — se isso acontecer, o sistema usará outra gameplay do mesmo jogo automaticamente.
+                              </p>
+                            </div>
+                          );
+                        })()}
+                      </>
                     ) : (
                       <p className="text-xs text-text-muted mt-1">
                         Nenhuma gameplay individual tem 2 min de material livre no momento — o sistema usará todas as gameplays do jogo automaticamente, o que é o comportamento padrão.

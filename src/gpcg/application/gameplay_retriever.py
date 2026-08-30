@@ -194,10 +194,65 @@ class GameplayRetriever:
         # V4: If user specified a specific source (gameplay_source_id),
         # we filter to ONLY that source. This takes precedence over
         # everything else — the user explicitly chose this gameplay file.
+        # V5: If the chosen source is exhausted (no eligible clips), we fall
+        # back to other sources of the same game (preserving gameplay_preference).
         if gameplay_source_id is not None:
             log.info(f"gameplay_source_id: user chose source #{gameplay_source_id}, "
                      f"restricting retrieval to this single source")
 
+        clips = self._retrieve_with_optional_source(
+            session, game_ids, primary_game_id, target_duration,
+            creative_plan, scene_duration, rng, video_type,
+            user_id, accept_public, narrative_beats, recent_game_ids,
+            max_uses, gameplay_source_id,
+        )
+
+        # V5: Fallback — if a specific source was chosen but yielded no clips,
+        # retry without the source restriction (preserving gameplay_preference).
+        # This handles the case where the chosen source was exhausted by
+        # jobs processed earlier in the queue.
+        if not clips and gameplay_source_id is not None:
+            log.warning(
+                f"gameplay_source_id #{gameplay_source_id} yielded no clips — "
+                f"falling back to other sources of game(s) {game_ids}"
+            )
+            clips = self._retrieve_with_optional_source(
+                session, game_ids, primary_game_id, target_duration,
+                creative_plan, scene_duration, rng, video_type,
+                user_id, accept_public, narrative_beats, recent_game_ids,
+                max_uses,
+                gameplay_source_id=None,  # remove source restriction
+            )
+            if clips:
+                log.info(
+                    f"fallback succeeded: found {len(clips)} clips from "
+                    f"alternative source(s) for game(s) {game_ids}"
+                )
+
+        return clips
+
+    def _retrieve_with_optional_source(
+        self,
+        session: Session,
+        game_ids: list[int],
+        primary_game_id: int,
+        target_duration: float,
+        creative_plan: Optional[VideoCreativePlan],
+        scene_duration: float,
+        rng: random.Random,
+        video_type: str,
+        user_id: Optional[int],
+        accept_public: bool,
+        narrative_beats: Optional[list],
+        recent_game_ids: Optional[list[int]],
+        max_uses: int,
+        gameplay_source_id: Optional[int],
+    ) -> list[SelectedClip]:
+        """Retrieve clips, optionally restricted to a single source.
+
+        This is a refactor of the original retrieve() body to allow
+        fallback retries without source restriction.
+        """
         # Decide whether to use semantic retrieval or fallback
         use_semantic = self._should_use_semantic(session, game_ids, creative_plan, video_type, user_id,
                                                   gameplay_source_id=gameplay_source_id)

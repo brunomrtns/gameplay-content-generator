@@ -648,9 +648,16 @@ def submit_job_result(
 
         # Remember to auto-publish after commit (outside the transaction)
         _pending_auto_publish = (vdata.get("storage_key") and not vdata.get("youtube_url"))
+        # Video model has no 'title' field — use social_title from job artifacts
+        # (or content_plan title as fallback) for the notification event.
+        _video_title = (
+            job.artifacts.get("social_title")
+            or job.artifacts.get("social_description", "")[:80]
+            or f"Video #{video.id}"
+        )
         _pending_video = {
             "id": video.id,
-            "title": video.title or "",
+            "title": _video_title,
             "status": video.status or "",
         }
     else:

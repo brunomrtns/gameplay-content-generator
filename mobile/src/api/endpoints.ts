@@ -1,19 +1,366 @@
 import { client, saveToken, getSSOCookies, clearAuth, videoUrl, thumbUrl, presentationImageUrl } from './client';
 
+// ── Types ────────────────────────────────────────────────────────────────────
+
+export interface User {
+  id: number;
+  email: string;
+  name: string;
+  is_active: boolean;
+  is_admin: boolean;
+  google_user_id?: string | null;
+  has_youtube: boolean;
+  channel_title?: string;
+  channel_domain?: string;
+  onboarding_completed?: boolean;
+  created_at?: string;
+}
+
+export interface QueueEntry {
+  ki_id: number;
+  gameplay_preference: number | null;
+  reuse_override: string | null;
+  gameplay_source_id: number | null;
+}
+
+export interface KnowledgeItem {
+  id: number;
+  title: string;
+  content: string;
+  item_type: string;
+  source_type: string;
+  status: string;
+  score: number;
+  editorial_score: number;
+  franchise: string | null;
+  developer: string | null;
+  tags: string[];
+  game_id?: number | null;
+  game_name?: string | null;
+  gameplay_preference?: number | null;
+  reuse_override?: string | null;
+  gameplay_source_id?: number | null;
+  gameplay_source_filename?: string | null;
+}
+
+export interface GameAvailability {
+  game_id: number;
+  game_name: string;
+  ownership: 'own' | 'public';
+  availability: 'abundant' | 'partial' | 'low' | 'none' | 'reuse_only';
+  total_sources: number;
+  available_seconds: number;
+  used_seconds: number;
+  eligible_events: number;
+  total_events: number;
+}
+
+export interface GameplaySourceInfo {
+  source_id: number;
+  filename: string | null;
+  free_seconds: number;
+  total_seconds: number;
+  eligible_events: number;
+  total_events: number;
+  availability: string;
+}
+
+export interface CatalogGame {
+  id: number;
+  name: string;
+  release_year?: number | null;
+  cover_url?: string | null;
+  slug?: string;
+}
+
+export interface Game {
+  id: number;
+  canonical_name: string;
+  slug: string;
+  description?: string | null;
+  developer?: string | null;
+  publisher?: string | null;
+  franchise?: string | null;
+  genres: string[];
+  themes: string[];
+  lore_summary?: string | null;
+  release_date?: string | null;
+  camera_type: string;
+  platforms: string[];
+  capture_sources: string[];
+  enriched_at?: string | null;
+}
+
+export interface GameplaySource {
+  id: number;
+  user_id?: number | null;
+  game_id?: number | null;
+  filename: string;
+  file_hash?: string | null;
+  file_size: number;
+  duration: number;
+  width: number;
+  height: number;
+  fps: number;
+  codec?: string | null;
+  has_audio: boolean;
+  ingestion_status: string;
+  processing_status?: string | null;
+  is_public: boolean;
+  enabled: boolean;
+  storage_key?: string | null;
+  capture_source?: string | null;
+  game_name?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GameplayEvent {
+  id: number;
+  source_id: number;
+  start_time: number;
+  end_time: number;
+  event_type: string;
+  description: string;
+  interesting_score: number;
+  visual_confidence: number;
+  analysis_version?: string;
+}
+
+export interface Job {
+  id: number;
+  user_id?: number | null;
+  job_uuid: string;
+  type: string;
+  domain: string;
+  game_id?: number | null;
+  content_plan_id?: number | null;
+  gameplay_source_id?: number | null;
+  status: string;
+  stage: string;
+  progress: number;
+  attempts: number;
+  max_attempts: number;
+  error?: string | null;
+  artifacts: Record<string, any>;
+  worker_id?: number | null;
+  priority: string;
+  required_capabilities: string[];
+  created_at: string;
+  started_at?: string | null;
+  updated_at: string;
+  completed_at?: string | null;
+  // Enriched fields from API (joined from ContentPlan/KnowledgeItem/Game)
+  ki_title?: string;
+  ki_item_type?: string;
+  stage_label?: string;
+  game_name?: string;
+  topic?: string;
+}
+
+export interface Video {
+  id: number;
+  user_id?: number | null;
+  job_id?: number | null;
+  content_plan_id?: number | null;
+  game_id?: number | null;
+  file_path: string;
+  storage_key?: string | null;
+  duration: number;
+  width: number;
+  height: number;
+  qa_score: number;
+  qa_report: Record<string, any>;
+  status: string;
+  thumbnail_path?: string | null;
+  youtube_url?: string | null;
+  youtube_video_id?: string | null;
+  knowledge_item_id?: number | null;
+  created_at: string;
+  // Enriched fields from API (joined from ContentPlan/KnowledgeItem)
+  title?: string;
+  social_title?: string;
+  topic?: string;
+  description?: string;
+  tags?: string[];
+  qa_passed?: boolean;
+  game_name?: string;
+}
+
+export interface Worker {
+  id: number;
+  worker_id: string;
+  hostname: string;
+  status: string;
+  last_heartbeat?: string | null;
+  last_status_at?: string | null;
+  current_job_id?: number | null;
+  current_activity?: string | null;
+  gpu_name?: string | null;
+  gpu_usage?: number | null;
+  cpu_usage?: number | null;
+  ram_usage?: number | null;
+  capabilities: string[];
+  worker_version?: string | null;
+  git_commit?: string | null;
+  build_number?: string | null;
+  metadata_json: Record<string, any>;
+  registered_at: string;
+  updated_at: string;
+}
+
+export interface Voice {
+  filename: string;
+  size: number;
+  created_at?: string;
+}
+
+export interface Dashboard {
+  gameplays: { total: number; processing: number; ready: number };
+  jobs: { total: number; running: number };
+  videos: { total: number; published: number };
+  youtube_connected: boolean;
+  automation_running: boolean;
+  worker_status?: string | null;
+  worker_activity?: string | null;
+  recent_videos?: Video[];
+  channel_domain?: string;
+  [key: string]: any;
+}
+
+export interface AutomationConfig {
+  enabled: boolean;
+  video_format: string;
+  voice: string;
+  creative_style: string;
+  max_clip_uses: number;
+  fallback_policy: string;
+  accept_public_gameplays: boolean;
+  auto_fill_queue: boolean;
+  max_queue_size: number;
+  presentation?: Record<string, any>;
+  [key: string]: any;
+}
+
+export interface YouTubeStatus {
+  connected: boolean;
+  channel_title?: string;
+  channel_id?: string;
+  thumbnail_url?: string;
+}
+
+export interface ChannelProfile {
+  name: string;
+  description: string;
+  domain: string;
+  language: string;
+  [key: string]: any;
+}
+
+export interface CollectionFocus {
+  type: 'game' | 'topic' | 'game+topic' | null;
+  game_id?: number | null;
+  game_name?: string | null;
+  topic?: string | null;
+  item_types?: string[];
+}
+
+export interface KnowledgeItemStats {
+  total: number;
+  fresh: number;
+  used: number;
+  rejected: number;
+  by_type: Record<string, number>;
+  by_status: Record<string, number>;
+  by_source: Record<string, number>;
+}
+
+export interface KidsTopic {
+  id: number;
+  name: string;
+  description?: string;
+  created_at?: string;
+}
+
+export interface KidsLibraryAsset {
+  id: number;
+  filename: string;
+  media_kind: string;
+  status: string;
+  tags?: string;
+  description?: string;
+  topic_id?: number | null;
+  topic_name?: string | null;
+  is_public: boolean;
+  duration?: number;
+  storage_key?: string | null;
+  created_at?: string;
+}
+
+export interface KidsIdea {
+  id: number;
+  title: string;
+  content: string;
+  category: string;
+  status: string;
+  score?: number;
+  topic_id?: number | null;
+  topic_name?: string | null;
+  job_id?: number;
+  description?: string;
+  created_at?: string;
+}
+
+export interface KidsIdeaStats {
+  total: number;
+  fresh: number;
+  used: number;
+  rejected: number;
+  by_category: Record<string, number>;
+}
+
+export interface TopicLibraryEntry {
+  id: number;
+  topic: string;
+  category: string;
+  description?: string;
+}
+
+export interface SeasonalCalendarEntry {
+  month: string;
+  events: Array<{ name: string; date: string; description?: string }>;
+}
+
+export interface DomainInfo {
+  name: string;
+  label: string;
+  description: string;
+}
+
+export interface AppVersionInfo {
+  available: boolean;
+  version: string | null;
+  versionCode: number | null;
+  download_url: string | null;
+  released_at: string | null;
+  changelog: string | null;
+  size_bytes: number | null;
+}
+
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
 export const authApi = {
   /** Exchange SSO cookies for JWT token (mobile auth flow) */
-  async exchangeToken(): Promise<{ token: string; user: any }> {
+  async exchangeToken(): Promise<{ token: string; user: User }> {
     const cookies = await getSSOCookies();
     if (!cookies) throw new Error('No SSO cookies found');
-    const { data } = await client.post('/auth/token', cookies);
+    const { data } = await client.post<{ token: string; user: User }>('/auth/token', cookies);
     await saveToken(data.token, data.user);
     return data;
   },
 
-  async getMe(): Promise<any> {
-    const { data } = await client.get('/auth/me');
+  async getMe(): Promise<User> {
+    const { data } = await client.get<User>('/auth/me');
     return data;
   },
 
@@ -24,13 +371,13 @@ export const authApi = {
     await clearAuth();
   },
 
-  async listUsers(): Promise<any[]> {
-    const { data } = await client.get('/auth/users');
+  async listUsers(): Promise<User[]> {
+    const { data } = await client.get<User[]>('/auth/users');
     return data;
   },
 
-  async updateUser(userId: number, payload: { name?: string; is_active?: boolean }): Promise<any> {
-    const { data } = await client.put(`/auth/users/${userId}`, payload);
+  async updateUser(userId: number, payload: { name?: string; is_active?: boolean }): Promise<User> {
+    const { data } = await client.put<User>(`/auth/users/${userId}`, payload);
     return data;
   },
 
@@ -40,17 +387,17 @@ export const authApi = {
 
   // ── Onboarding ─────────────────────────────────────────────────────────
   async getOnboarding(): Promise<{ completed: boolean }> {
-    const { data } = await client.get('/auth/onboarding');
+    const { data } = await client.get<{ completed: boolean }>('/auth/onboarding');
     return data;
   },
 
   async completeOnboarding(): Promise<{ completed: boolean }> {
-    const { data } = await client.post('/auth/onboarding/complete');
+    const { data } = await client.post<{ completed: boolean }>('/auth/onboarding/complete');
     return data;
   },
 
   async resetOnboarding(): Promise<{ completed: boolean }> {
-    const { data } = await client.post('/auth/onboarding/reset');
+    const { data } = await client.post<{ completed: boolean }>('/auth/onboarding/reset');
     return data;
   },
 };
@@ -58,8 +405,8 @@ export const authApi = {
 // ── Dashboard ────────────────────────────────────────────────────────────────
 
 export const dashboardApi = {
-  async get(): Promise<any> {
-    const { data } = await client.get('/dashboard');
+  async get(): Promise<Dashboard> {
+    const { data } = await client.get<Dashboard>('/dashboard');
     return data;
   },
 };
@@ -67,12 +414,12 @@ export const dashboardApi = {
 // ── Automation ───────────────────────────────────────────────────────────────
 
 export const automationApi = {
-  async get(): Promise<any> {
-    const { data } = await client.get('/automation');
+  async get(): Promise<AutomationConfig> {
+    const { data } = await client.get<AutomationConfig>('/automation');
     return data;
   },
 
-  async update(config: any): Promise<void> {
+  async update(config: Partial<AutomationConfig>): Promise<void> {
     await client.patch('/automation', { config });
   },
 
@@ -89,12 +436,12 @@ export const automationApi = {
 
 export const youtubeApi = {
   async connectUrl(): Promise<string> {
-    const { data } = await client.get('/youtube/connect');
-    return data.url || data;
+    const { data } = await client.get<{ url: string } | string>('/youtube/connect');
+    return typeof data === 'string' ? data : data.url;
   },
 
-  async status(): Promise<any> {
-    const { data } = await client.get('/youtube/status');
+  async status(): Promise<YouTubeStatus> {
+    const { data } = await client.get<YouTubeStatus>('/youtube/status');
     return data;
   },
 
@@ -106,13 +453,13 @@ export const youtubeApi = {
 // ── Games ────────────────────────────────────────────────────────────────────
 
 export const gamesApi = {
-  async list(): Promise<any[]> {
-    const { data } = await client.get('/games');
+  async list(): Promise<Game[]> {
+    const { data } = await client.get<Game[]>('/games');
     return data;
   },
 
-  async enrich(gameId: number): Promise<any> {
-    const { data } = await client.post(`/games/${gameId}/enrich`);
+  async enrich(gameId: number): Promise<Game> {
+    const { data } = await client.post<Game>(`/games/${gameId}/enrich`);
     return data;
   },
 };
@@ -120,13 +467,13 @@ export const gamesApi = {
 // ── Gameplays / Content ──────────────────────────────────────────────────────
 
 export const gameplaysApi = {
-  async list(includePublic = true): Promise<any[]> {
-    const { data } = await client.get('/sources', { params: { include_public: includePublic } });
+  async list(includePublic = true): Promise<GameplaySource[]> {
+    const { data } = await client.get<GameplaySource[]>('/sources', { params: { include_public: includePublic } });
     return data;
   },
 
-  async getEvents(sourceId: number): Promise<{ events: any[] }> {
-    const { data } = await client.get(`/sources/${sourceId}/events`);
+  async getEvents(sourceId: number): Promise<{ events: GameplayEvent[] }> {
+    const { data } = await client.get<{ events: GameplayEvent[] }>(`/sources/${sourceId}/events`);
     return data;
   },
 
@@ -161,7 +508,7 @@ export const gameplaysApi = {
   },
 
   async scanInbox(): Promise<{ discovered: number }> {
-    const { data } = await client.post('/inbox/scan');
+    const { data } = await client.post<{ discovered: number }>('/inbox/scan');
     return data;
   },
 
@@ -185,13 +532,13 @@ export const gameplaysApi = {
 // ── Catalog (IGDB search) ────────────────────────────────────────────────────
 
 export const catalogApi = {
-  async search(q: string): Promise<any[]> {
-    const { data } = await client.get('/catalog/search', { params: { q } });
+  async search(q: string): Promise<CatalogGame[]> {
+    const { data } = await client.get<CatalogGame[]>('/catalog/search', { params: { q } });
     return data;
   },
 
-  async autocomplete(q: string): Promise<any> {
-    const { data } = await client.get('/catalog/autocomplete', { params: { q } });
+  async autocomplete(q: string): Promise<CatalogGame[] | { results: CatalogGame[] }> {
+    const { data } = await client.get<CatalogGame[] | { results: CatalogGame[] }>('/catalog/autocomplete', { params: { q } });
     return data;
   },
 };
@@ -199,13 +546,13 @@ export const catalogApi = {
 // ── Jobs ─────────────────────────────────────────────────────────────────────
 
 export const jobsApi = {
-  async list(status?: string): Promise<any[]> {
-    const { data } = await client.get('/jobs', { params: status ? { status } : {} });
+  async list(status?: string): Promise<Job[]> {
+    const { data } = await client.get<Job[]>('/jobs', { params: status ? { status } : {} });
     return data;
   },
 
-  async get(jobId: number): Promise<any> {
-    const { data } = await client.get(`/jobs/${jobId}`);
+  async get(jobId: number): Promise<Job> {
+    const { data } = await client.get<Job>(`/jobs/${jobId}`);
     return data;
   },
 };
@@ -213,18 +560,18 @@ export const jobsApi = {
 // ── Videos ───────────────────────────────────────────────────────────────────
 
 export const videosApi = {
-  async list(search?: string): Promise<any[]> {
-    const { data } = await client.get('/videos', { params: search ? { search } : {} });
+  async list(search?: string): Promise<Video[]> {
+    const { data } = await client.get<Video[]>('/videos', { params: search ? { search } : {} });
     return data;
   },
 
-  async updateMetadata(videoId: number, payload: { title?: string; description?: string; tags?: string[] }): Promise<any> {
-    const { data } = await client.put(`/videos/${videoId}/metadata`, payload);
+  async updateMetadata(videoId: number, payload: { title?: string; description?: string; tags?: string[] }): Promise<Video> {
+    const { data } = await client.put<Video>(`/videos/${videoId}/metadata`, payload);
     return data;
   },
 
-  async publish(videoId: number, overrides?: { title?: string; description?: string; tags?: string[] }): Promise<any> {
-    const { data } = await client.post(`/videos/${videoId}/publish`, overrides || {});
+  async publish(videoId: number, overrides?: { title?: string; description?: string; tags?: string[] }): Promise<Video> {
+    const { data } = await client.post<Video>(`/videos/${videoId}/publish`, overrides || {});
     return data;
   },
 
@@ -243,15 +590,15 @@ export const videosApi = {
 // ── Voices ───────────────────────────────────────────────────────────────────
 
 export const voicesApi = {
-  async list(): Promise<any[]> {
-    const { data } = await client.get('/voices');
+  async list(): Promise<Voice[]> {
+    const { data } = await client.get<Voice[]>('/voices');
     return data;
   },
 
-  async upload(file: { uri: string; name: string; type: string }): Promise<any> {
+  async upload(file: { uri: string; name: string; type: string }): Promise<{ filename: string }> {
     const formData = new FormData();
     formData.append('file', file as any);
-    const { data } = await client.post('/voices/upload', formData, {
+    const { data } = await client.post<{ filename: string }>('/voices/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return data;
@@ -268,7 +615,7 @@ export const presentationApi = {
   async uploadImage(file: { uri: string; name: string; type: string }): Promise<{ key: string }> {
     const formData = new FormData();
     formData.append('file', file as any);
-    const { data } = await client.post('/presentation/upload-image', formData, {
+    const { data } = await client.post<{ key: string }>('/presentation/upload-image', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return data;
@@ -280,12 +627,12 @@ export const presentationApi = {
 // ── Channel Profile ──────────────────────────────────────────────────────────
 
 export const channelApi = {
-  async getProfile(): Promise<any> {
-    const { data } = await client.get('/channel/profile');
+  async getProfile(): Promise<ChannelProfile> {
+    const { data } = await client.get<ChannelProfile>('/channel/profile');
     return data;
   },
 
-  async updateProfile(payload: any): Promise<void> {
+  async updateProfile(payload: Partial<ChannelProfile>): Promise<void> {
     await client.patch('/channel/profile', payload);
   },
 };
@@ -293,8 +640,8 @@ export const channelApi = {
 // ── Workers ──────────────────────────────────────────────────────────────────
 
 export const workersApi = {
-  async list(): Promise<any[]> {
-    const { data } = await client.get('/workers');
+  async list(): Promise<Worker[]> {
+    const { data } = await client.get<Worker[]>('/workers');
     return data;
   },
 };
@@ -302,13 +649,13 @@ export const workersApi = {
 // ── Domains ──────────────────────────────────────────────────────────────────
 
 export const domainsApi = {
-  async list(): Promise<{ domains: any[]; current: string }> {
-    const { data } = await client.get('/channel/domains');
+  async list(): Promise<{ domains: DomainInfo[]; current: string }> {
+    const { data } = await client.get<{ domains: DomainInfo[]; current: string }>('/channel/domains');
     return data;
   },
 
-  async reset(newDomain: string, confirm = true): Promise<any> {
-    const { data } = await client.post('/channel/reset-domain', { new_domain: newDomain, confirm });
+  async reset(newDomain: string, confirm = true): Promise<{ message: string }> {
+    const { data } = await client.post<{ message: string }>('/channel/reset-domain', { new_domain: newDomain, confirm });
     return data;
   },
 };
@@ -324,13 +671,13 @@ export const knowledgeApi = {
     limit?: number;
     offset?: number;
     min_score?: number;
-  }): Promise<{ items: any[] }> {
-    const { data } = await client.get('/knowledge-items', { params });
+  }): Promise<{ items: KnowledgeItem[] }> {
+    const { data } = await client.get<{ items: KnowledgeItem[] }>('/knowledge-items', { params });
     return data;
   },
 
-  async stats(): Promise<any> {
-    const { data } = await client.get('/knowledge-items/stats');
+  async stats(): Promise<KnowledgeItemStats> {
+    const { data } = await client.get<KnowledgeItemStats>('/knowledge-items/stats');
     return data;
   },
 
@@ -338,20 +685,20 @@ export const knowledgeApi = {
     await client.post(`/knowledge-items/${itemId}/reject`);
   },
 
-  async triggerCollection(): Promise<any> {
-    const { data } = await client.post('/knowledge-items/collect');
+  async triggerCollection(): Promise<{ message: string }> {
+    const { data } = await client.post<{ message: string }>('/knowledge-items/collect');
     return data;
   },
 
-  async createManual(payload: { title: string; content: string; game_id?: number }): Promise<any> {
-    const { data } = await client.post('/knowledge-items', payload);
+  async createManual(payload: { title: string; content: string; game_id?: number }): Promise<KnowledgeItem> {
+    const { data } = await client.post<KnowledgeItem>('/knowledge-items', payload);
     return data;
   },
 
   // ── Idea Queue ────────────────────────────────────────────────────────────
 
-  async getQueue(): Promise<{ queue: any[]; items: any[] }> {
-    const { data } = await client.get('/idea-queue');
+  async getQueue(): Promise<{ queue: QueueEntry[]; items: KnowledgeItem[] }> {
+    const { data } = await client.get<{ queue: QueueEntry[]; items: KnowledgeItem[] }>('/idea-queue');
     return data;
   },
 
@@ -360,8 +707,8 @@ export const knowledgeApi = {
     gameplayPreference?: number | null,
     reuseOverride?: string | null,
     gameplaySourceId?: number | null,
-  ): Promise<any> {
-    const { data } = await client.post('/idea-queue/add', {
+  ): Promise<{ queue: QueueEntry[]; message: string }> {
+    const { data } = await client.post<{ queue: QueueEntry[]; message: string }>('/idea-queue/add', {
       knowledge_item_id: knowledgeItemId,
       gameplay_preference: gameplayPreference ?? null,
       reuse_override: reuseOverride ?? null,
@@ -370,15 +717,15 @@ export const knowledgeApi = {
     return data;
   },
 
-  async removeFromQueue(knowledgeItemId: number): Promise<any> {
-    const { data } = await client.post('/idea-queue/remove', {
+  async removeFromQueue(knowledgeItemId: number): Promise<{ queue: QueueEntry[]; message: string }> {
+    const { data } = await client.post<{ queue: QueueEntry[]; message: string }>('/idea-queue/remove', {
       knowledge_item_id: knowledgeItemId,
     });
     return data;
   },
 
-  async reorderQueue(orderedIds: number[]): Promise<any> {
-    const { data } = await client.post('/idea-queue/reorder', orderedIds);
+  async reorderQueue(orderedIds: number[]): Promise<{ queue: QueueEntry[]; message: string }> {
+    const { data } = await client.post<{ queue: QueueEntry[]; message: string }>('/idea-queue/reorder', orderedIds);
     return data;
   },
 
@@ -387,8 +734,8 @@ export const knowledgeApi = {
     gameplayPreference?: number | null,
     reuseOverride?: string | null,
     gameplaySourceId?: number | null,
-  ): Promise<any> {
-    const { data } = await client.post('/idea-queue/update', {
+  ): Promise<{ queue: QueueEntry[]; message: string }> {
+    const { data } = await client.post<{ queue: QueueEntry[]; message: string }>('/idea-queue/update', {
       knowledge_item_id: knowledgeItemId,
       gameplay_preference: gameplayPreference ?? null,
       reuse_override: reuseOverride ?? null,
@@ -399,20 +746,20 @@ export const knowledgeApi = {
 
   // ── Gameplay Availability ─────────────────────────────────────────────────
 
-  async getGameplayAvailability(): Promise<{ games: any[]; max_uses: number }> {
-    const { data } = await client.get('/gameplay-availability');
+  async getGameplayAvailability(): Promise<{ games: GameAvailability[]; max_uses: number }> {
+    const { data } = await client.get<{ games: GameAvailability[]; max_uses: number }>('/gameplay-availability');
     return data;
   },
 
-  async getGameplaySourcesForGame(gameId: number): Promise<{ game_id: number; sources: any[]; min_free_seconds: number }> {
-    const { data } = await client.get(`/gameplay-availability/${gameId}/sources`);
+  async getGameplaySourcesForGame(gameId: number): Promise<{ game_id: number; sources: GameplaySourceInfo[]; min_free_seconds: number }> {
+    const { data } = await client.get<{ game_id: number; sources: GameplaySourceInfo[]; min_free_seconds: number }>(`/gameplay-availability/${gameId}/sources`);
     return data;
   },
 
   // ── Collection Focus ──────────────────────────────────────────────────────
 
-  async getCollectionFocus(): Promise<{ collection_focus: any }> {
-    const { data } = await client.get('/channel/collection-focus');
+  async getCollectionFocus(): Promise<{ collection_focus: CollectionFocus | null }> {
+    const { data } = await client.get<{ collection_focus: CollectionFocus | null }>('/channel/collection-focus');
     return data;
   },
 
@@ -422,20 +769,20 @@ export const knowledgeApi = {
     game_name?: string;
     topic?: string;
     item_types?: string[];
-  }): Promise<any> {
-    const { data } = await client.put('/channel/collection-focus', payload);
+  }): Promise<{ message: string }> {
+    const { data } = await client.post<{ message: string }>('/channel/collection-focus', payload);
     return data;
   },
 
-  async clearCollectionFocus(): Promise<any> {
-    const { data } = await client.delete('/channel/collection-focus');
+  async clearCollectionFocus(): Promise<{ message: string }> {
+    const { data } = await client.delete<{ message: string }>('/channel/collection-focus');
     return data;
   },
 
   // ── Current Job (automation) ──────────────────────────────────────────────
 
-  async getCurrentJob(): Promise<{ job: any }> {
-    const { data } = await client.get('/automation/current-job');
+  async getCurrentJob(): Promise<{ job: Job | null }> {
+    const { data } = await client.get<{ job: Job | null }>('/automation/current-job');
     return data;
   },
 };
@@ -444,13 +791,13 @@ export const knowledgeApi = {
 
 export const kidsApi = {
   // ── Topics ──────────────────────────────────────────────────────────────
-  async listTopics(): Promise<any[]> {
-    const { data } = await client.get('/kids/topics');
+  async listTopics(): Promise<KidsTopic[]> {
+    const { data } = await client.get<KidsTopic[]>('/kids/topics');
     return data;
   },
 
-  async createTopic(payload: any): Promise<any> {
-    const { data } = await client.post('/kids/topics', payload);
+  async createTopic(payload: { name: string; description?: string }): Promise<KidsTopic> {
+    const { data } = await client.post<KidsTopic>('/kids/topics', payload);
     return data;
   },
 
@@ -464,8 +811,8 @@ export const kidsApi = {
     status?: string;
     topic_id?: number;
     include_public?: boolean;
-  }): Promise<any[]> {
-    const { data } = await client.get('/kids/assets', { params });
+  }): Promise<KidsLibraryAsset[]> {
+    const { data } = await client.get<KidsLibraryAsset[]>('/kids/assets', { params });
     return data;
   },
 
@@ -473,13 +820,13 @@ export const kidsApi = {
     file: { uri: string; name: string; type: string },
     metadata?: { tags?: string; description?: string; topic_id?: number },
     onProgress?: (pct: number) => void,
-  ): Promise<any> {
+  ): Promise<KidsLibraryAsset> {
     const formData = new FormData();
     formData.append('file', file as any);
     if (metadata?.tags) formData.append('tags', metadata.tags);
     if (metadata?.description) formData.append('description', metadata.description);
     if (metadata?.topic_id) formData.append('topic_id', String(metadata.topic_id));
-    const { data } = await client.post('/kids/assets/upload', formData, {
+    const { data } = await client.post<KidsLibraryAsset>('/kids/assets/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: (e) => {
         if (e.total && onProgress) {
@@ -496,8 +843,8 @@ export const kidsApi = {
     description?: string;
     topic_id?: number;
     is_public?: boolean;
-  }): Promise<any> {
-    const { data } = await client.patch(`/kids/assets/${assetId}`, payload);
+  }): Promise<KidsLibraryAsset> {
+    const { data } = await client.patch<KidsLibraryAsset>(`/kids/assets/${assetId}`, payload);
     return data;
   },
 
@@ -505,8 +852,8 @@ export const kidsApi = {
     await client.delete(`/kids/assets/${assetId}`);
   },
 
-  async getAssetEvents(assetId: number): Promise<{ events: any[] }> {
-    const { data } = await client.get(`/kids/assets/${assetId}/events`);
+  async getAssetEvents(assetId: number): Promise<{ events: GameplayEvent[] }> {
+    const { data } = await client.get<{ events: GameplayEvent[] }>(`/kids/assets/${assetId}/events`);
     return data;
   },
 
@@ -515,23 +862,23 @@ export const kidsApi = {
   },
 
   // ── Ideas ───────────────────────────────────────────────────────────────
-  async listIdeas(params?: { status?: string; category?: string; limit?: number }): Promise<{ ideas: any[] }> {
-    const { data } = await client.get('/kids/ideas', { params });
+  async listIdeas(params?: { status?: string; category?: string; limit?: number }): Promise<{ ideas: KidsIdea[] }> {
+    const { data } = await client.get<{ ideas: KidsIdea[] }>('/kids/ideas', { params });
     return data;
   },
 
-  async getIdeaStats(): Promise<any> {
-    const { data } = await client.get('/kids/ideas/stats');
+  async getIdeaStats(): Promise<KidsIdeaStats> {
+    const { data } = await client.get<KidsIdeaStats>('/kids/ideas/stats');
     return data;
   },
 
-  async createIdea(payload: any): Promise<any> {
-    const { data } = await client.post('/kids/ideas', payload);
+  async createIdea(payload: { title: string; content: string; category: string; topic_id?: number; description?: string }): Promise<KidsIdea> {
+    const { data } = await client.post<KidsIdea>('/kids/ideas', payload);
     return data;
   },
 
-  async scoreIdea(ideaId: number): Promise<any> {
-    const { data } = await client.post(`/kids/ideas/${ideaId}/score`);
+  async scoreIdea(ideaId: number): Promise<KidsIdea & { job_id?: number }> {
+    const { data } = await client.post<KidsIdea & { job_id?: number }>(`/kids/ideas/${ideaId}/score`);
     return data;
   },
 
@@ -539,13 +886,13 @@ export const kidsApi = {
     await client.post(`/kids/ideas/${ideaId}/reject`);
   },
 
-  async convertIdea(ideaId: number, topicName?: string): Promise<any> {
-    const { data } = await client.post(`/kids/ideas/${ideaId}/convert`, { topic_name: topicName });
+  async convertIdea(ideaId: number, topicName?: string): Promise<KidsIdea> {
+    const { data } = await client.post<KidsIdea>(`/kids/ideas/${ideaId}/convert`, { topic_name: topicName });
     return data;
   },
 
-  async produceIdea(ideaId: number): Promise<any> {
-    const { data } = await client.post(`/kids/ideas/${ideaId}/produce`);
+  async produceIdea(ideaId: number): Promise<{ job_id: number; topic_id?: number; message: string }> {
+    const { data } = await client.post<{ job_id: number; topic_id?: number; message: string }>(`/kids/ideas/${ideaId}/produce`);
     return data;
   },
 
@@ -554,65 +901,55 @@ export const kidsApi = {
     ideas_per_category?: number;
     include_seasonal?: boolean;
     include_topic_library?: boolean;
-  }): Promise<any> {
-    const { data } = await client.post('/kids/ideas/discover', payload);
+  }): Promise<{ discovered: number; ideas: KidsIdea[]; job_id?: number }> {
+    const { data } = await client.post<{ discovered: number; ideas: KidsIdea[]; job_id?: number }>('/kids/ideas/discover', payload);
     return data;
   },
 
   // ── Idea Queue ──────────────────────────────────────────────────────────
-  async getIdeaQueue(): Promise<{ queue: number[]; items: any[] }> {
-    const { data } = await client.get('/kids/idea-queue');
+  async getIdeaQueue(): Promise<{ queue: number[]; items: KidsIdea[] }> {
+    const { data } = await client.get<{ queue: number[]; items: KidsIdea[] }>('/kids/idea-queue');
     return data;
   },
 
-  async addToIdeaQueue(ideaId: number): Promise<any> {
-    const { data } = await client.post('/kids/idea-queue/add', { idea_id: ideaId });
+  async addToIdeaQueue(ideaId: number): Promise<{ queue: number[]; message: string }> {
+    const { data } = await client.post<{ queue: number[]; message: string }>('/kids/idea-queue/add', { idea_id: ideaId });
     return data;
   },
 
-  async removeFromIdeaQueue(ideaId: number): Promise<any> {
-    const { data } = await client.post('/kids/idea-queue/remove', { idea_id: ideaId });
+  async removeFromIdeaQueue(ideaId: number): Promise<{ queue: number[]; message: string }> {
+    const { data } = await client.post<{ queue: number[]; message: string }>('/kids/idea-queue/remove', { idea_id: ideaId });
     return data;
   },
 
-  async reorderIdeaQueue(orderedIds: number[]): Promise<any> {
-    const { data } = await client.post('/kids/idea-queue/reorder', { idea_ids: orderedIds });
+  async reorderIdeaQueue(orderedIds: number[]): Promise<{ queue: number[]; message: string }> {
+    const { data } = await client.post<{ queue: number[]; message: string }>('/kids/idea-queue/reorder', { idea_ids: orderedIds });
     return data;
   },
 
-  async reconcileIdeaQueue(): Promise<any> {
-    const { data } = await client.post('/kids/idea-queue/reconcile');
+  async reconcileIdeaQueue(): Promise<{ queue: number[]; message: string }> {
+    const { data } = await client.post<{ queue: number[]; message: string }>('/kids/idea-queue/reconcile');
     return data;
   },
 
   // ── Topic Library & Seasonal ────────────────────────────────────────────
-  async getTopicLibrary(): Promise<any> {
-    const { data } = await client.get('/kids/topic-library');
+  async getTopicLibrary(): Promise<TopicLibraryEntry[]> {
+    const { data } = await client.get<TopicLibraryEntry[]>('/kids/topic-library');
     return data;
   },
 
-  async getSeasonalCalendar(): Promise<any> {
-    const { data } = await client.get('/kids/seasonal-calendar');
+  async getSeasonalCalendar(): Promise<SeasonalCalendarEntry[]> {
+    const { data } = await client.get<SeasonalCalendarEntry[]>('/kids/seasonal-calendar');
     return data;
   },
 };
 
-// ── App distribution (self-hosted update check) ──────────────────────────────
-
-export interface AppVersionInfo {
-  available: boolean;
-  version: string | null;
-  versionCode: number | null;
-  download_url: string | null;
-  released_at: string | null;
-  changelog: string | null;
-  size_bytes: number | null;
-}
+// ── App Version ──────────────────────────────────────────────────────────────
 
 export const appApi = {
   /** Check latest app version (public, no auth needed) */
   async getVersion(): Promise<AppVersionInfo> {
-    const { data } = await client.get('/app/version');
+    const { data } = await client.get<AppVersionInfo>('/app/version');
     return data;
   },
 };

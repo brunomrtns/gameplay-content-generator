@@ -393,6 +393,9 @@ def get_idea_queue(
         return {"queue": [], "items": []}
     queue = _normalize_idea_queue((auto.config or {}).get("idea_queue", []))
     # Fetch the actual items (preserve order)
+    # Also resolve gameplay_source filenames for display
+    from gpcg.domains.games.models import GameplaySource
+    source_cache: dict[int, str] = {}
     items = []
     for entry in queue:
         ki_id = entry.get("ki_id")
@@ -404,6 +407,13 @@ def get_idea_queue(
             item_out["gameplay_preference"] = entry.get("gameplay_preference")
             item_out["reuse_override"] = entry.get("reuse_override")
             item_out["gameplay_source_id"] = entry.get("gameplay_source_id")
+            # Resolve source filename for display
+            gs_id = entry.get("gameplay_source_id")
+            if gs_id is not None:
+                if gs_id not in source_cache:
+                    src = db.get(GameplaySource, gs_id)
+                    source_cache[gs_id] = src.filename if src else None
+                item_out["gameplay_source_filename"] = source_cache[gs_id]
             items.append(item_out)
     return {"queue": queue, "items": items}
 
