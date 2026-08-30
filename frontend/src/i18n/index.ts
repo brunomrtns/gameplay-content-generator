@@ -42,7 +42,9 @@ void i18n
     ns: [...NAMESPACES],
     defaultNS: "common",
     backend: {
-      loadPath: "/locales/{{lng}}/{{ns}}.json",
+      // In production the app is served under /gpcg/, so the loadPath
+      // must include the base path. Vite sets import.meta.env.BASE_URL.
+      loadPath: `${import.meta.env.BASE_URL}locales/{{lng}}/{{ns}}.json`,
     },
     detection: {
       order: ["localStorage", "navigator", "htmlTag"],
