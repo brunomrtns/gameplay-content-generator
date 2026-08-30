@@ -83,6 +83,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Cookie refresh middleware — repass Set-Cookie from BI Identity to browser
+    # so the user doesn't get logged out every 15 minutes when bi_auth expires.
+    from gpcg.infrastructure.auth import CookieRefreshMiddleware
+    app.add_middleware(CookieRefreshMiddleware)
+
     # API routes
     app.include_router(auth_router, prefix="/api")
     app.include_router(automation_router, prefix="/api")

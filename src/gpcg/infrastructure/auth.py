@@ -22,6 +22,8 @@ from typing import Optional
 import httpx
 import jwt
 from fastapi import Depends, HTTPException, Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from sqlalchemy.orm import Session
 
 from gpcg.config import get_settings
@@ -35,6 +37,8 @@ log = logging.getLogger(__name__)
 _BI_USER_KEY = "_bi_user"
 # Cache the local user resolved from Bearer token on the request.
 _TOKEN_USER_KEY = "_token_user"
+# Key for storing Set-Cookie headers to repass to the browser
+_SET_COOKIE_KEY = "_bi_set_cookies"
 
 
 def _validate_bi_user(request: Request) -> Optional[dict]:
@@ -89,6 +93,20 @@ def _validate_bi_user(request: Request) -> Optional[dict]:
         log.debug(f"BI Identity check returned {resp.status_code}")
         return None
 
+    # Repass Set-Cookie headers from BI Identity to the browser.
+    # When bi_auth expires (15min), BI Identity rotates it using bi_refresh
+    # and sends a Set-Cookie with the new token. Without this, the browser
+    # never gets the refreshed cookie and the user is logged out after 15min.
+    set_cookie_headers = resp.headers.get_list("set-cookie")
+    if set_cookie_headers:
+        repass = []
+        for cookie_header in set_cookie_headers:
+            # Only repass bi_auth and bi_refresh cookies (not others)
+            if "bi_auth=" in cookie_header or "bi_refresh=" in cookie_header:
+                repass.append(cookie_header)
+        if repass:
+            setattr(request.state, _SET_COOKIE_KEY, repass)
+
     data = resp.json()
     # /api/auth/check returns the user object directly (not wrapped in {user: ...})
     bi_user = data.get("user") if "user" in data else data
@@ -99,7 +117,11 @@ def _validate_bi_user(request: Request) -> Optional[dict]:
     # Cache on request state
     setattr(request.state, _BI_USER_KEY, bi_user)
     # Cache in Redis (TTL 10s — short window for security)
-    cache_set(cache_key, bi_user, ttl=10)
+    # NOTE: only cache if the access token was valid (not refreshed) —
+    # if BI Identity rotated the cookie, the cached user would be tied to
+    # the old token. We detect rotation by checking if Set-Cookie was sent.
+    if not set_cookie_headers:
+        cache_set(cache_key, bi_user, ttl=10)
     return bi_user
 
 
@@ -320,3 +342,28 @@ def get_optional_user(
         return user
     except Exception:
         return None
+
+
+class CookieRefreshMiddleware(BaseHTTPMiddleware):
+    """Repass Set-Cookie headers from BI Identity to the browser.
+
+    When _validate_bi_user detects that BI Identity rotated the bi_auth
+    cookie (via bi_refresh), it stores the Set-Cookie headers on
+    request.state. This middleware copies them to the actual HTTP response
+    so the browser receives the refreshed cookie.
+
+    Without this, the GPCG backend calls BI Identity server-side, gets a
+    new cookie in the httpx response, but never sends it to the browser —
+    causing the user to be logged out every 15 minutes when the access
+    token expires.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        # Check if _validate_bi_user stored cookies to repass
+        # (only set when BI Identity rotated the token)
+        repass = getattr(request.state, _SET_COOKIE_KEY, None)
+        if repass:
+            for cookie_header in repass:
+                response.headers.append("set-cookie", cookie_header)
+        return response
