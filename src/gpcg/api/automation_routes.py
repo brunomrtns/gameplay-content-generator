@@ -393,16 +393,32 @@ def check_automation(
         if not user or not user.google_user_id:
             continue
 
-        # Check if there are gameplays available
-        ready_count = db.query(GameplaySource).filter(
-            GameplaySource.user_id == auto.user_id,
+        # Check if there are gameplays available.
+        # Count own gameplays + public gameplays from other users when the
+        # user has opted into the public fallback.
+        cfg = auto.config or {}
+        fallback_policy = cfg.get("fallback_policy")
+        accept_public = cfg.get("accept_public_gameplays")
+        allows_public = fallback_policy == "allow_public" or accept_public is True
+
+        from sqlalchemy import or_
+        ready_q = db.query(GameplaySource).filter(
             GameplaySource.ingestion_status == IngestionStatus.ready.value,
             GameplaySource.enabled == True,
-        ).count()
+        )
+        if allows_public:
+            ready_q = ready_q.filter(
+                or_(
+                    GameplaySource.user_id == auto.user_id,
+                    GameplaySource.is_public == True,
+                )
+            )
+        else:
+            ready_q = ready_q.filter(GameplaySource.user_id == auto.user_id)
+        ready_count = ready_q.count()
         if ready_count == 0:
             continue
 
-        cfg = auto.config or {}
         # V3: Reconciliador — auto-fill queue with fresh KIs up to max_queue_size
         # Runs on VPS, independent of worker. Also triggered after content
         # collection and when user opens the ideas page.
@@ -815,11 +831,25 @@ def get_editorial_data(
     from sqlalchemy import select, func, desc
     from datetime import datetime, timezone, timedelta
 
-    # 1. Build inventory: games with gameplay sources
+    # 1. Build inventory: games with gameplay sources.
+    # Include public gameplays from other users when the user has opted
+    # into the public fallback.
+    auto = db.query(Automation).filter(Automation.user_id == user_id).first()
+    auto_cfg = (auto.config or {}) if auto else {}
+    allows_public = (
+        auto_cfg.get("fallback_policy") == "allow_public"
+        or auto_cfg.get("accept_public_gameplays") is True
+    )
+    from sqlalchemy import or_ as _or
+    gameplay_vis = (
+        or_(GameplaySource.user_id == user_id, GameplaySource.is_public == True)
+        if allows_public
+        else GameplaySource.user_id == user_id
+    )
     games_with_gameplay = db.execute(
         select(Game, func.count(GameplaySource.id), func.sum(GameplaySource.duration))
         .join(GameplaySource, GameplaySource.game_id == Game.id)
-        .where(GameplaySource.user_id == user_id)
+        .where(gameplay_vis)
         .where(GameplaySource.ingestion_status == IngestionStatus.ready.value)
         .group_by(Game.id)
     ).all()
@@ -892,7 +922,7 @@ def get_editorial_data(
 
         inv["gameplay_sources_total"] = db.execute(
             select(func.count(GameplaySource.id))
-            .where(GameplaySource.user_id == user_id)
+            .where(gameplay_vis)
             .where(GameplaySource.game_id == game.id)
         ).scalar() or 0
 
@@ -1269,12 +1299,27 @@ def create_job_from_automation(user_id: int) -> int | None:
         if not user.google_user_id:
             return None
 
-        # Check if there are gameplays available
-        ready_count = session.query(GameplaySource).filter(
-            GameplaySource.user_id == user_id,
+        # Check if there are gameplays available (own + public fallback)
+        cfg = auto.config or {}
+        allows_public = (
+            cfg.get("fallback_policy") == "allow_public"
+            or cfg.get("accept_public_gameplays") is True
+        )
+        from sqlalchemy import or_ as _or2
+        ready_q = session.query(GameplaySource).filter(
             GameplaySource.ingestion_status == IngestionStatus.ready.value,
             GameplaySource.enabled == True,
-        ).count()
+        )
+        if allows_public:
+            ready_q = ready_q.filter(
+                _or2(
+                    GameplaySource.user_id == user_id,
+                    GameplaySource.is_public == True,
+                )
+            )
+        else:
+            ready_q = ready_q.filter(GameplaySource.user_id == user_id)
+        ready_count = ready_q.count()
         if ready_count == 0:
             return None
 
@@ -1379,15 +1424,24 @@ def create_job_from_automation(user_id: int) -> int | None:
             # cause the render pipeline to fail with "no gameplay assets available".
             if not bg_game:
                 from gpcg.domains.games.models import GameplayAsset
-                bg_game = session.query(Game).join(
+                bg_game_q = session.query(Game).join(
                     GameplaySource, GameplaySource.game_id == Game.id
                 ).join(
                     GameplayAsset, GameplayAsset.source_id == GameplaySource.id
                 ).filter(
-                    GameplaySource.user_id == user_id,
                     GameplaySource.ingestion_status == IngestionStatus.ready.value,
             GameplaySource.enabled == True,
-                ).order_by(Game.id).first()
+                )
+                if allows_public:
+                    bg_game_q = bg_game_q.filter(
+                        _or2(
+                            GameplaySource.user_id == user_id,
+                            GameplaySource.is_public == True,
+                        )
+                    )
+                else:
+                    bg_game_q = bg_game_q.filter(GameplaySource.user_id == user_id)
+                bg_game = bg_game_q.order_by(Game.id).first()
 
             if not bg_game:
                 log.warning("automation: idea queue has items but no gameplay available")
