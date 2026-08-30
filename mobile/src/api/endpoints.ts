@@ -254,6 +254,7 @@ export interface ChannelProfile {
   description: string;
   domain: string;
   language: string;
+  // Multilingual: target_language controls script/TTS/subtitle language
   target_language: string;
   prompt_version: string;
   [key: string]: any;

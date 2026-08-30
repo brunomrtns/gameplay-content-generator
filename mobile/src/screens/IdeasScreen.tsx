@@ -86,6 +86,7 @@ const AVAILABILITY_COLORS: Record<string, any> = {
 // ── Main Screen ──────────────────────────────────────────────────────────────
 
 export function IdeasScreen() {
+  // Stage labels use i18n (t function) — falls back to stage_label from backend
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [filterType, setFilterType] = useState<string>('');
