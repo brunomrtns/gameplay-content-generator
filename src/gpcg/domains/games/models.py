@@ -250,7 +250,7 @@ class GameplaySource(Base):
     upload_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
     filename: Mapped[str] = mapped_column(String(255), index=True)
-    file_hash: Mapped[str] = mapped_column(String(64), index=True)
+    file_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     file_size: Mapped[int] = mapped_column(Integer, default=0)
 
     capture_source: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

@@ -256,8 +256,43 @@ def init_db() -> None:
     # V2: gameplay_clip_usage table is created by create_all() above
     # V2: data migrations (slug generation, aliases JSON → game_aliases, user_id deprecation)
     _migrate_v2_game_registry(engine)
+    # Drop old unique index on gameplay_sources.file_hash (singular).
+    # The model now uses a composite (file_hash, user_id) constraint, but
+    # older databases may still have the original UNIQUE(file_hash) which
+    # blocks re-uploading a file after soft-deleting the previous source.
+    _drop_old_file_hash_unique(engine)
     # Seed admin user if not exists (linked to BI Identity by email)
     _seed_admin_user()
+
+
+def _drop_old_file_hash_unique(engine) -> None:
+    """Drop the old UNIQUE(file_hash) index on gameplay_sources if it exists.
+
+    The model now defines a composite UniqueConstraint(file_hash, user_id),
+    but older databases created before that change have a singular
+    UNIQUE(file_hash) constraint (sqlite_autoindex_gameplay_sources_1).
+    This blocks re-uploading a file after soft-deleting the previous
+    source, because the old row still has the hash even though it's
+    marked as deleted.
+    """
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        # Find unique indexes on gameplay_sources
+        result = conn.execute(text(
+            "SELECT name FROM pragma_index_list('gameplay_sources') "
+            "WHERE origin = 'u' AND name LIKE 'sqlite_autoindex%'"
+        ))
+        autoindexes = [row[0] for row in result]
+        for idx_name in autoindexes:
+            # Check if this index is on just file_hash (not composite)
+            cols_result = conn.execute(text(
+                f"SELECT name FROM pragma_index_info('{idx_name}')"
+            ))
+            cols = [row[0] for row in cols_result]
+            if cols == ["file_hash"]:
+                log.info(f"Dropping old UNIQUE(file_hash) index: {idx_name}")
+                conn.execute(text(f"DROP INDEX IF EXISTS {idx_name}"))
+                conn.commit()
 
 
 def _migrate_story_assets_topic_id_nullable(engine) -> None:

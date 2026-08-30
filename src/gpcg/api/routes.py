@@ -607,6 +607,9 @@ def delete_gameplay_source(
     source.ingestion_status = IngestionStatus.deleted.value
     source.processing_status = None
     source.is_public = False
+    # Nullify file_hash so the UNIQUE constraint doesn't block re-uploads
+    # of the same file after deletion
+    source.file_hash = None
 
     # Create cleanup job so worker deletes physical files
     cleanup_job = Job(
