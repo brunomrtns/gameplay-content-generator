@@ -1,3 +1,4 @@
+// i18n: aligned with web i18n migration cycle
 import { useLiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
 import { Card, Badge } from "@/components/ui";
