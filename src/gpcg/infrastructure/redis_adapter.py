@@ -80,9 +80,12 @@ class RedisAdapter:
         if self._client is not None and self._available:
             return True
 
-        # Throttle connection attempts (don't retry more than once per second)
+        # Throttle: after a full failure cycle, wait 30s before trying again.
+        # This prevents the worker from spending 5s per poll cycle retrying a
+        # Redis that is permanently unreachable (e.g. worker running outside
+        # Docker with redis_url=redis://redis:6379/0).
         now = time.time()
-        if now - self._last_check < 1.0 and self._connect_attempts > 0:
+        if self._connect_attempts >= 5 and now - self._last_check < 30.0:
             return self._available
 
         max_retries = 5
@@ -103,6 +106,20 @@ class RedisAdapter:
                 log.info(f"Redis connected: {self._url}")
                 return True
             except Exception as e:
+                # DNS resolution errors (hostname doesn't resolve) are
+                # permanent — no point retrying 5 times with 1s sleep.
+                # Fail fast on the first attempt to avoid blocking the
+                # worker loop for 5 seconds every cycle.
+                err_str = str(e).lower()
+                if "name or service not known" in err_str or \
+                   "temporary failure in name resolution" in err_str or \
+                   "nodename nor servname provided" in err_str or \
+                   "getaddrinfo" in err_str:
+                    log.warning(f"Redis unreachable (DNS failure): {self._url} — not retrying")
+                    self._client = None
+                    self._available = False
+                    return False
+
                 log.warning(f"Redis connect attempt {attempt + 1}/{max_retries} failed: {e}")
                 self._client = None
                 self._available = False
