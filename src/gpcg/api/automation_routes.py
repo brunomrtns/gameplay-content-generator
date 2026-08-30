@@ -1615,8 +1615,6 @@ def create_job_from_automation(user_id: int) -> int | None:
         # Determine whether the user accepts public gameplays (fallback_policy
         # == "allow_public" or accept_public_gameplays == True) so the
         # editorial inventory includes public gameplay sources.
-        from gpcg.domain.visibility import user_allows_public_gameplays
-
         _auto = session.query(Automation).filter(Automation.user_id == user_id).first()
         _accept_public = user_allows_public_gameplays(_auto.config if _auto else None)
         decision = editorial.decide_next_video(
