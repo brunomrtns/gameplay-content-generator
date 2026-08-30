@@ -274,14 +274,41 @@ def start_automation(
     if not user.google_user_id:
         raise HTTPException(status_code=400, detail="Conecte seu canal do YouTube primeiro")
 
-    # Check if there are gameplays available
-    sources = db.query(GameplaySource).filter(
+    # Check if there are gameplays available.
+    # Count the user's own ready+enabled gameplays, PLUS public gameplays
+    # from other users when the user has opted into the public fallback
+    # (fallback_policy == "allow_public" or accept_public_gameplays == true).
+    own_sources = db.query(GameplaySource).filter(
         GameplaySource.user_id == user.id,
         GameplaySource.ingestion_status == IngestionStatus.ready.value,
-            GameplaySource.enabled == True,
+        GameplaySource.enabled == True,
     ).count()
-    if sources == 0:
-        raise HTTPException(status_code=400, detail="Envie gameplays primeiro")
+
+    if own_sources == 0:
+        # No own gameplays — check if the user allows public fallback
+        # and there are public gameplays available from other users.
+        cfg = auto.config or {}
+        fallback_policy = cfg.get("fallback_policy")
+        accept_public = cfg.get("accept_public_gameplays")
+        allows_public = fallback_policy == "allow_public" or accept_public is True
+
+        if allows_public:
+            public_sources = db.query(GameplaySource).filter(
+                GameplaySource.is_public == True,
+                GameplaySource.user_id != user.id,
+                GameplaySource.ingestion_status == IngestionStatus.ready.value,
+                GameplaySource.enabled == True,
+            ).count()
+            if public_sources == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Nenhuma gameplay pública disponível no momento. Envie suas próprias gameplays ou aguarde novas gameplays públicas.",
+                )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Envie gameplays primeiro ou ative o uso de gameplays públicas em Automação → Conteúdo → Fallback.",
+            )
 
     with session_scope() as session:
         a = session.get(Automation, auto.id)
