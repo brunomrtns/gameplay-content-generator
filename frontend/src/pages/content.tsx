@@ -272,6 +272,8 @@ function MediaTab() {
       });
       updateUpload(id, { status: "done", progress: 100 });
       toast.success(`"${file.name}" enviado com sucesso`);
+      // Invalidate sources list so the new gameplay appears immediately
+      queryClient.invalidateQueries({ queryKey: ['sources'] });
       setTimeout(() => removeUpload(id), 5000);
     } catch (err: any) {
       updateUpload(id, { status: "error", error: err.message || "Erro no upload" });

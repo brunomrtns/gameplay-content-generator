@@ -15,8 +15,21 @@ from __future__ import annotations
 
 import logging
 import secrets
+import urllib.parse
 from pathlib import Path
 from typing import Optional
+
+
+def _safe_content_disposition(filename: str) -> str:
+    """Build a Content-Disposition header that handles non-ASCII filenames.
+
+    HTTP headers are latin-1 (RFC 7230). Filenames with unicode chars
+    (e.g. fullwidth colon '：') crash Starlette's header encoding.
+    Use RFC 5987 encoding (filename*=UTF-8''...) with an ASCII fallback.
+    """
+    ascii_fallback = filename.encode("ascii", "replace").decode("ascii")
+    encoded = urllib.parse.quote(filename, safe="")
+    return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -117,11 +130,14 @@ def download_gameplay(
                     break
                 yield chunk
 
+    # Sanitize filename for HTTP header (latin-1 only — RFC 7230).
+    # Use RFC 5987 encoding for non-ASCII filenames so the worker still
+    # gets the real name, plus an ASCII fallback.
     return StreamingResponse(
         _stream_file(file_path),
         media_type="video/mp4",
         headers={
-            "Content-Disposition": f'attachment; filename="{source.filename}"',
+            "Content-Disposition": _safe_content_disposition(source.filename),
             "Content-Length": str(file_path.stat().st_size),
         },
     )
@@ -169,7 +185,7 @@ def download_voice_worker(
                 _stream(p),
                 media_type="audio/wav",
                 headers={
-                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Disposition": _safe_content_disposition(filename),
                     "Content-Length": str(p.stat().st_size),
                 },
             )
@@ -228,7 +244,7 @@ def download_kids_asset(
         _stream(file_path),
         media_type=media_type,
         headers={
-            "Content-Disposition": f'attachment; filename="{asset.filename}"',
+            "Content-Disposition": _safe_content_disposition(asset.filename),
             "Content-Length": str(file_path.stat().st_size),
         },
     )
