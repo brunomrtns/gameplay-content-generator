@@ -1,0 +1,1 @@
+Mobile já invalida gameplays após upload na linha 103 do ContentScreen.tsx. Mudança web apenas alinha com o que mobile já fazia.
