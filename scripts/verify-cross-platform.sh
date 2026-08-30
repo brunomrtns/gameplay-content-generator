@@ -141,7 +141,8 @@ MAP=(
 
   # ── Componentes compartilhados ─────────────────────────────────────────────
   "frontend/src/components/worker-status.tsx|src/screens/DashboardScreen.tsx|Worker Status"
-  "frontend/src/components/game-search-modal.tsx|src/screens/ContentScreen.tsx|Busca de jogos"
+  # game-search-modal.tsx é web-only (no mobile a busca é inline no ContentScreen)
+  # — não parear para evitar falso positivo quando ContentScreen muda por outro motivo
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
