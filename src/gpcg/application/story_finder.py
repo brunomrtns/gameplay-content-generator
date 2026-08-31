@@ -29,6 +29,7 @@ from gpcg.domain.creative_plan import StoryConcept
 from gpcg.core.models import ContentPlan, Fact
 from gpcg.domains.games.models import Game
 from gpcg.domains.games.prompts import STORY_FINDER_SYSTEM as SYSTEM_PROMPT
+from gpcg.i18n.prompt_adapter import adapt_system_prompt
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 
@@ -57,6 +58,7 @@ class StoryFinder:
         *,
         background_game_id: Optional[int] = None,
         channel_context: str = "",
+        language_context=None,
     ) -> StoryConcept:
         """Find the story angle for the fact in a content plan.
 
@@ -99,7 +101,7 @@ class StoryFinder:
 
         try:
             data = self.llm.chat_json(
-                system=SYSTEM_PROMPT,
+                system=adapt_system_prompt(SYSTEM_PROMPT, language_context),
                 prompt=user_prompt,
                 model=s.gpcg_story_finder_model or None,
                 temperature=s.gpcg_story_finder_temperature,

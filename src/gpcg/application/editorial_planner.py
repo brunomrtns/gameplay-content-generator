@@ -43,6 +43,7 @@ from gpcg.domain.creative_plan import (
 from gpcg.core.models import ContentPlan, Fact
 from gpcg.domains.games.models import Game, GameplayEvent, GameplaySource
 from gpcg.domains.games.prompts import PLANNER_SYSTEM
+from gpcg.i18n.prompt_adapter import adapt_system_prompt
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 from sqlalchemy.orm import Session
@@ -71,6 +72,7 @@ class EditorialPlanner:
         background_game_id: Optional[int] = None,
         story_concept: Optional[StoryConcept] = None,
         channel_context: str = "",
+        language_context=None,
     ) -> VideoCreativePlan:
         """Analyze the content plan and produce a VideoCreativePlan.
 
@@ -112,7 +114,7 @@ class EditorialPlanner:
         # Call the LLM
         try:
             data = self.llm.chat_json(
-                system=PLANNER_SYSTEM,
+                system=adapt_system_prompt(PLANNER_SYSTEM, language_context),
                 prompt=user_prompt,
                 # Don't pass model explicitly — let LLMClient use its default
                 # (which is gpcg_llm_model_litellm in litellm mode, gpcg_llm_model

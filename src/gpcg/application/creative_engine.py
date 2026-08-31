@@ -295,6 +295,7 @@ class CreativeEngine:
         style: Optional[CreativeStyle] = None,
         humor_plan: Optional["HumorPlan"] = None,
         model_override: Optional[str] = None,
+        language_context=None,
     ) -> CreativeMaterial:
         """Generate hooks + angles + punchlines + observations in a single
         LLM call. Returns a CreativeMaterial (never raises — failures are
@@ -328,6 +329,8 @@ class CreativeEngine:
         max_tokens = s.gpcg_creative_engine_max_tokens
 
         system = SYSTEM_PROMPT_TEMPLATE.format(style_block=_build_style_block(style))
+        from gpcg.i18n.prompt_adapter import adapt_system_prompt
+        system = adapt_system_prompt(system, language_context)
         user_prompt = self._build_user_prompt(topic=topic, fact=fact, context=context)
 
         llm = self.llm or LLMClient()
@@ -364,6 +367,7 @@ class CreativeEngine:
         model_override: Optional[str] = None,
         narrative_beats: Optional[list["NarrativeBeat"]] = None,
         central_idea: str = "",
+        language_context=None,
     ) -> CreativeMaterial:
         """Generate beat-oriented creative material (V2).
 
@@ -395,6 +399,7 @@ class CreativeEngine:
             return self.generate_creative_material(
                 topic=topic, fact=fact, context=context, style=style,
                 humor_plan=humor_plan, model_override=model_override,
+                language_context=language_context,
             )
 
         style = style or get_style(s.gpcg_creative_engine_style)
@@ -413,6 +418,8 @@ class CreativeEngine:
             central_idea=central_idea or "(não especificada)",
             beats_block=beats_block,
         )
+        from gpcg.i18n.prompt_adapter import adapt_system_prompt
+        system = adapt_system_prompt(system, language_context)
         user_prompt = self._build_user_prompt(topic=topic, fact=fact, context=context)
 
         llm = self.llm or LLMClient()

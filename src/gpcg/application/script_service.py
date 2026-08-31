@@ -50,26 +50,9 @@ log = get_logger(__name__)
 
 
 def _adapt_system_prompt(prompt: str, language_context) -> str:
-    """Replace hardcoded pt-BR language directives in a system prompt with
-    the actual target language from the LanguageContext.
-
-    The stock prompts (DRAFT_SYSTEM, PLAN_DRAFT_SYSTEM, REVISION_SYSTEM, etc.)
-    all hardcode 'Brazilian Portuguese (pt-BR)'. When generating content in
-    another language, we swap those references for the correct language name.
-    """
-    if language_context is None or language_context.is_default:
-        return prompt  # pt-BR is the default — no change needed
-    from gpcg.i18n.language_context import get_language_name
-    name = get_language_name(language_context.language)
-    # Replace the hardcoded language references
-    prompt = prompt.replace("Brazilian Portuguese (pt-BR)", name)
-    prompt = prompt.replace("100% in Portuguese", f"100% in {name}")
-    prompt = prompt.replace("in Portuguese.", f"in {name}.")
-    prompt = prompt.replace("in Portuguese,", f"in {name},")
-    prompt = prompt.replace("Keep it in pt-BR.", f"Keep it in {language_context.language}.")
-    prompt = prompt.replace("the script must be 100% Portuguese", f"the script must be 100% {name}")
-    prompt = prompt.replace("a Brazilian gaming", "a gaming")
-    return prompt
+    """Adapt a system prompt for the target language (delegates to i18n)."""
+    from gpcg.i18n.prompt_adapter import adapt_system_prompt
+    return adapt_system_prompt(prompt, language_context)
 
 
 
@@ -135,6 +118,12 @@ class ScriptService:
 
         llm = self.llm or LLMClient()
         s = self.settings
+
+        # Debug: log language context for tracing multilingual issues
+        if language_context is not None:
+            log.info(f"script_service: language_context={language_context.language} is_default={language_context.is_default}")
+        else:
+            log.warning("script_service: language_context is None — falling back to pt-BR")
 
         # ── Language-aware character targets ──────────────────────────────
         # Mandarin Chinese has ~3.5 chars/sec vs ~13-15 for Latin scripts.

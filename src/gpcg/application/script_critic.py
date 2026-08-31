@@ -36,6 +36,7 @@ from gpcg.domain.creative_plan import (
     VideoCreativePlan,
 )
 from gpcg.domains.games.prompts import CRITIC_SYSTEM, SECTION_CRITIC_SYSTEM
+from gpcg.i18n.prompt_adapter import adapt_system_prompt
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 
@@ -61,6 +62,7 @@ class ScriptCritic:
         *,
         revision_count: int = 0,
         source_fact: str = "",
+        language_context=None,
     ) -> ScriptReview:
         """Evaluate a script and return a ScriptReview.
 
@@ -92,7 +94,7 @@ class ScriptCritic:
         model = s.gpcg_script_critic_model or None  # empty = default text model
         try:
             data = self.llm.chat_json(
-                system=CRITIC_SYSTEM,
+                system=adapt_system_prompt(CRITIC_SYSTEM, language_context),
                 prompt=user_prompt,
                 model=model,
                 temperature=s.gpcg_script_critic_temperature,
@@ -127,6 +129,7 @@ class ScriptCritic:
         *,
         revision_count: int = 0,
         source_fact: str = "",
+        language_context=None,
     ) -> ScriptReview:
         """Evaluate a script SECTION BY SECTION (V2).
 
@@ -167,7 +170,7 @@ class ScriptCritic:
         model = s.gpcg_script_critic_model or None
         try:
             data = self.llm.chat_json(
-                system=SECTION_CRITIC_SYSTEM,
+                system=adapt_system_prompt(SECTION_CRITIC_SYSTEM, language_context),
                 prompt=user_prompt,
                 model=model,
                 temperature=s.gpcg_script_critic_temperature,

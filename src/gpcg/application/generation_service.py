@@ -509,6 +509,7 @@ class GenerationService:
             story_concept = self._run_story_finding(
                 job_id, llm=llm, is_curiosity=is_curiosity, bg_game_id=bg_game_id,
                 channel_context=cp_context_story,
+                language_context=gen_ctx,
             )
 
         # ── Stage: editorial_planning (NEW — produces VideoCreativePlan) ────
@@ -519,6 +520,7 @@ class GenerationService:
                 job_id, llm=llm, is_curiosity=is_curiosity, bg_game_id=bg_game_id,
                 story_concept=story_concept,
                 channel_context=cp_context_editorial,
+                language_context=gen_ctx,
             )
 
         # ── Stage: creative_engine (optional, Qwen3-14B) ─────────────────────
@@ -590,7 +592,8 @@ class GenerationService:
         if self.settings.gpcg_script_critic_enabled:
             self._set_stage(job_id, JobStage.script_review)
             script = self._run_script_review(
-                job_id, llm=llm, creative_plan=creative_plan
+                job_id, llm=llm, creative_plan=creative_plan,
+                language_context=gen_ctx,
             )
 
         # ── Stage: tts ──────────────────────────────────────────────────────
@@ -1343,6 +1346,7 @@ class GenerationService:
         bg_game_id: Optional[int],
         story_concept: Optional[StoryConcept] = None,
         channel_context: str = "",
+        language_context=None,
     ) -> Optional[VideoCreativePlan]:
         """Run the editorial planning stage for a job.
 
@@ -1364,6 +1368,7 @@ class GenerationService:
                 session, plan, job_type=job_type, background_game_id=bg_game_id,
                 story_concept=story_concept,
                 channel_context=channel_context,
+                language_context=language_context,
             )
 
             if creative_plan.success:
@@ -1389,6 +1394,7 @@ class GenerationService:
         is_curiosity: bool,
         bg_game_id: Optional[int],
         channel_context: str = "",
+        language_context=None,
     ) -> Optional[StoryConcept]:
         """Run the story finding stage for a job (V2).
 
@@ -1410,6 +1416,7 @@ class GenerationService:
             concept = self.story_finder.find_story(
                 session, plan, background_game_id=bg_game_id,
                 channel_context=channel_context,
+                language_context=language_context,
             )
 
             if concept.success:
@@ -1486,6 +1493,7 @@ class GenerationService:
         *,
         llm: LLMClient,
         creative_plan: Optional[VideoCreativePlan],
+        language_context=None,
     ) -> Optional[Script]:
         """Run the script critic stage for a job.
 
@@ -1510,6 +1518,11 @@ class GenerationService:
             current_script = session.get(Script, script_id)
             if current_script is None:
                 return None
+
+            # Build gen_ctx from artifacts if not provided
+            if language_context is None:
+                from gpcg.i18n.language_context import GenerationContext
+                language_context = GenerationContext.from_artifacts(job.artifacts)
             # Get the content plan and fact for factual accuracy checking
             plan = session.get(ContentPlan, job.content_plan_id)
             if plan and plan.fact_id:
@@ -1536,6 +1549,7 @@ class GenerationService:
                     creative_plan or VideoCreativePlan(),
                     revision_count=revision_count,
                     source_fact=source_fact,
+                    language_context=gen_ctx,
                 )
             else:
                 review = self.script_critic.review(
@@ -1543,6 +1557,7 @@ class GenerationService:
                     creative_plan or VideoCreativePlan(),
                     revision_count=revision_count,
                     source_fact=source_fact,
+                    language_context=gen_ctx,
                 )
             reviews.append(review.to_dict())
             log.info(
@@ -1631,6 +1646,10 @@ class GenerationService:
                 log.warning(f"creative_engine: no content plan for job #{job_id}, skipping")
                 return None
 
+            # Multilingual: build GenerationContext from job artifacts
+            from gpcg.i18n.language_context import GenerationContext
+            gen_ctx = GenerationContext.from_artifacts(job.artifacts)
+
             fact_text = ""
             if plan.fact_id:
                 fact = session.get(Fact, plan.fact_id)
@@ -1671,6 +1690,7 @@ class GenerationService:
                 model_override=model_override,
                 narrative_beats=narrative_beats,
                 central_idea=central_idea,
+                language_context=gen_ctx,
             )
         else:
             material = self.creative_engine.generate_creative_material(
@@ -1680,6 +1700,7 @@ class GenerationService:
                 style=style,
                 humor_plan=humor_plan,
                 model_override=model_override,
+                language_context=gen_ctx,
             )
 
         # Persist into job artifacts
