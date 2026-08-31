@@ -174,6 +174,7 @@ class ScriptService:
             revision_prompt = self._build_revision_prompt(
                 plan, fact_text, previous_script, critic_feedback, creative_plan, s,
                 lang_min=lang_min, lang_max=lang_max,
+                language_context=language_context,
             )
             # Inject channel context + knowledge into revision
             if channel_block or knowledge_block:
@@ -258,6 +259,7 @@ class ScriptService:
                 plan, fact_text, creative_plan, s, story_concept=story_concept,
                 channel_block=channel_block, knowledge_block=knowledge_block,
                 lang_min=lang_min, lang_max=lang_max,
+                language_context=language_context,
             )
         else:
             draft_system = _adapt_system_prompt(DRAFT_SYSTEM, language_context)
@@ -282,6 +284,15 @@ class ScriptService:
         # Enrich with creative material when available
         if creative_material is not None and creative_material.success:
             draft_prompt += self._format_creative_material(creative_material)
+        # Multilingual: append language reminder at the end (recency bias)
+        if language_context is not None and not language_context.is_default:
+            from gpcg.i18n.language_context import get_language_name
+            lang_name = get_language_name(language_context.language)
+            draft_prompt += (
+                f"\nCRITICAL REMINDER: Write the script EXCLUSIVELY in {lang_name} ({language_context.language}).\n"
+                f"The material above may be in Portuguese, but your OUTPUT MUST be 100% in {lang_name}.\n"
+                f"Translate the concepts, do NOT write in Portuguese.\n"
+            )
         try:
             draft_data = llm.chat_json(
                 draft_system, draft_prompt,
@@ -469,6 +480,7 @@ class ScriptService:
         knowledge_block: str = "",
         lang_min: int = 800,
         lang_max: int = 1200,
+        language_context=None,
     ) -> str:
         """Build the draft prompt oriented by the VideoCreativePlan.
 
@@ -562,6 +574,18 @@ class ScriptService:
 
         parts.append("Write the narration script now. Follow the editorial plan. Return JSON.")
 
+        # Multilingual: append a STRONG language reminder at the end of the user
+        # prompt. The LLM has recency bias — the last instruction has the most
+        # weight. This counteracts the Portuguese creative material and fact text.
+        if language_context is not None and not language_context.is_default:
+            from gpcg.i18n.language_context import get_language_name
+            lang_name = get_language_name(language_context.language)
+            parts.append("")
+            parts.append(f"CRITICAL REMINDER: Write the script EXCLUSIVELY in {lang_name} ({language_context.language}).")
+            parts.append(f"The creative material, fact, and story concept above may be in Portuguese or another language,")
+            parts.append(f"but your OUTPUT MUST be 100% in {lang_name}. Translate the concepts, do NOT write in Portuguese.")
+            parts.append(f"Use natural {lang_name} phrasing, idioms, and cultural references.")
+
         return "\n".join(parts)
 
     def _format_story_concept(self, concept: StoryConcept) -> str:
@@ -591,6 +615,7 @@ class ScriptService:
         *,
         lang_min: int = 800,
         lang_max: int = 1200,
+        language_context=None,
     ) -> str:
         """Build the revision prompt using the critic's feedback."""
         parts = [
@@ -620,6 +645,14 @@ class ScriptService:
             parts.append("")
 
         parts.append("Produce the revised script. Address the critic's issues. Return JSON.")
+
+        # Multilingual: language reminder at the end
+        if language_context is not None and not language_context.is_default:
+            from gpcg.i18n.language_context import get_language_name
+            lang_name = get_language_name(language_context.language)
+            parts.append("")
+            parts.append(f"CRITICAL REMINDER: Write the revised script EXCLUSIVELY in {lang_name} ({language_context.language}).")
+            parts.append(f"The previous script and fact may be in Portuguese, but your OUTPUT MUST be 100% in {lang_name}.")
 
         return "\n".join(parts)
 
