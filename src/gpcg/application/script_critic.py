@@ -156,6 +156,7 @@ class ScriptCritic:
         if not getattr(s, "gpcg_script_critic_section_based", False):
             return self.review(
                 script_text, plan, revision_count=revision_count, source_fact=source_fact,
+                language_context=language_context,
             )
 
         # Split the script into sections

@@ -16,6 +16,7 @@ from gpcg.core.models import ContentPlan, Script
 from gpcg.domains.games.models import Game
 from gpcg.domains.games.prompts import METADATA_SYSTEM
 from gpcg.infrastructure.llm import LLMClient, LLMError
+from gpcg.i18n.prompt_adapter import adapt_system_prompt
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ class MetadataGenerator:
         game_name = game.canonical_name if game else ""
         script_text = (script.final or "")[:2000]  # Truncate for prompt size
 
-        system = METADATA_SYSTEM
+        system = adapt_system_prompt(METADATA_SYSTEM, language_context)
 
         # Language-aware prompt: when a language_context is provided, instruct
         # the LLM to write the title/description in the target language.
@@ -120,7 +121,13 @@ Script excerpt:
                 tags = []
 
             if not title:
-                title = (plan.topic or "Gameplay Curiosidade")[:100]
+                # Language-aware fallback title
+                if language_context is not None and not language_context.is_default:
+                    from gpcg.i18n.language_context import get_language_name
+                    lang_name = get_language_name(language_context.language)
+                    title = (plan.topic or f"{lang_name} Gameplay")[:100]
+                else:
+                    title = (plan.topic or "Gameplay Curiosidade")[:100]
             if not description:
                 description = (script.final or "")[:5000]
 
@@ -129,16 +136,23 @@ Script excerpt:
 
         except (LLMError, Exception) as e:
             log.warning(f"metadata_generator: LLM failed ({e}), using fallback")
-            return self._fallback(plan, script, game)
+            return self._fallback(plan, script, game, language_context=language_context)
 
     def _fallback(
         self,
         plan: ContentPlan,
         script: Script,
         game: Optional[Game] = None,
+        *,
+        language_context=None,
     ) -> VideoMetadata:
         """Simple fallback: topic as title, script as description, game name as tag."""
-        title = (plan.topic or "Gameplay Curiosidade")[:100]
+        if language_context is not None and not language_context.is_default:
+            from gpcg.i18n.language_context import get_language_name
+            lang_name = get_language_name(language_context.language)
+            title = (plan.topic or f"{lang_name} Gameplay")[:100]
+        else:
+            title = (plan.topic or "Gameplay Curiosidade")[:100]
         description = (script.final or "")[:5000]
         tags: list[str] = []
         if game:

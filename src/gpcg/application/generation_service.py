@@ -537,6 +537,33 @@ class GenerationService:
         else:
             creative_material = None
 
+        # ── Multilingual: translate creative inputs to target language ──────
+        # The creative material, story concept, and editorial plan are generated
+        # by LLMs whose system prompts contain Portuguese examples/instructions.
+        # Even with adapt_system_prompt, the output often comes out in Portuguese.
+        # Since these are fed to the script LLM as input, Portuguese creative
+        # material biases the script toward Portuguese. Translate them before
+        # the script stage so the script LLM sees target-language input.
+        if not gen_ctx.is_default:
+            if creative_material is not None and creative_material.success:
+                creative_material = self._translate_creative_material(creative_material, gen_ctx, llm)
+                with self._session_scope() as session:
+                    job = session.get(Job, job_id)
+                    job.artifacts = {**job.artifacts, "creative_material": creative_material.to_dict()}
+                    session.flush()
+            if story_concept is not None and story_concept.success:
+                story_concept = self._translate_story_concept(story_concept, gen_ctx, llm)
+                with self._session_scope() as session:
+                    job = session.get(Job, job_id)
+                    job.artifacts = {**job.artifacts, "story_concept": story_concept.to_dict()}
+                    session.flush()
+            if creative_plan is not None and creative_plan.success:
+                creative_plan = self._translate_creative_plan(creative_plan, gen_ctx, llm)
+                with self._session_scope() as session:
+                    job = session.get(Job, job_id)
+                    job.artifacts = {**job.artifacts, "creative_plan": creative_plan.to_dict()}
+                    session.flush()
+
         # ── Stage: script ───────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.script)
         if self._has_checkpoint(job_id, "script_id", gen_ctx=gen_ctx):
@@ -1717,6 +1744,67 @@ class GenerationService:
 
         log.info(f"creative_engine for job #{job_id}: {material.summary()}")
         return material
+
+    # ── Multilingual: translate creative inputs before script stage ──────────
+
+    def _translate_text(self, text: str, language_context, llm: LLMClient) -> str:
+        """Translate a single text string to the target language using chat()."""
+        if not text or not text.strip():
+            return text
+        from gpcg.i18n.language_context import get_language_name
+        lang_name = get_language_name(language_context.language)
+        system = (
+            f"You are a professional translator. Translate to {lang_name} ({language_context.language}). "
+            f"Return ONLY the translated text, no explanations. "
+            f"Preserve tone and meaning. Use native {lang_name} phrasing. "
+            f"Do NOT translate proper nouns or game titles."
+        )
+        user = f"Translate to {lang_name}:\n\n{text}"
+        try:
+            raw = llm.chat(system, user, temperature=0.3, max_tokens=2000)
+            result = raw.strip()
+            if result and len(result) >= 5:
+                return result
+            return text
+        except LLMError as e:
+            log.warning(f"text translation to {language_context.language} failed: {e}")
+            return text
+
+    def _translate_creative_material(self, material, language_context, llm: LLMClient):
+        """Translate all text fields of a CreativeMaterial to the target language."""
+        try:
+            material.hooks = [self._translate_text(h, language_context, llm) for h in material.hooks]
+            material.angles = [self._translate_text(a, language_context, llm) for a in material.angles]
+            material.punchlines = [self._translate_text(p, language_context, llm) for p in material.punchlines]
+            material.observations = [self._translate_text(o, language_context, llm) for o in material.observations]
+            log.info(f"translated creative material to {language_context.language}")
+        except Exception as e:
+            log.warning(f"creative material translation failed: {e}")
+        return material
+
+    def _translate_story_concept(self, concept, language_context, llm: LLMClient):
+        """Translate the text fields of a StoryConcept to the target language."""
+        from gpcg.domain.creative_plan import StoryConcept
+        try:
+            concept.angle = self._translate_text(concept.angle, language_context, llm)
+            concept.curiosity_gap = self._translate_text(concept.curiosity_gap, language_context, llm)
+            concept.narrative_hook = self._translate_text(concept.narrative_hook, language_context, llm)
+            concept.frame = self._translate_text(concept.frame, language_context, llm)
+            log.info(f"translated story concept to {language_context.language}")
+        except Exception as e:
+            log.warning(f"story concept translation failed: {e}")
+        return concept
+
+    def _translate_creative_plan(self, plan: VideoCreativePlan, language_context, llm: LLMClient):
+        """Translate the central_idea and narrative_beats of a VideoCreativePlan."""
+        try:
+            plan.central_idea = self._translate_text(plan.central_idea, language_context, llm)
+            for beat in plan.narrative_beats:
+                beat.description = self._translate_text(beat.description, language_context, llm)
+            log.info(f"translated creative plan to {language_context.language}")
+        except Exception as e:
+            log.warning(f"creative plan translation failed: {e}")
+        return plan
 
     def _set_stage(self, job_id: int, stage: JobStage) -> None:
         with self._session_scope() as session:

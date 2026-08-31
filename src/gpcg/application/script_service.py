@@ -499,11 +499,11 @@ class ScriptService:
         system = (
             f"You are a professional translator. "
             f"Your ONLY job is to translate text to {lang_name} ({language_context.language}). "
-            f"Output ONLY the translated text. No explanations, no notes, no commentary. "
             f"Preserve the tone, style, and meaning. Translate naturally — use native "
             f"{lang_name} phrasing and idioms, not word-for-word. "
             f"Do NOT translate proper nouns, game titles, or brand names unless they "
-            f"have a well-known {lang_name} equivalent."
+            f"have a well-known {lang_name} equivalent. "
+            f"Return ONLY the translated text, no explanations, no notes."
         )
         user = (
             f"Translate the following narration script to {lang_name} ({language_context.language}). "
@@ -511,8 +511,13 @@ class ScriptService:
             f"---\n{text}\n---"
         )
         try:
-            data = llm.chat_json(system, user, model=model, temperature=0.3, max_tokens=3000)
-            translated = (data.get("script") or data.get("translation") or data.get("text") or "").strip()
+            # Use chat() not chat_json() — the translation model returns plain text,
+            # not JSON. chat_json would fail to parse it and raise LLMError.
+            raw = llm.chat(system, user, model=model, temperature=0.3, max_tokens=3000)
+            translated = raw.strip()
+            # Strip leading/trailing quotes if the model wrapped the text
+            if translated.startswith('"') and translated.endswith('"'):
+                translated = translated[1:-1].strip()
             if translated and len(translated) >= 10:
                 log.info(
                     f"script translated to {language_context.language}: "
