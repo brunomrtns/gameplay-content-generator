@@ -139,8 +139,12 @@ class VideoGenerateAdapter:
 
         # Chunk the text using ai_media_core's segmentation (same as video-generate)
         # then synthesize each chunk individually + merge with FFmpeg.
+        # For CJK languages (zh, ja, ko), ai_media_core's clean_text_for_tts
+        # strips CJK characters via its overly broad emoji regex, and its
+        # sentence splitting doesn't handle CJK punctuation (。？！). We use
+        # a CJK-aware chunking path instead.
         script = textwrap.dedent(f"""\
-            import json, sys, os, tempfile, glob
+            import json, sys, os, tempfile, glob, re
             from pathlib import Path
             sys.path.insert(0, {str(self.vg_dir)!r})
             sys.path.insert(0, {str(self.ai_media_core)!r})
@@ -153,14 +157,52 @@ class VideoGenerateAdapter:
             language = {language!r}
             out_path = {str(output_wav)!r}
 
-            # Use ai_media_core's chunking (same logic video-generate uses)
-            from ai_media_core.speech.tts.text_processing import prepare_commercial_chunks
-            max_chars = int(os.environ.get("TTS_CHUNK_MAX_CHARS", "170"))
-            max_words = int(os.environ.get("TTS_CHUNK_MAX_WORDS", "24"))
-            min_words = int(os.environ.get("TTS_CHUNK_MIN_WORDS", "6"))
-            chunks = prepare_commercial_chunks(text, max_chars=max_chars, max_words=max_words, min_words=min_words)
-            if not chunks:
-                chunks = [text]
+            # CJK-aware chunking: for Chinese/Japanese/Korean, the standard
+            # clean_text_for_tts strips CJK chars (emoji regex too broad) and
+            # sentence splitting doesn't handle CJK punctuation. Use a simple
+            # CJK-aware splitter instead.
+            def is_cjk_lang(lang):
+                return lang.split("-")[0].lower() in ("zh", "ja", "ko")
+
+            def cjk_chunk(text, max_chars=200):
+                \"\"\"Split CJK text on CJK punctuation, then by max_chars.\"\"\"
+                # Split on CJK sentence-ending punctuation: 。！？
+                sentences = re.split(r'(?<=[。！？.!?])\\s*', text.strip())
+                sentences = [s.strip() for s in sentences if s.strip()]
+                if not sentences:
+                    return [text] if text.strip() else []
+                chunks = []
+                current = ""
+                for sent in sentences:
+                    candidate = (current + " " + sent).strip() if current else sent
+                    if len(candidate) > max_chars:
+                        if current:
+                            chunks.append(current)
+                        # If single sentence > max_chars, split by char count
+                        if len(sent) > max_chars:
+                            for i in range(0, len(sent), max_chars):
+                                chunks.append(sent[i:i+max_chars])
+                            current = ""
+                        else:
+                            current = sent
+                    else:
+                        current = candidate
+                if current:
+                    chunks.append(current)
+                return chunks
+
+            if is_cjk_lang(language):
+                chunks = cjk_chunk(text, max_chars=200)
+                if not chunks:
+                    chunks = [text]
+            else:
+                from ai_media_core.speech.tts.text_processing import prepare_commercial_chunks
+                max_chars = int(os.environ.get("TTS_CHUNK_MAX_CHARS", "170"))
+                max_words = int(os.environ.get("TTS_CHUNK_MAX_WORDS", "24"))
+                min_words = int(os.environ.get("TTS_CHUNK_MIN_WORDS", "6"))
+                chunks = prepare_commercial_chunks(text, max_chars=max_chars, max_words=max_words, min_words=min_words)
+                if not chunks:
+                    chunks = [text]
 
             from src.generators.tts import synthesize
 
