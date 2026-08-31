@@ -243,6 +243,15 @@ class ScriptService:
                     rewrite_count=0,
                     language=language_context.language if language_context else "pt-BR",
                 )
+                # Multilingual: translate the revised script to target language
+                if language_context is not None and not language_context.is_default:
+                    log.info(f"translating revised script to {language_context.language} (dedicated pass)")
+                    final = self._translate_script(final, language_context, llm, model=model_override)
+                    char_count = len(final)
+                    revised = self._translate_script(revised, language_context, llm, model=model_override)
+                    script.final = final
+                    script.optimized = revised
+                    script.char_count = char_count
                 session.add(script)
                 session.flush()
                 log.info(f"revised script #{script.id}: {char_count} chars, originality={report.score:.1f}")
@@ -427,6 +436,21 @@ class ScriptService:
                 f"(score={report.score:.1f}). Proceeding but flagging for review."
             )
 
+        # ── Multilingual: dedicated translation pass ─────────────────────────
+        # The script-generation LLM tends to follow the language of the input
+        # material (Portuguese facts, creative material, story concepts) rather
+        # than the language instructions in the prompt. A dedicated translation
+        # call that ONLY translates is far more reliable. We translate `final`
+        # (the narration text that goes to TTS) and `draft`/`optimized` for
+        # record-keeping consistency.
+        if language_context is not None and not language_context.is_default:
+            log.info(f"translating final script to {language_context.language} (dedicated pass)")
+            final = self._translate_script(final, language_context, llm, model=model_override)
+            char_count = len(final)
+            draft = self._translate_script(draft, language_context, llm, model=model_override)
+            if optimized:
+                optimized = self._translate_script(optimized, language_context, llm, model=model_override)
+
         script = Script(
             content_plan_id=content_plan_id,
             draft=draft,
@@ -446,6 +470,60 @@ class ScriptService:
             f"originality={report.score:.1f} (rewrites={rewrite_count})"
         )
         return script
+
+    def _translate_script(self, text: str, language_context, llm: LLMClient, *, model: Optional[str] = None) -> str:
+        """Dedicated translation pass — translates `text` to the target language.
+
+        This is a FOCUSED LLM call that ONLY translates. It does not create,
+        edit, or optimize content. This is far more reliable than asking the
+        script-generation model to both create AND translate in one shot,
+        because the generation model tends to follow the language of the
+        input material (Portuguese) rather than the language instructions.
+
+        The translation prompt is deliberately minimal and imperative:
+        - System: "You are a professional translator."
+        - User: "Translate the following text to {language}. Output ONLY the
+          translation, no explanations, no notes."
+
+        If the text is already in the target language, the model returns it
+        unchanged (or near-unchanged), which is harmless.
+        """
+        if language_context is None or language_context.is_default:
+            return text
+        if not text or not text.strip():
+            return text
+
+        from gpcg.i18n.language_context import get_language_name
+        lang_name = get_language_name(language_context.language)
+
+        system = (
+            f"You are a professional translator. "
+            f"Your ONLY job is to translate text to {lang_name} ({language_context.language}). "
+            f"Output ONLY the translated text. No explanations, no notes, no commentary. "
+            f"Preserve the tone, style, and meaning. Translate naturally — use native "
+            f"{lang_name} phrasing and idioms, not word-for-word. "
+            f"Do NOT translate proper nouns, game titles, or brand names unless they "
+            f"have a well-known {lang_name} equivalent."
+        )
+        user = (
+            f"Translate the following narration script to {lang_name} ({language_context.language}). "
+            f"Output ONLY the {lang_name} translation, nothing else.\n\n"
+            f"---\n{text}\n---"
+        )
+        try:
+            data = llm.chat_json(system, user, model=model, temperature=0.3, max_tokens=3000)
+            translated = (data.get("script") or data.get("translation") or data.get("text") or "").strip()
+            if translated and len(translated) >= 10:
+                log.info(
+                    f"script translated to {language_context.language}: "
+                    f"{len(text)} → {len(translated)} chars"
+                )
+                return translated
+            log.warning(f"translation to {language_context.language} produced empty/short result, keeping original")
+            return text
+        except LLMError as e:
+            log.error(f"script translation to {language_context.language} failed: {e}")
+            return text
 
     def _format_creative_material(self, material: "CreativeMaterial") -> str:
         """Format CreativeMaterial as an extra prompt section for the draft LLM.

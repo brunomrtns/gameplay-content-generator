@@ -584,9 +584,14 @@ class GenerationService:
                 session.flush()
 
         # ── Stage: humanization (V2 — break AI patterns, ensure orality) ────
-        if self.settings.gpcg_humanization_enabled:
+        # Skip humanization for non-pt-BR languages: the humanizer's regex
+        # patterns and LLM prompt are Portuguese-specific and would corrupt
+        # a Chinese/English script by reverting it to Portuguese.
+        if self.settings.gpcg_humanization_enabled and gen_ctx.is_default:
             self._set_stage(job_id, JobStage.humanization)
             self._run_humanization(job_id, llm=llm, creative_plan=creative_plan)
+        elif self.settings.gpcg_humanization_enabled and not gen_ctx.is_default:
+            log.info(f"skipping humanization for job #{job_id}: language={gen_ctx.language} (pt-BR-only stage)")
 
         # ── Stage: script_review (NEW — ScriptCritic evaluates + may revise) ─
         if self.settings.gpcg_script_critic_enabled:
@@ -1580,6 +1585,7 @@ class GenerationService:
                     critic_feedback=review.feedback,
                     previous_script=current_script.final,
                     user_id=job.user_id,
+                    language_context=language_context,
                 )
                 if revised is None:
                     log.error(f"script revision failed for job #{job_id}")
