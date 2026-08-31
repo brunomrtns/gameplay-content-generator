@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gameplay-content-generator"
-version = "0.13.15"
+version = "0.14.0"
 description = "Local-first gameplay-to-YouTube-Shorts content generator for the Bruno Integrations ecosystem"
 readme = "README.md"
 requires-python = ">=3.11"
