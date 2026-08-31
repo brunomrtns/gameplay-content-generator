@@ -49,6 +49,28 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
+def _adapt_system_prompt(prompt: str, language_context) -> str:
+    """Replace hardcoded pt-BR language directives in a system prompt with
+    the actual target language from the LanguageContext.
+
+    The stock prompts (DRAFT_SYSTEM, PLAN_DRAFT_SYSTEM, REVISION_SYSTEM, etc.)
+    all hardcode 'Brazilian Portuguese (pt-BR)'. When generating content in
+    another language, we swap those references for the correct language name.
+    """
+    if language_context is None or language_context.is_default:
+        return prompt  # pt-BR is the default — no change needed
+    from gpcg.i18n.language_context import get_language_name
+    name = get_language_name(language_context.language)
+    # Replace the hardcoded language references
+    prompt = prompt.replace("Brazilian Portuguese (pt-BR)", name)
+    prompt = prompt.replace("100% in Portuguese", f"100% in {name}")
+    prompt = prompt.replace("in Portuguese.", f"in {name}.")
+    prompt = prompt.replace("in Portuguese,", f"in {name},")
+    prompt = prompt.replace("Keep it in pt-BR.", f"Keep it in {language_context.language}.")
+    prompt = prompt.replace("the script must be 100% Portuguese", f"the script must be 100% {name}")
+    prompt = prompt.replace("a Brazilian gaming", "a gaming")
+    return prompt
+
 
 
 class ScriptService:
@@ -169,7 +191,7 @@ class ScriptService:
                 revision_prompt = f"{channel_block}{knowledge_block}\n{revision_prompt}"
             try:
                 rev_data = llm.chat_json(
-                    REVISION_SYSTEM, revision_prompt,
+                    _adapt_system_prompt(REVISION_SYSTEM, language_context), revision_prompt,
                     model=model_override,
                     temperature=0.6, max_tokens=2500,
                 )
@@ -198,7 +220,7 @@ class ScriptService:
                         f"Return the full expanded script (not just the additions)."
                     )
                     try:
-                        expand_data = llm.chat_json(OPTIMIZE_SYSTEM, expand_prompt, temperature=0.5, max_tokens=3000)
+                        expand_data = llm.chat_json(_adapt_system_prompt(OPTIMIZE_SYSTEM, language_context), expand_prompt, temperature=0.5, max_tokens=3000)
                         expanded = (expand_data.get("script") or "").strip()
                         if expanded and len(expanded) > len(final):
                             final = expanded
@@ -242,14 +264,14 @@ class ScriptService:
         # ── Draft ──────────────────────────────────────────────────────────
         # Choose system prompt: plan-oriented if plan available, else legacy
         if creative_plan is not None and creative_plan.success:
-            draft_system = PLAN_DRAFT_SYSTEM
+            draft_system = _adapt_system_prompt(PLAN_DRAFT_SYSTEM, language_context)
             draft_prompt = self._build_plan_draft_prompt(
                 plan, fact_text, creative_plan, s, story_concept=story_concept,
                 channel_block=channel_block, knowledge_block=knowledge_block,
                 lang_min=lang_min, lang_max=lang_max,
             )
         else:
-            draft_system = DRAFT_SYSTEM
+            draft_system = _adapt_system_prompt(DRAFT_SYSTEM, language_context)
             draft_prompt = (
                 f"{context_line}"
                 f"{channel_block}{knowledge_block}"
@@ -294,7 +316,7 @@ class ScriptService:
             f"{'TOO SHORT — must expand to at least ' + str(lang_min) + ' chars.' if len(draft) < lang_min else ''}"
         )
         try:
-            opt_data = llm.chat_json(OPTIMIZE_SYSTEM, opt_prompt, temperature=0.4, max_tokens=2500)
+            opt_data = llm.chat_json(_adapt_system_prompt(OPTIMIZE_SYSTEM, language_context), opt_prompt, temperature=0.4, max_tokens=2500)
             optimized = (opt_data.get("script") or "").strip()
             if not optimized:
                 optimized = draft
@@ -380,7 +402,7 @@ class ScriptService:
                 f"Target {lang_min}-{lang_max} chars."
             )
             try:
-                rw_data = llm.chat_json(REWRITE_SYSTEM, rewrite_prompt, temperature=0.8, max_tokens=1500)
+                rw_data = llm.chat_json(_adapt_system_prompt(REWRITE_SYSTEM, language_context), rewrite_prompt, temperature=0.8, max_tokens=1500)
                 rewritten = (rw_data.get("script") or "").strip()
                 if rewritten and len(rewritten) >= 100:
                     final = rewritten
