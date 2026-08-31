@@ -900,7 +900,7 @@ class GenerationService:
                 # V5: Detect source fallback — if the user chose a specific source
                 # but the clips came from a different one, record it for transparency.
                 if gameplay_source_id is not None:
-                    clip_source_ids = {c.source_id for c in clips if c.source_id is not None}
+                    clip_source_ids = {c.asset.source_id for c in clips if c.asset and c.asset.source_id is not None}
                     if clip_source_ids and gameplay_source_id not in clip_source_ids:
                         job.artifacts["gameplay_source_fallback"] = True
                         job.artifacts["gameplay_source_fallback_from"] = gameplay_source_id
