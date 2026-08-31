@@ -224,7 +224,7 @@ class VideoGenerateAdapter:
                 write_result({{"success": False, "error": error_msg or "no chunks produced"}})
                 sys.exit(1)
 
-            write_result({{"success": True, "chunk_wavs": chunk_wavs, "chunk_dir": chunk_dir, "tts_text": text}})
+            write_result({{"success": True, "chunk_wavs": chunk_wavs, "chunk_dir": chunk_dir, "tts_text": text, "chunks": chunks}})
         """)
 
         result_json = self._run_with_bridge(script)
@@ -235,11 +235,20 @@ class VideoGenerateAdapter:
         if not chunk_wavs:
             raise VideoGenerateError("TTS produced no chunk WAVs")
 
+        # Measure duration of each chunk before merging (for subtitle timing)
+        from gpcg.infrastructure.media import probe, MediaError
+        chunk_durations = []
+        for cw in chunk_wavs:
+            try:
+                ci = probe(cw)
+                chunk_durations.append(ci.duration)
+            except (MediaError, Exception):
+                chunk_durations.append(0.0)
+
         # Merge chunks with FFmpeg (handles different sample rates via resampling)
         self._merge_wavs_with_ffmpeg(chunk_wavs, output_wav)
 
-        # Get duration
-        from gpcg.infrastructure.media import probe, MediaError
+        # Get total duration
         try:
             info = probe(output_wav)
             duration = info.duration
@@ -252,19 +261,52 @@ class VideoGenerateAdapter:
         if chunk_dir:
             shutil.rmtree(chunk_dir, ignore_errors=True)
 
-        # Subtitles: let video-generate use Whisper + SequenceAligner for
-        # real timestamps. We pass the original narration text so the
-        # aligner can replace Whisper's transcription with the exact script
-        # text while preserving Whisper's word-level timestamps.
-        # The old proportional-timing _build_subtitle_segments path is
-        # removed because it produced inaccurate timing for CJK and
-        # mixed-language content.
+        # Build subtitle_mapping with real per-chunk timings.
+        # Each TTS chunk = one subtitle segment with accurate start/end times.
+        # This is more reliable than Whisper (which may not be installed)
+        # and more accurate than proportional distribution.
+        chunks_text = result_json.get("chunks") or [text]
+        subtitle_mapping = self._build_chunk_subtitle_mapping(
+            chunks_text, chunk_durations, language
+        )
+
         log.info(f"TTS: {len(chunk_wavs)} chunks merged → {duration:.1f}s")
         return TTSResult(
             wav_path=output_wav,
             duration_sec=duration,
-            subtitle_mapping=None,  # Whisper + SequenceAligner handles subtitles
+            subtitle_mapping=subtitle_mapping,
         )
+
+    @staticmethod
+    def _build_chunk_subtitle_mapping(
+        chunks_text: list[str], chunk_durations: list[float], language: str
+    ) -> dict:
+        """Build subtitle_mapping from TTS chunk text + per-chunk durations.
+
+        Each TTS chunk becomes one subtitle segment with accurate start/end
+        times measured from the actual audio. This replaces both the old
+        proportional _build_subtitle_segments and the Whisper fallback
+        (which may not be installed).
+        """
+        segments = []
+        current_time = 0.0
+        for i, chunk_text in enumerate(chunks_text):
+            dur = chunk_durations[i] if i < len(chunk_durations) else 0.0
+            if dur <= 0:
+                continue
+            text_clean = chunk_text.strip() if chunk_text else ""
+            if not text_clean:
+                current_time += dur
+                continue
+            segments.append({
+                "subtitle_fragment": text_clean,
+                "tts_fragment": text_clean,
+                "start_time": round(current_time, 3),
+                "end_time": round(current_time + dur, 3),
+            })
+            current_time += dur
+
+        return {"tts_text": " ".join(chunks_text), "expansions": [], "segments": segments}
 
     def _merge_wavs_with_ffmpeg(self, wav_paths: list[str], output: Path) -> None:
         """Merge multiple WAVs into one using FFmpeg concat with resampling."""
