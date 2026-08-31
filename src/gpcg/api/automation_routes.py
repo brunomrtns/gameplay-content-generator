@@ -18,7 +18,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from pathlib import Path
 
@@ -1411,7 +1411,7 @@ def create_job_from_automation(user_id: int) -> int | None:
                 )
                 if allows_public:
                     bg_game_q = bg_game_q.filter(
-                        _or2(
+                        or_(
                             GameplaySource.user_id == user_id,
                             GameplaySource.is_public == True,
                         )
