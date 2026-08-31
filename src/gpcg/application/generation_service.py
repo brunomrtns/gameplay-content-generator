@@ -1549,7 +1549,7 @@ class GenerationService:
                     creative_plan or VideoCreativePlan(),
                     revision_count=revision_count,
                     source_fact=source_fact,
-                    language_context=gen_ctx,
+                    language_context=language_context,
                 )
             else:
                 review = self.script_critic.review(
@@ -1557,7 +1557,7 @@ class GenerationService:
                     creative_plan or VideoCreativePlan(),
                     revision_count=revision_count,
                     source_fact=source_fact,
-                    language_context=gen_ctx,
+                    language_context=language_context,
                 )
             reviews.append(review.to_dict())
             log.info(
