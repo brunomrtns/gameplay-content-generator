@@ -19,9 +19,27 @@ from gpcg.domains.games.models import Game
 from gpcg.domains.games.prompts import FACT_EXTRACTOR_SYSTEM as SYSTEM_PROMPT
 from gpcg.infrastructure.document_parser import DocumentParseError, parse_document
 from gpcg.infrastructure.llm import LLMClient, LLMError
+from gpcg.i18n.prompts.registry import PromptRegistry
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)
+
+
+def _get_prompt(name: str, language_context=None) -> str:
+    """Resolve a prompt via PromptRegistry when a language context is available.
+
+    Fact extraction stays in pt-BR by design (facts are translated in memory
+    later, not persisted).  This helper only uses the registry when a
+    ``language_context`` is explicitly provided.
+    """
+    if language_context is not None:
+        try:
+            lang = getattr(language_context, "language", str(language_context))
+            return PromptRegistry.get(name, domain="games", language=lang).text
+        except Exception:
+            pass
+    # Fallback to direct import (pt-BR default)
+    return SYSTEM_PROMPT
 
 # Chunk size tuned for local LLM context windows (~8B models)
 CHUNK_CHARS = 4000
@@ -59,6 +77,8 @@ def extract_facts_from_document(
     session: Session,
     document: Document,
     llm: LLMClient,
+    *,
+    language_context=None,
 ) -> list[Fact]:
     """Extract facts from a document, dedup, score, and persist."""
     try:
@@ -92,7 +112,8 @@ def extract_facts_from_document(
     for i, chunk in enumerate(chunks):
         prompt = f"Context: {game_name}\n\nText chunk {i + 1}/{len(chunks)}:\n\n{chunk}"
         try:
-            data = llm.chat_json(SYSTEM_PROMPT, prompt, temperature=0.3, max_tokens=2048)
+            system_prompt = _get_prompt("FACT_EXTRACTOR_SYSTEM", language_context)
+            data = llm.chat_json(system_prompt, prompt, temperature=0.3, max_tokens=2048)
         except LLMError as e:
             log.error(f"LLM extraction failed for chunk {i + 1}: {e}")
             continue

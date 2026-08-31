@@ -37,10 +37,36 @@ from gpcg.domain.creative_plan import (
 )
 from gpcg.domains.games.prompts import CRITIC_SYSTEM, SECTION_CRITIC_SYSTEM
 from gpcg.i18n.prompt_adapter import adapt_system_prompt
+from gpcg.i18n.prompts.registry import PromptRegistry
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)
+
+# Direct imports kept as fallback when the PromptRegistry has no localized
+# template for the requested language (e.g. pt-BR games pack does not yet
+# ship CRITIC_SYSTEM / SECTION_CRITIC_SYSTEM).
+_DIRECT_IMPORTS = {
+    "CRITIC_SYSTEM": CRITIC_SYSTEM,
+    "SECTION_CRITIC_SYSTEM": SECTION_CRITIC_SYSTEM,
+}
+
+
+def _get_prompt(name: str, language_context=None) -> str:
+    """Resolve a prompt by name, preferring the PromptRegistry when a
+    language context is available, falling back to the direct import.
+
+    The registry returns a localized template for the requested language;
+    if no template is available (KeyError) or the registry raises, we fall
+    back to the original Portuguese/English constant imported above.
+    """
+    if language_context is not None:
+        try:
+            lang = getattr(language_context, "language", str(language_context))
+            return PromptRegistry.get(name, domain="games", language=lang).text
+        except Exception:
+            pass
+    return _DIRECT_IMPORTS.get(name, "")
 
 
 
@@ -63,6 +89,9 @@ class ScriptCritic:
         revision_count: int = 0,
         source_fact: str = "",
         language_context=None,
+        target_duration: int = 60,
+        lang_min: int = 800,
+        lang_max: int = 1200,
     ) -> ScriptReview:
         """Evaluate a script and return a ScriptReview.
 
@@ -72,6 +101,9 @@ class ScriptCritic:
             revision_count: how many revisions have been done (0 = first review)
             source_fact: the original fact the script should be based on
                 (used for factual_accuracy checking — detects hallucinations)
+            target_duration: target video duration in seconds
+            lang_min: minimum character count for the target language
+            lang_max: maximum character count for the target language
 
         Returns:
             ScriptReview with verdict, scores, issues, and feedback
@@ -88,13 +120,26 @@ class ScriptCritic:
             )
 
         # Build the review prompt
-        user_prompt = self._build_prompt(script_text, plan, revision_count, source_fact)
+        user_prompt = self._build_prompt(
+            script_text, plan, revision_count, source_fact,
+            target_duration=target_duration, lang_min=lang_min, lang_max=lang_max,
+        )
 
         # Call the LLM
         model = s.gpcg_script_critic_model or None  # empty = default text model
+        # For CJK languages, use a model with native Chinese capability
+        if model is None and language_context is not None and not language_context.is_default:
+            from gpcg.i18n.language_context import get_recommended_model
+            lang_model = get_recommended_model(language_context.language)
+            if lang_model:
+                model = lang_model
+                log.info(f"script critic using language-recommended model: {model}")
         try:
             data = self.llm.chat_json(
-                system=adapt_system_prompt(CRITIC_SYSTEM, language_context),
+                system=adapt_system_prompt(
+                    _get_prompt("CRITIC_SYSTEM", language_context),
+                    language_context,
+                ),
                 prompt=user_prompt,
                 model=model,
                 temperature=s.gpcg_script_critic_temperature,
@@ -130,6 +175,9 @@ class ScriptCritic:
         revision_count: int = 0,
         source_fact: str = "",
         language_context=None,
+        target_duration: int = 60,
+        lang_min: int = 800,
+        lang_max: int = 1200,
     ) -> ScriptReview:
         """Evaluate a script SECTION BY SECTION (V2).
 
@@ -157,6 +205,7 @@ class ScriptCritic:
             return self.review(
                 script_text, plan, revision_count=revision_count, source_fact=source_fact,
                 language_context=language_context,
+                target_duration=target_duration, lang_min=lang_min, lang_max=lang_max,
             )
 
         # Split the script into sections
@@ -164,14 +213,25 @@ class ScriptCritic:
 
         # Build the section-based prompt
         user_prompt = self._build_section_prompt(
-            script_text, plan, sections, revision_count, source_fact
+            script_text, plan, sections, revision_count, source_fact,
+            target_duration=target_duration, lang_min=lang_min, lang_max=lang_max,
         )
 
         # Call the LLM
         model = s.gpcg_script_critic_model or None
+        # For CJK languages, use a model with native Chinese capability
+        if model is None and language_context is not None and not language_context.is_default:
+            from gpcg.i18n.language_context import get_recommended_model
+            lang_model = get_recommended_model(language_context.language)
+            if lang_model:
+                model = lang_model
+                log.info(f"section critic using language-recommended model: {model}")
         try:
             data = self.llm.chat_json(
-                system=adapt_system_prompt(SECTION_CRITIC_SYSTEM, language_context),
+                system=adapt_system_prompt(
+                    _get_prompt("SECTION_CRITIC_SYSTEM", language_context),
+                    language_context,
+                ),
                 prompt=user_prompt,
                 model=model,
                 temperature=s.gpcg_script_critic_temperature,
@@ -248,6 +308,10 @@ class ScriptCritic:
         sections: list[dict],
         revision_count: int,
         source_fact: str = "",
+        *,
+        target_duration: int = 60,
+        lang_min: int = 800,
+        lang_max: int = 1200,
     ) -> str:
         """Build the user prompt for the section-based critic LLM call."""
         parts = [
@@ -255,6 +319,7 @@ class ScriptCritic:
             f"VIDEO TYPE: {plan.video_type}",
             f"HUMOR PLAN: enabled={plan.humor.enabled} intensity={plan.humor.intensity}",
             f"REVISION: this is review #{revision_count + 1}",
+            f"TARGET DURATION: ~{target_duration}s of narration ({lang_min}-{lang_max} chars)",
             f"",
         ]
 
@@ -280,6 +345,10 @@ class ScriptCritic:
                 parts.append(f"  {beat.label}: {beat.description}")
             parts.append("")
 
+        parts.append(
+            f"LENGTH CHECK: The full script should be {lang_min}-{lang_max} characters "
+            f"for ~{target_duration}s of narration. Flag scripts that are too short or too long."
+        )
         parts.append("Evaluate each section separately, then aggregate. Return the JSON.")
         return "\n".join(parts)
 
@@ -387,6 +456,10 @@ class ScriptCritic:
         plan: VideoCreativePlan,
         revision_count: int,
         source_fact: str = "",
+        *,
+        target_duration: int = 60,
+        lang_min: int = 800,
+        lang_max: int = 1200,
     ) -> str:
         """Build the user prompt for the critic LLM call."""
         parts = [
@@ -394,6 +467,7 @@ class ScriptCritic:
             f"VIDEO TYPE: {plan.video_type}",
             f"HUMOR PLAN: enabled={plan.humor.enabled} intensity={plan.humor.intensity}",
             f"REVISION: this is review #{revision_count + 1} (0 = first draft)",
+            f"TARGET DURATION: ~{target_duration}s of narration ({lang_min}-{lang_max} chars)",
             f"",
         ]
 
@@ -422,6 +496,10 @@ class ScriptCritic:
                 parts.append(f"  {beat.label}: {beat.description}")
             parts.append("")
 
+        parts.append(
+            f"LENGTH CHECK: The script should be {lang_min}-{lang_max} characters "
+            f"for ~{target_duration}s of narration. Flag scripts that are too short or too long."
+        )
         parts.append("Evaluate this script and return the review JSON.")
 
         return "\n".join(parts)

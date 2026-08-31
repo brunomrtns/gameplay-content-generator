@@ -626,6 +626,9 @@ class ChannelProfile(Base):
     target_language: Mapped[str] = mapped_column(String(10), default="pt-BR")
     # Prompt version for A/B testing and checkpoint compatibility.
     prompt_version: Mapped[str] = mapped_column(String(20), default="v1")
+    # Per-language model preferences (e.g. {"zh-CN": {"script": "qwen3:14b"}}).
+    # When empty/NULL, GenerationContext falls back to get_recommended_model(language).
+    model_preferences: Mapped[Optional[dict]] = mapped_column(JSON, default=dict, nullable=True)
 
     # Free-form channel description — the "elevator pitch" of the channel.
     channel_description: Mapped[str] = mapped_column(Text, default="")
@@ -1027,3 +1030,30 @@ class AppRelease(Base):
 
     def __repr__(self) -> str:
         return f"<AppRelease v{self.version} code={self.version_code}>"
+
+
+class Voice(Base):
+    """Voice metadata — tracks language and display name for TTS voice files.
+
+    System voices have user_id=NULL. User-uploaded voices have user_id set.
+    The physical file lives in ``data/voices/`` (system) or
+    ``data/voices/user_{id}/`` (user). This table only stores metadata.
+    """
+    __tablename__ = "voices"
+    __table_args__ = (
+        UniqueConstraint("user_id", "filename", name="uq_voices_user_filename"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # NULL = system voice; set = user-uploaded voice
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    # BCP-47 language tag (e.g. "pt-BR", "en-US", "zh-CN")
+    language: Mapped[str] = mapped_column(String(10), default="pt-BR")
+    display_name: Mapped[str] = mapped_column(String(100), default="")
+    file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    def __repr__(self) -> str:
+        owner = f"user_{self.user_id}" if self.user_id else "system"
+        return f"<Voice {owner}/{self.filename} lang={self.language}>"

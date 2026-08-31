@@ -19,6 +19,11 @@ def run_remote_worker(
     capabilities: str = "",
 ) -> None:
     """Run the remote worker. Called by the CLI."""
+    # Load optional worker .env file (e.g. ~/.config/gpcg/worker.env) so the
+    # worker picks up the same feature flags as the VPS without requiring every
+    # env var to be duplicated in the systemd service file.
+    _load_worker_env()
+
     from .config import WorkerConfig
     from .remote_worker import RemoteWorker
 
@@ -80,3 +85,38 @@ def _heuristic_score(item) -> float:
 
     # Clamp to 0-100
     return max(0.0, min(100.0, score))
+
+
+def _load_worker_env() -> None:
+    """Load optional worker .env file.
+
+    Searches (in order):
+      1. $GPCG_WORKER_ENV (explicit path)
+      2. ~/.config/gpcg/worker.env
+      3. <repo>/.env (development)
+
+    Existing environment variables (e.g. from systemd) take precedence —
+    dotenv only sets variables that are NOT already in os.environ.
+    """
+    from pathlib import Path
+
+    candidates: list[Path] = []
+    explicit = os.environ.get("GPCG_WORKER_ENV", "")
+    if explicit:
+        candidates.append(Path(explicit))
+    candidates.append(Path.home() / ".config" / "gpcg" / "worker.env")
+    # Development fallback: repo root .env
+    candidates.append(Path(__file__).resolve().parents[3] / ".env")
+
+    for path in candidates:
+        if path.is_file():
+            try:
+                from dotenv import load_dotenv
+
+                load_dotenv(str(path), override=False)
+                return
+            except ImportError:
+                # python-dotenv not installed — env vars must come from systemd
+                return
+            except Exception:
+                pass

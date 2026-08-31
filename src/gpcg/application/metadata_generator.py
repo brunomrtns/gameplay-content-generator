@@ -17,8 +17,27 @@ from gpcg.domains.games.models import Game
 from gpcg.domains.games.prompts import METADATA_SYSTEM
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.i18n.prompt_adapter import adapt_system_prompt
+from gpcg.i18n.prompts.registry import PromptRegistry
 
 log = logging.getLogger(__name__)
+
+
+# Direct imports kept as fallback when the registry has no translation.
+_DIRECT_IMPORTS = {
+    "METADATA_SYSTEM": METADATA_SYSTEM,
+}
+
+
+def _get_prompt(name: str, language_context=None) -> str:
+    """Resolve a prompt via the PromptRegistry when a language context is
+    available, falling back to the direct import otherwise."""
+    if language_context is not None:
+        try:
+            lang = getattr(language_context, "language", str(language_context))
+            return PromptRegistry.get(name, domain="games", language=lang).text
+        except (KeyError, Exception):
+            pass
+    return _DIRECT_IMPORTS.get(name, "")
 
 
 @dataclass
@@ -63,7 +82,10 @@ class MetadataGenerator:
         game_name = game.canonical_name if game else ""
         script_text = (script.final or "")[:2000]  # Truncate for prompt size
 
-        system = adapt_system_prompt(METADATA_SYSTEM, language_context)
+        system = adapt_system_prompt(
+            _get_prompt("METADATA_SYSTEM", language_context),
+            language_context,
+        )
 
         # Language-aware prompt: when a language_context is provided, instruct
         # the LLM to write the title/description in the target language.
@@ -119,6 +141,13 @@ Script excerpt:
                 tags = [str(t).strip().lower()[:30] for t in tags_raw if str(t).strip()]
             else:
                 tags = []
+
+            # NOTE (Fase 6a): The title-language validation / force-translation
+            # workaround that previously ran here has been removed. Titles are
+            # now generated natively in the target language (the prompt
+            # instructs the LLM explicitly, and a CJK-capable model is selected
+            # via get_recommended_model in generation_service). The
+            # _force_translate_title method is retained for Fase 7 cleanup.
 
             if not title:
                 # Language-aware fallback title

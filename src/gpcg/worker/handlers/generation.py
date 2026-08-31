@@ -53,6 +53,8 @@ class GenerationMixin:
             except Exception:
                 artifacts = {}
         voice_path_vps = artifacts.get("voice_path", "")
+        voice_language = artifacts.get("voice_language", "unknown")
+        gen_ctx_lang = (artifacts.get("generation_context") or {}).get("language", "unknown")
         if voice_path_vps:
             voice_filename = Path(voice_path_vps).name
             user_id = job.get("user_id")
@@ -68,6 +70,11 @@ class GenerationMixin:
                     self._download_voice(voice_filename, user_id, local_voice)
                 except Exception as e:
                     log.warning(f"Could not download voice {voice_filename}: {e}")
+            # Log voice + language for audit
+            log.info(
+                f"Job #{job_id}: voice={voice_filename}, voice_language={voice_language}, "
+                f"target_language={gen_ctx_lang}"
+            )
 
         # Populate a local temp DB and run GenerationService
         from gpcg.worker.local_db_sync import populate_local_db, run_generation_locally

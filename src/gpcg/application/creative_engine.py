@@ -40,6 +40,7 @@ from typing import Optional, TYPE_CHECKING
 
 from gpcg.config import get_settings
 from gpcg.domains.games.prompts import BEAT_ORIENTED_PROMPT_TEMPLATE, SYSTEM_PROMPT_TEMPLATE
+from gpcg.i18n.prompts.registry import PromptRegistry
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 
@@ -47,6 +48,25 @@ if TYPE_CHECKING:
     from gpcg.domain.creative_plan import HumorPlan, NarrativeBeat, VideoCreativePlan
 
 log = get_logger(__name__)
+
+
+# Direct imports kept as fallback when the registry has no translation.
+_DIRECT_IMPORTS = {
+    "BEAT_ORIENTED_PROMPT_TEMPLATE": BEAT_ORIENTED_PROMPT_TEMPLATE,
+    "SYSTEM_PROMPT_TEMPLATE": SYSTEM_PROMPT_TEMPLATE,
+}
+
+
+def _get_prompt(name: str, language_context=None) -> str:
+    """Resolve a prompt via the PromptRegistry when a language context is
+    available, falling back to the direct import otherwise."""
+    if language_context is not None:
+        try:
+            lang = getattr(language_context, "language", str(language_context))
+            return PromptRegistry.get(name, domain="games", language=lang).text
+        except (KeyError, Exception):
+            pass
+    return _DIRECT_IMPORTS.get(name, "")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -328,7 +348,9 @@ class CreativeEngine:
         temperature = s.gpcg_creative_engine_temperature
         max_tokens = s.gpcg_creative_engine_max_tokens
 
-        system = SYSTEM_PROMPT_TEMPLATE.format(style_block=_build_style_block(style))
+        system = _get_prompt("SYSTEM_PROMPT_TEMPLATE", language_context).format(
+            style_block=_build_style_block(style)
+        )
         from gpcg.i18n.prompt_adapter import adapt_system_prompt
         system = adapt_system_prompt(system, language_context)
         user_prompt = self._build_user_prompt(topic=topic, fact=fact, context=context)
@@ -413,7 +435,7 @@ class CreativeEngine:
         max_tokens = s.gpcg_creative_engine_max_tokens
 
         beats_block = self._format_beats(narrative_beats)
-        system = BEAT_ORIENTED_PROMPT_TEMPLATE.format(
+        system = _get_prompt("BEAT_ORIENTED_PROMPT_TEMPLATE", language_context).format(
             style_block=_build_style_block(style),
             central_idea=central_idea or "(não especificada)",
             beats_block=beats_block,

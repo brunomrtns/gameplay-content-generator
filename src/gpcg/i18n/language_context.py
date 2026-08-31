@@ -64,13 +64,14 @@ def is_supported(language: str) -> bool:
 # ── Character density ─────────────────────────────────────────────────────────
 
 # Characters per second of clear TTS narration, by language family.
-# Mandarin Chinese has much higher information density per character
-# (~3.5 chars/sec) vs Latin scripts (~13-15 chars/sec).
-# Used to compute target character counts for scripts.
+# Calibrated from actual TTS output measurements:
+# - zh: 205 chars / 37.4s = ~5.5 chars/sec (measured from real XTTS output)
+# - pt: ~13 chars/sec (Latin script, Portuguese narration)
+# - en: ~15 chars/sec (Latin script, English narration)
 _CHARS_PER_SECOND: dict[str, float] = {
     "pt": 13.0,
     "en": 15.0,
-    "zh": 3.5,  # Mandarin (applies to zh-CN, zh-TW, zh)
+    "zh": 5.5,  # Calibrated from real XTTS zh output (was 3.5, too low)
 }
 
 # Default chars/sec when language is unknown
@@ -91,9 +92,9 @@ def get_target_char_range(duration_seconds: int, language: str) -> tuple[int, in
     """Return (min_chars, max_chars) for a target narration duration.
 
     For a 60-second video:
-    - pt-BR: ~780-1020 chars (13 cps)
-    - en-US: ~900-1170 chars (15 cps)
-    - zh-CN/zh-TW/zh: ~180-240 chars (3.5 cps)
+    - pt-BR: ~663-897 chars (13 cps)
+    - en-US: ~765-1035 chars (15 cps)
+    - zh-CN/zh-TW/zh: ~280-379 chars (5.5 cps, calibrated from real TTS)
     """
     cps = get_chars_per_second(language)
     min_chars = int(duration_seconds * cps * 0.85)
@@ -105,6 +106,36 @@ def is_cjk(language: str) -> bool:
     """Check whether the language uses CJK characters (no word spaces)."""
     base = language.split("-")[0].lower()
     return base in ("zh", "ja", "ko")
+
+
+# ── Model selection ───────────────────────────────────────────────────────────
+
+# Recommended LLM models by language family for Ollama.
+# CJK languages need models with strong Chinese/Japanese/Korean capability.
+# Llama 3.1 has weak CJK; Qwen3 is native Chinese (Alibaba).
+_RECOMMENDED_MODELS: dict[str, str] = {
+    "zh": "qwen3:14b",  # Native Chinese model — far better than llama3.1 for CJK
+    "ja": "qwen3:14b",  # Qwen3 also handles Japanese well
+    "ko": "qwen3:14b",  # Qwen3 also handles Korean reasonably
+}
+
+# Default model for non-CJK languages (Latin scripts)
+_DEFAULT_MODEL = ""  # empty = use whatever the caller/config defaults to
+
+
+def get_recommended_model(language: str) -> str:
+    """Return the recommended LLM model for a given language.
+
+    For CJK languages (zh, ja, ko), returns qwen3:14b which has native
+    Chinese/Japanese/Korean capability. For Latin scripts, returns empty
+    string (use config default like llama3.1:8b).
+
+    This is critical because llama3.1:8b has very limited Chinese capability
+    and tends to fall back to English/Portuguese when asked to generate
+    Chinese content, producing mixed-language or short outputs.
+    """
+    base = language.split("-")[0].lower()
+    return _RECOMMENDED_MODELS.get(base, _DEFAULT_MODEL)
 
 
 # ── LanguageContext ───────────────────────────────────────────────────────────
@@ -234,11 +265,28 @@ class GenerationContext(LanguageContext):
 
     @classmethod
     def from_channel_profile(cls, profile: "ChannelProfile | None") -> "GenerationContext":
-        """Build a GenerationContext from a ChannelProfile."""
+        """Build a GenerationContext from a ChannelProfile.
+
+        Model selection priority:
+        1. model_preferences[language]["script"] (per-channel override)
+        2. get_recommended_model(language) (CJK → qwen3:14b)
+        3. settings.gpcg_llm_model (config default, e.g. gpt-oss:latest)
+        """
         from gpcg.config import get_settings
 
         s = get_settings()
         base = LanguageContext.from_channel_profile(profile)
+
+        # Resolve llm_script_model with language-aware selection
+        prefs = base.model_preferences or {}
+        lang_prefs = prefs.get(base.language, {}) if isinstance(prefs, dict) else {}
+        explicit_model = lang_prefs.get("script") if isinstance(lang_prefs, dict) else None
+        if explicit_model:
+            llm_script_model = explicit_model
+        else:
+            recommended = get_recommended_model(base.language)
+            llm_script_model = recommended or s.gpcg_llm_model
+
         return cls(
             language=base.language,
             locale=base.locale,
@@ -246,7 +294,7 @@ class GenerationContext(LanguageContext):
             prompt_version=base.prompt_version,
             model_preferences=base.model_preferences,
             tts_engine_version=getattr(s, "gpcg_tts_engine", "xtts-v2"),
-            llm_script_model=s.gpcg_llm_model,
+            llm_script_model=llm_script_model,
         )
 
     @classmethod

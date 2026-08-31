@@ -252,12 +252,18 @@ class VideoGenerateAdapter:
         if chunk_dir:
             shutil.rmtree(chunk_dir, ignore_errors=True)
 
-        subtitle_mapping = {"tts_text": text, "expansions": []}
+        # Subtitles: let video-generate use Whisper + SequenceAligner for
+        # real timestamps. We pass the original narration text so the
+        # aligner can replace Whisper's transcription with the exact script
+        # text while preserving Whisper's word-level timestamps.
+        # The old proportional-timing _build_subtitle_segments path is
+        # removed because it produced inaccurate timing for CJK and
+        # mixed-language content.
         log.info(f"TTS: {len(chunk_wavs)} chunks merged → {duration:.1f}s")
         return TTSResult(
             wav_path=output_wav,
             duration_sec=duration,
-            subtitle_mapping=subtitle_mapping,
+            subtitle_mapping=None,  # Whisper + SequenceAligner handles subtitles
         )
 
     def _merge_wavs_with_ffmpeg(self, wav_paths: list[str], output: Path) -> None:

@@ -86,9 +86,26 @@ def _normalize(text: str, *, language: str = "pt-BR") -> str:
     return s
 
 
-def _tokenize(text: str) -> list[str]:
-    """Split normalized text into word tokens."""
-    return text.split() if text else []
+def _tokenize(text: str, language: str = "pt-BR") -> list[str]:
+    """Split normalized text into word tokens.
+
+    For CJK languages (zh/ja/ko), whitespace-based splitting doesn't work
+    because words aren't separated by spaces. Instead, tokenize by character
+    and build bigrams for better plagiarism detection.
+    """
+    if not text:
+        return []
+    base = language.split("-")[0].lower()
+    if base in ("zh", "ja", "ko"):
+        # CJK: tokenize by character, then build bigrams
+        # Strip common CJK punctuation
+        cjk_punct = "。，！？、；：「」『』（）【】《》…—·"
+        chars = [c for c in text if c.strip() and c not in cjk_punct]
+        if len(chars) < 2:
+            return chars
+        return [chars[i] + chars[i + 1] for i in range(len(chars) - 1)]
+    # Latin scripts: split by whitespace
+    return text.split()
 
 
 def _ngrams(tokens: list[str], n: int) -> set[tuple[str, ...]]:
@@ -147,8 +164,14 @@ def compare_texts(script: str, source: str, n: int = 5, *, language: str = "pt-B
     Returns (overlap_fraction, longest_matches).
     overlap_fraction = fraction of script n-grams that appear in the source.
     """
-    script_tokens = _tokenize(_normalize(script, language=language))
-    source_tokens = _tokenize(_normalize(source, language=language))
+    # For CJK languages (character bigrams), use a smaller n-gram size.
+    # A word-level n=5 in Latin scripts roughly corresponds to ~5 words;
+    # for CJK bigrams, n=3 (6 chars) is a comparable plagiarism signal.
+    base = language.split("-")[0].lower()
+    if base in ("zh", "ja", "ko"):
+        n = min(n, 3)
+    script_tokens = _tokenize(_normalize(script, language=language), language=language)
+    source_tokens = _tokenize(_normalize(source, language=language), language=language)
 
     if not script_tokens or not source_tokens:
         return 0.0, []
@@ -162,7 +185,8 @@ def compare_texts(script: str, source: str, n: int = 5, *, language: str = "pt-B
     overlap = script_ngrams & source_ngrams
     overlap_fraction = len(overlap) / len(script_ngrams)
 
-    longest = _find_longest_common_sequences(script_tokens, source_tokens, min_len=5)
+    min_match_len = 3 if base in ("zh", "ja", "ko") else 5
+    longest = _find_longest_common_sequences(script_tokens, source_tokens, min_len=min_match_len)
     return overlap_fraction, longest
 
 

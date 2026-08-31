@@ -30,6 +30,48 @@ from gpcg.logging import get_logger
 log = get_logger(__name__)
 
 
+# ── BCP-47 normalization ──────────────────────────────────────────────────────
+
+# Mapping of bare/ambiguous language codes to canonical BCP-47 tags understood
+# by the YouTube Data API (snippet.defaultLanguage / snippet.defaultAudioLanguage).
+_BCP47_NORMALIZE: dict[str, str] = {
+    "zh": "zh-Hans",      # bare Chinese → Simplified (YouTube convention)
+    "zh-CN": "zh-CN",     # already canonical (Simplified)
+    "zh-TW": "zh-TW",     # already canonical (Traditional)
+    "zh-Hans": "zh-Hans",
+    "zh-Hant": "zh-TW",
+    "pt-BR": "pt-BR",
+    "pt": "pt-BR",
+    "en-US": "en-US",
+    "en": "en-US",
+}
+
+
+def _normalize_bcp47(lang: str) -> str:
+    """Normalize a language code to a canonical BCP-47 tag for YouTube.
+
+    Examples:
+        zh      → zh-Hans
+        zh-CN   → zh-CN
+        zh-TW   → zh-TW
+        pt-BR   → pt-BR
+        en-US   → en-US
+
+    Unknown codes are returned unchanged (YouTube is lenient with BCP-47).
+    """
+    if not lang:
+        return lang
+    key = lang.strip()
+    if key in _BCP47_NORMALIZE:
+        return _BCP47_NORMALIZE[key]
+    # Case-insensitive lookup as a fallback
+    lower = key.lower()
+    for k, v in _BCP47_NORMALIZE.items():
+        if k.lower() == lower:
+            return v
+    return key
+
+
 @dataclass
 class UploadResult:
     """Result of a YouTube upload attempt."""
@@ -99,6 +141,12 @@ class GoogleIntegrationAdapter:
         cat = str(category_id or self.settings.gpcg_youtube_category_id)
         all_tags = list(dict.fromkeys((tags or []) + self._default_tags()))
 
+        # Normalize the language to a canonical BCP-47 tag for YouTube's
+        # snippet.defaultLanguage / snippet.defaultAudioLanguage fields.
+        # The google-integration service reads these and injects them into
+        # the YouTube Data API upload request.
+        bcp47 = _normalize_bcp47(language)
+
         body = {
             "userId": uid,
             "videoPath": remote_path,
@@ -108,6 +156,11 @@ class GoogleIntegrationAdapter:
             "categoryId": cat,
             "privacy": priv,
             "language": language,
+            # YouTube snippet language metadata (BCP-47). defaultLanguage is
+            # the metadata language (title/description); defaultAudioLanguage
+            # is the primary spoken language of the audio track.
+            "defaultLanguage": bcp47,
+            "defaultAudioLanguage": bcp47,
         }
         # Presentation Layer: include thumbnail if available
         if thumbnail_path:

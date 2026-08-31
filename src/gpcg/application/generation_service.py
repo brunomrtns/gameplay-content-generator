@@ -186,8 +186,18 @@ class GenerationService:
                 artifacts["scene_duration"] = scene_duration
             if video_format:
                 artifacts["video_format"] = video_format
-            if voice_path:
+            if voice_path is not None:
                 artifacts["voice_path"] = voice_path
+                # Persist voice language for audit (which language the voice speaks)
+                try:
+                    from pathlib import Path as _Path
+                    from gpcg.api.routes import _voice_metadata
+                    _vname = _Path(voice_path).name if voice_path else ""
+                    _meta = _voice_metadata(_vname) if _vname else None
+                    if _meta:
+                        artifacts["voice_language"] = _meta.get("language", "pt-BR")
+                except Exception:
+                    pass
             if creative_style:
                 artifacts["creative_style"] = creative_style
             if transition_type:
@@ -289,8 +299,18 @@ class GenerationService:
                 artifacts["scene_duration"] = scene_duration
             if video_format:
                 artifacts["video_format"] = video_format
-            if voice_path:
+            if voice_path is not None:
                 artifacts["voice_path"] = voice_path
+                # Persist voice language for audit (which language the voice speaks)
+                try:
+                    from pathlib import Path as _Path
+                    from gpcg.api.routes import _voice_metadata
+                    _vname = _Path(voice_path).name if voice_path else ""
+                    _meta = _voice_metadata(_vname) if _vname else None
+                    if _meta:
+                        artifacts["voice_language"] = _meta.get("language", "pt-BR")
+                except Exception:
+                    pass
             if creative_style:
                 artifacts["creative_style"] = creative_style
             if transition_type:
@@ -538,31 +558,12 @@ class GenerationService:
             creative_material = None
 
         # ── Multilingual: translate creative inputs to target language ──────
-        # The creative material, story concept, and editorial plan are generated
-        # by LLMs whose system prompts contain Portuguese examples/instructions.
-        # Even with adapt_system_prompt, the output often comes out in Portuguese.
-        # Since these are fed to the script LLM as input, Portuguese creative
-        # material biases the script toward Portuguese. Translate them before
-        # the script stage so the script LLM sees target-language input.
-        if not gen_ctx.is_default:
-            if creative_material is not None and creative_material.success:
-                creative_material = self._translate_creative_material(creative_material, gen_ctx, llm)
-                with self._session_scope() as session:
-                    job = session.get(Job, job_id)
-                    job.artifacts = {**job.artifacts, "creative_material": creative_material.to_dict()}
-                    session.flush()
-            if story_concept is not None and story_concept.success:
-                story_concept = self._translate_story_concept(story_concept, gen_ctx, llm)
-                with self._session_scope() as session:
-                    job = session.get(Job, job_id)
-                    job.artifacts = {**job.artifacts, "story_concept": story_concept.to_dict()}
-                    session.flush()
-            if creative_plan is not None and creative_plan.success:
-                creative_plan = self._translate_creative_plan(creative_plan, gen_ctx, llm)
-                with self._session_scope() as session:
-                    job = session.get(Job, job_id)
-                    job.artifacts = {**job.artifacts, "creative_plan": creative_plan.to_dict()}
-                    session.flush()
+        # NOTE: The late translation passes for creative_material, story_concept,
+        # and creative_plan have been REMOVED. These are now generated natively
+        # in the target language via language-aware prompts (PromptRegistry,
+        # Fase 2). The _translate_* methods are kept defined for Fase 7 cleanup.
+        # Only the fact claim is translated in-memory (transient, see
+        # _translate_fact_in_memory) because Facts are stored in pt-BR.
 
         # ── Stage: script ───────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.script)
@@ -628,6 +629,39 @@ class GenerationService:
                 language_context=gen_ctx,
             )
 
+        # ── Stage: language_qa (SOFT check — flag script/declared mismatch) ─
+        # Runs after all script modifications (script, humanization,
+        # script_review) so it inspects the truly final script text. Does NOT
+        # fail the job — only logs a WARNING and persists the result to
+        # job.artifacts["language_qa"] for review.
+        try:
+            from gpcg.domain.language_qa import check_script_language_consistency
+            script_id = self._get_artifact(job_id, "script_id")
+            if script_id:
+                with self._session_scope() as session:
+                    job = session.get(Job, job_id)
+                    script = session.get(Script, script_id)
+                    if script and script.final:
+                        is_consistent, reason = check_script_language_consistency(
+                            script.final, gen_ctx.language
+                        )
+                        job.artifacts = {
+                            **job.artifacts,
+                            "language_qa": {
+                                "consistent": is_consistent,
+                                "reason": reason,
+                            },
+                        }
+                        session.flush()
+                        if not is_consistent:
+                            log.warning(
+                                f"job #{job_id}: language QA flagged "
+                                f"inconsistency (declared={gen_ctx.language}): "
+                                f"{reason}"
+                            )
+        except Exception as e:
+            log.warning(f"job #{job_id}: language QA check failed: {e}")
+
         # ── Stage: tts ──────────────────────────────────────────────────────
         self._set_stage(job_id, JobStage.tts)
         if self._has_checkpoint(job_id, "narration_wav", file_check=True, gen_ctx=gen_ctx):
@@ -690,17 +724,20 @@ class GenerationService:
                         f"warning, not a gate — short scripts can be legitimate."
                     )
                 # 2. target_duration — estimate narration duration and warn if
-                # below target * (1 - tolerance). Average narration speed ~150 wpm.
+                # below target * (1 - tolerance). Use language-aware char counting
+                # instead of word count (CJK has no spaces, so split() fails).
                 target_dur = plan.target_duration or self.settings.gpcg_default_target_duration
                 tolerance = self.settings.gpcg_target_duration_tolerance
-                word_count = len((script.final or "").split())
-                estimated_dur = (word_count / 150.0) * 60.0  # 150 wpm → seconds
+                from gpcg.i18n.language_context import get_chars_per_second
+                cps = get_chars_per_second(gen_ctx.language) if gen_ctx else 13.0
+                char_count = len(script.final or "")
+                estimated_dur = char_count / cps if cps > 0 else 0
                 acceptable_dur = target_dur * (1.0 - tolerance)
                 if estimated_dur < acceptable_dur:
                     log.warning(
                         f"job #{job_id}: estimated narration duration {estimated_dur:.1f}s "
                         f"is below target {target_dur:.1f}s * (1 - {tolerance:.0%}) "
-                        f"= {acceptable_dur:.1f}s. Words={word_count}. "
+                        f"= {acceptable_dur:.1f}s. Chars={char_count}, cps={cps}. "
                         f"This is a diagnostic warning, not a gate."
                     )
                 # TTS output path
@@ -1012,7 +1049,7 @@ class GenerationService:
                 music_path=Path(music_path_str) if music_path_str else None,
                 video_format=video_format,
                 subtitle_config=subtitle_config,
-                language=gen_ctx.language,
+                language=gen_ctx.tts_language,  # ISO 639-1 (zh) not BCP-47 (zh-CN)
             )
             job.artifacts = {**job.artifacts, "batch_id": rp.batch_id, "scene_dir": str(rp.scene_dir)}
             session.flush()
@@ -1258,6 +1295,15 @@ class GenerationService:
 
             try:
                 model = self.settings.gpcg_metadata_llm_model or None
+                # For CJK languages, override with a model that has native
+                # Chinese capability (qwen3:14b). llama3.1:8b has weak Chinese
+                # and tends to generate English titles despite instructions.
+                if gen_ctx is not None and not gen_ctx.is_default:
+                    from gpcg.i18n.language_context import get_recommended_model
+                    lang_model = get_recommended_model(gen_ctx.language)
+                    if lang_model:
+                        model = lang_model
+                        log.info(f"metadata using language-recommended model: {model}")
                 metadata = self.metadata_generator.generate(
                     plan, script, game, model=model,
                     language_context=gen_ctx,
@@ -1545,6 +1591,9 @@ class GenerationService:
 
         # Fetch the source fact for factual_accuracy checking
         source_fact = ""
+        target_duration = 60
+        lang_min = self.settings.gpcg_narration_min_chars
+        lang_max = self.settings.gpcg_narration_max_chars
         with self._session_scope() as session:
             job = session.get(Job, job_id)
             current_script = session.get(Script, script_id)
@@ -1557,20 +1606,28 @@ class GenerationService:
                 language_context = GenerationContext.from_artifacts(job.artifacts)
             # Get the content plan and fact for factual accuracy checking
             plan = session.get(ContentPlan, job.content_plan_id)
-            if plan and plan.fact_id:
-                from gpcg.core.models import Fact
-                fact = session.get(Fact, plan.fact_id)
-                if fact:
-                    source_fact = fact.claim
-            # V2: if plan was based on a KnowledgeItem, use its content as source
-            if not source_fact and plan:
-                plan_meta = plan.metadata_json or {}
-                ki_id = plan_meta.get("knowledge_item_id")
-                if ki_id:
-                    from gpcg.core.models import KnowledgeItem
-                    ki = session.get(KnowledgeItem, ki_id)
-                    if ki:
-                        source_fact = ki.content[:500]  # truncate for prompt
+            if plan:
+                target_duration = plan.target_duration or 60
+                # Language-aware char range for the critic's length check
+                if language_context is not None:
+                    from gpcg.i18n.language_context import get_target_char_range
+                    lang_min, lang_max = get_target_char_range(
+                        target_duration, language_context.language
+                    )
+                if plan.fact_id:
+                    from gpcg.core.models import Fact
+                    fact = session.get(Fact, plan.fact_id)
+                    if fact:
+                        source_fact = fact.claim
+                # V2: if plan was based on a KnowledgeItem, use its content as source
+                if not source_fact:
+                    plan_meta = plan.metadata_json or {}
+                    ki_id = plan_meta.get("knowledge_item_id")
+                    if ki_id:
+                        from gpcg.core.models import KnowledgeItem
+                        ki = session.get(KnowledgeItem, ki_id)
+                        if ki:
+                            source_fact = ki.content[:500]  # truncate for prompt
 
         while revision_count <= max_revisions:
             # Review the current script (pass source_fact for hallucination detection)
@@ -1582,6 +1639,9 @@ class GenerationService:
                     revision_count=revision_count,
                     source_fact=source_fact,
                     language_context=language_context,
+                    target_duration=target_duration,
+                    lang_min=lang_min,
+                    lang_max=lang_max,
                 )
             else:
                 review = self.script_critic.review(
@@ -1590,6 +1650,9 @@ class GenerationService:
                     revision_count=revision_count,
                     source_fact=source_fact,
                     language_context=language_context,
+                    target_duration=target_duration,
+                    lang_min=lang_min,
+                    lang_max=lang_max,
                 )
             reviews.append(review.to_dict())
             log.info(
@@ -1689,16 +1752,38 @@ class GenerationService:
                 if fact:
                     fact_text = fact.claim
 
+            # Multilingual: translate the fact claim in memory so the creative
+            # engine (and downstream script LLM) sees target-language input.
+            # CRITICAL: this is a transient translation — the Fact model is NOT
+            # persisted. The original pt-BR claim stays in the database.
+            if gen_ctx and not gen_ctx.is_default and fact_text:
+                try:
+                    fact_text = self._translate_fact_in_memory(fact_text, gen_ctx, llm)
+                except Exception as e:
+                    log.warning(f"Fact translation failed, using original: {e}")
+
             # Build context line (game name or general curiosity)
+            # Language-aware: use gen_ctx.language to localize the context label
+            _ctx_lang = gen_ctx.language if gen_ctx else "pt-BR"
             if plan.game is not None:
                 context = f"Game: {plan.game.canonical_name}"
             elif plan.background_game is not None:
-                context = (
-                    f"Curiosidade geral (não sobre o jogo). "
-                    f"Gameplay de fundo: {plan.background_game.canonical_name}"
-                )
+                if _ctx_lang.startswith("zh"):
+                    context = f"一般趣闻（不关于游戏）。背景游戏：{plan.background_game.canonical_name}"
+                elif _ctx_lang.startswith("en"):
+                    context = f"General curiosity (not about the game). Background gameplay: {plan.background_game.canonical_name}"
+                else:
+                    context = (
+                        f"Curiosidade geral (não sobre o jogo). "
+                        f"Gameplay de fundo: {plan.background_game.canonical_name}"
+                    )
             else:
-                context = "Curiosidade geral"
+                if _ctx_lang.startswith("zh"):
+                    context = "一般趣闻"
+                elif _ctx_lang.startswith("en"):
+                    context = "General curiosity"
+                else:
+                    context = "Curiosidade geral"
 
             # Resolve style: job override > config default
             style_name = job.artifacts.get("creative_style") or self.settings.gpcg_creative_engine_style
@@ -1747,6 +1832,22 @@ class GenerationService:
 
     # ── Multilingual: translate creative inputs before script stage ──────────
 
+    def _translate_fact_in_memory(self, fact_text: str, language_context, llm: LLMClient) -> str:
+        """Translate a fact claim to the target language IN MEMORY (transient).
+
+        This does NOT persist anything to the Fact model — the original pt-BR
+        claim stays in the database. The translated text is only used to feed
+        the creative engine and script LLM so they see target-language input.
+
+        Delegates to ScriptService._translate_script() which is a focused,
+        reliable translation utility.
+        """
+        if not fact_text or not fact_text.strip():
+            return fact_text
+        # Reuse the ScriptService translation utility (focused translation pass)
+        script_svc = ScriptService(llm=llm)
+        return script_svc._translate_script(fact_text, language_context, llm)
+
     def _translate_text(self, text: str, language_context, llm: LLMClient) -> str:
         """Translate a single text string to the target language using chat()."""
         if not text or not text.strip():
@@ -1769,42 +1870,6 @@ class GenerationService:
         except LLMError as e:
             log.warning(f"text translation to {language_context.language} failed: {e}")
             return text
-
-    def _translate_creative_material(self, material, language_context, llm: LLMClient):
-        """Translate all text fields of a CreativeMaterial to the target language."""
-        try:
-            material.hooks = [self._translate_text(h, language_context, llm) for h in material.hooks]
-            material.angles = [self._translate_text(a, language_context, llm) for a in material.angles]
-            material.punchlines = [self._translate_text(p, language_context, llm) for p in material.punchlines]
-            material.observations = [self._translate_text(o, language_context, llm) for o in material.observations]
-            log.info(f"translated creative material to {language_context.language}")
-        except Exception as e:
-            log.warning(f"creative material translation failed: {e}")
-        return material
-
-    def _translate_story_concept(self, concept, language_context, llm: LLMClient):
-        """Translate the text fields of a StoryConcept to the target language."""
-        from gpcg.domain.creative_plan import StoryConcept
-        try:
-            concept.angle = self._translate_text(concept.angle, language_context, llm)
-            concept.curiosity_gap = self._translate_text(concept.curiosity_gap, language_context, llm)
-            concept.narrative_hook = self._translate_text(concept.narrative_hook, language_context, llm)
-            concept.frame = self._translate_text(concept.frame, language_context, llm)
-            log.info(f"translated story concept to {language_context.language}")
-        except Exception as e:
-            log.warning(f"story concept translation failed: {e}")
-        return concept
-
-    def _translate_creative_plan(self, plan: VideoCreativePlan, language_context, llm: LLMClient):
-        """Translate the central_idea and narrative_beats of a VideoCreativePlan."""
-        try:
-            plan.central_idea = self._translate_text(plan.central_idea, language_context, llm)
-            for beat in plan.narrative_beats:
-                beat.description = self._translate_text(beat.description, language_context, llm)
-            log.info(f"translated creative plan to {language_context.language}")
-        except Exception as e:
-            log.warning(f"creative plan translation failed: {e}")
-        return plan
 
     def _set_stage(self, job_id: int, stage: JobStage) -> None:
         with self._session_scope() as session:

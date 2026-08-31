@@ -42,10 +42,29 @@ from gpcg.config import get_settings
 from gpcg.core.models import Fact
 from gpcg.domains.games.models import Game
 from gpcg.domains.games.prompts import CURIOSITY_SCORER_SYSTEM as SYSTEM_PROMPT
+from gpcg.i18n.prompts.registry import PromptRegistry
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)
+
+
+# Direct imports kept as fallback when the registry has no translation.
+_DIRECT_IMPORTS = {
+    "CURIOSITY_SCORER_SYSTEM": SYSTEM_PROMPT,
+}
+
+
+def _get_prompt(name: str, language_context=None) -> str:
+    """Resolve a prompt via the PromptRegistry when a language context is
+    available, falling back to the direct import otherwise."""
+    if language_context is not None:
+        try:
+            lang = getattr(language_context, "language", str(language_context))
+            return PromptRegistry.get(name, domain="games", language=lang).text
+        except (KeyError, Exception):
+            pass
+    return _DIRECT_IMPORTS.get(name, "")
 
 
 # ── Sub-score weights (sum to 1.0 for the 5 editorial sub-scores) ────────────
@@ -139,7 +158,7 @@ class CuriosityScorer:
         self.llm = llm
         self.settings = get_settings()
 
-    def score_facts(self, session: Session, game_id: int | None, llm: Optional[LLMClient] = None) -> int:
+    def score_facts(self, session: Session, game_id: int | None, llm: Optional[LLMClient] = None, *, language_context=None) -> int:
         """Score unscored facts (curiosity_score == 0) for a game or general pool.
 
         Returns the number of facts scored.
@@ -181,7 +200,7 @@ class CuriosityScorer:
             )
             try:
                 data = client.chat_json(
-                    SYSTEM_PROMPT, prompt,
+                    _get_prompt("CURIOSITY_SCORER_SYSTEM", language_context), prompt,
                     model=s.gpcg_curiosity_scorer_model or None,
                     temperature=s.gpcg_curiosity_scorer_temperature,
                     max_tokens=s.gpcg_curiosity_scorer_max_tokens,
@@ -206,7 +225,7 @@ class CuriosityScorer:
         log.info(f"curiosity-scored {scored}/{len(facts)} facts for '{game_name}'")
         return scored
 
-    def score_single(self, fact: Fact, game_name: str = "", llm: Optional[LLMClient] = None) -> CuriosityScore:
+    def score_single(self, fact: Fact, game_name: str = "", llm: Optional[LLMClient] = None, *, language_context=None) -> CuriosityScore:
         """Score a single fact and return a CuriosityScore (does NOT persist).
 
         Useful for testing / CLI smoke tests.
@@ -221,7 +240,7 @@ class CuriosityScorer:
         )
         try:
             data = client.chat_json(
-                SYSTEM_PROMPT, prompt,
+                _get_prompt("CURIOSITY_SCORER_SYSTEM", language_context), prompt,
                 model=s.gpcg_curiosity_scorer_model or None,
                 temperature=s.gpcg_curiosity_scorer_temperature,
                 max_tokens=s.gpcg_curiosity_scorer_max_tokens,

@@ -27,9 +27,26 @@ from gpcg.core.models import (
 from gpcg.domains.games.models import ContentScope, Game
 from gpcg.domains.games.prompts import CONTENT_PLANNING_SYSTEM as SYSTEM_PROMPT
 from gpcg.infrastructure.llm import LLMClient, LLMError
+from gpcg.i18n.prompts.registry import PromptRegistry
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)
+
+
+def _get_prompt(name: str, language_context=None) -> str:
+    """Resolve a prompt via PromptRegistry when a language context is available.
+
+    Falls back to the direct pt-BR import (``SYSTEM_PROMPT``) when no
+    language context is provided or the registry lookup fails.
+    """
+    if language_context is not None:
+        try:
+            lang = getattr(language_context, "language", str(language_context))
+            return PromptRegistry.get(name, domain="games", language=lang).text
+        except Exception:
+            pass
+    # Fallback to direct import (pt-BR default)
+    return SYSTEM_PROMPT
 
 
 
@@ -157,7 +174,8 @@ class ContentPlanningService:
 
         llm = self.llm or LLMClient()
         try:
-            data = llm.chat_json(SYSTEM_PROMPT, prompt, temperature=0.6, max_tokens=1024)
+            system_prompt = _get_prompt("CONTENT_PLANNING_SYSTEM", language_context)
+            data = llm.chat_json(system_prompt, prompt, temperature=0.6, max_tokens=1024)
         except LLMError as e:
             log.error(f"content planning failed: {e}")
             return None
@@ -386,13 +404,12 @@ class ContentPlanningService:
                         background_game_id=background_game_id,
                         topic=ki.title[:200],
                         tone="curious",
-                        mood="energetic",
+                        music_mood="energetic",
                         fact_id=None,
                         user_id=user_id,
-                        scope=ContentScope.general.value,
                         target_duration=self.settings.gpcg_default_target_duration,
-            target_language=language_context.language if language_context else "pt-BR",
-                        metadata={
+                        target_language=language_context.language if language_context else "pt-BR",
+                        metadata_json={
                             "mode": "curiosity_short",
                             "knowledge_item_id": ki.id,
                             "source_type": "knowledge_item",
@@ -464,7 +481,8 @@ class ContentPlanningService:
 
         llm = self.llm or LLMClient()
         try:
-            data = llm.chat_json(SYSTEM_PROMPT, prompt, temperature=0.6, max_tokens=1024)
+            system_prompt = _get_prompt("CONTENT_PLANNING_SYSTEM", language_context)
+            data = llm.chat_json(system_prompt, prompt, temperature=0.6, max_tokens=1024)
         except LLMError as e:
             log.error(f"content planning failed: {e}")
             return None

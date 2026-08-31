@@ -268,6 +268,8 @@ def init_db() -> None:
     _ensure_column(engine, "channel_profiles", "target_language", "VARCHAR(10) DEFAULT 'pt-BR'")
     # ChannelProfile.prompt_version — for A/B testing and checkpoint compat
     _ensure_column(engine, "channel_profiles", "prompt_version", "VARCHAR(20) DEFAULT 'v1'")
+    # ChannelProfile.model_preferences — per-language model overrides
+    _ensure_column(engine, "channel_profiles", "model_preferences", "JSON")
     # ContentPlan.target_language — frozen at plan creation
     _ensure_column(engine, "content_plans", "target_language", "VARCHAR(10) DEFAULT 'pt-BR'")
     # Script.language — frozen at script creation
@@ -276,6 +278,8 @@ def init_db() -> None:
     _ensure_column(engine, "videos", "language", "VARCHAR(10) DEFAULT 'pt-BR'")
     # KnowledgeChunk.language — for language-aware RAG retrieval
     _ensure_column(engine, "knowledge_chunks", "language", "VARCHAR(10) DEFAULT 'pt-BR'")
+    # Seed system voices with language metadata
+    _seed_system_voices()
     # Seed admin user if not exists (linked to BI Identity by email)
     _seed_admin_user()
 
@@ -485,6 +489,46 @@ def _fix_story_assets_primary_key(engine) -> None:
         ))
         conn.execute(text("DROP TABLE _story_assets_broken"))
     log.info("story_assets primary key fixed: id is now INTEGER PRIMARY KEY AUTOINCREMENT")
+
+
+def _seed_system_voices() -> None:
+    """Seed the voices table with system voice metadata.
+
+    System voices have user_id=NULL and live in data/voices/.
+    This is idempotent — only inserts voices that don't already have a row.
+    """
+    import logging
+    from gpcg.core.models import Voice
+
+    log = logging.getLogger(__name__)
+
+    # System voices known to exist in the deployment.
+    # (filename, language, display_name)
+    SYSTEM_VOICES = [
+        ("bruno.wav", "pt-BR", "Bruna"),
+        ("bruno-slow.wav", "pt-BR", "Bruna (lento)"),
+        ("brunoamplifier-slow.wav", "pt-BR", "Bruna Amplifier (lento)"),
+        ("voice-en-native.mp3", "en-US", "English Native"),
+        ("voice-zh-native.mp3", "zh-CN", "Chinese Native"),
+    ]
+
+    try:
+        with session_scope() as session:
+            for filename, language, display_name in SYSTEM_VOICES:
+                existing = session.query(Voice).filter(
+                    Voice.user_id.is_(None),
+                    Voice.filename == filename,
+                ).first()
+                if not existing:
+                    session.add(Voice(
+                        user_id=None,
+                        filename=filename,
+                        language=language,
+                        display_name=display_name,
+                    ))
+            session.flush()
+    except Exception as e:
+        log.debug(f"System voice seed skipped: {e}")
 
 
 def _seed_admin_user() -> None:

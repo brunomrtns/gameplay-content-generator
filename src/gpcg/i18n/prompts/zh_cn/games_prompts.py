@@ -11,10 +11,10 @@ natural-language content is translated, and all language references are switched
 to Simplified Chinese (zh-CN).
 
 IMPORTANT — Mandarin character density:
-Mandarin Chinese narration is ~3.5 characters per second (vs ~15 for English).
-For a 60-second video: ~210 characters (vs ~900 for English).
+Mandarin Chinese narration is ~5.5 characters per second (vs ~15 for English).
+For a 60-second video: ~330 characters (vs ~900 for English).
 Character count targets in these prompts have been adjusted accordingly
-(~200-280 汉字 instead of ~800-1000 characters).
+(~280-379 汉字 instead of ~800-1000 characters).
 """
 
 # ── ScriptService prompts ────────────────────────────────────────────────────
@@ -22,7 +22,7 @@ Character count targets in these prompts have been adjusted accordingly
 DRAFT_SYSTEM = """你是一个游戏YouTube Shorts频道的编剧。
 用简体中文（zh-CN）为一条竖屏Short撰写旁白脚本。
 
-注意：这是中文 narration，每个汉字大约对应0.3秒的语音。60秒视频约需要200-280个汉字。
+注意：这是中文 narration，每个汉字大约对应0.3秒的语音。60秒视频约需要280-379个汉字。
 
 关键要求 — 语言：
 脚本必须完全使用简体中文（zh-CN）撰写。
@@ -39,7 +39,7 @@ DRAFT_SYSTEM = """你是一个游戏YouTube Shorts频道的编剧。
 - 不要编造事实——只使用提供的信息
 - 纯文本，没有markdown，没有标题
 - 重要：写出足够的内容来填满目标时长。不要写短脚本——
-  目标是用户提示中指定的目标字数（汉字，大约每秒3.5个字的旁白）。
+  目标是用户提示中指定的目标字数（汉字，大约每秒5.5个字的旁白）。
 
 关键要求 — 反抄袭：
 你讲述的事实来自第三方源文档。你必须完全用自己的话撰写脚本。
@@ -56,7 +56,7 @@ DRAFT_SYSTEM = """你是一个游戏YouTube Shorts频道的编剧。
 PLAN_DRAFT_SYSTEM = """你是一个游戏YouTube Shorts频道的编剧。
 用简体中文（zh-CN）为一条竖屏Short撰写旁白脚本。
 
-注意：这是中文 narration，每个汉字大约对应0.3秒的语音。60秒视频约需要200-280个汉字。
+注意：这是中文 narration，每个汉字大约对应0.3秒的语音。60秒视频约需要280-379个汉字。
 
 关键要求 — 语言：
 脚本必须完全使用简体中文（zh-CN）撰写。
@@ -137,7 +137,7 @@ PLAN_DRAFT_SYSTEM = """你是一个游戏YouTube Shorts频道的编剧。
    绝不重复使用来源中的措辞。
 
 8. 格式：纯文本，没有markdown，没有标题。为TTS使用干净的标点。
-   目标是用户提示中指定的字数（汉字，大约每秒3.5个字的旁白）。
+   目标是用户提示中指定的字数（汉字，大约每秒5.5个字的旁白）。
 
 返回JSON: {"script": "<旁白文本>"}"""
 
@@ -186,7 +186,7 @@ OPTIMIZE_SYSTEM = """你是YouTube Shorts TTS旁白的脚本优化器。
 - 留存率（收紧节奏，去除冗余）
 - TTS适用性（干净的标点，自然的停顿，没有难以发音的符号）
 - 钩子强度（如有需要让第一句更有力）
-- 时长（匹配用户提示中指定的目标字数，汉字，大约每秒3.5个字的旁白）
+- 时长（匹配用户提示中指定的目标字数，汉字，大约每秒5.5个字的旁白）
 - 事实准确性（不要添加新事实；只重新表述现有事实）
 - 事实准确性（关键）：不要编造不在草稿中的游戏机制、功能或
   细节。在扩展脚本以达到目标长度时，添加评论、背景或观点——而不是
@@ -218,7 +218,7 @@ REWRITE_SYSTEM = """你是专门从事反抄袭重写的脚本重写者。
   即使参考知识上下文是其他语言，脚本也必须100%使用简体中文。
 - 保持相同的事实（不要编造或省略信息）
 - 为TTS保持干净的标点
-- 匹配用户提示中指定的目标字数（汉字，大约每秒3.5个字的旁白）
+- 匹配用户提示中指定的目标字数（汉字，大约每秒5.5个字的旁白）
 - 结果必须读起来像100%的原创作品，而不是改写
 
 返回JSON: {"script": "<完全重写的旁白>"}"""
@@ -789,7 +789,7 @@ CONTENT_PLANNING_SYSTEM = """你是一个游戏频道的YouTube Shorts内容策�
 考虑：
 - 钩子潜力（前3秒必须抓住注意力）
 - 好奇心/惊喜因素
-- 在约60秒内的可讲述性（约200-280 汉字 of narration，使用简体中文zh-CN）
+- 在约60秒内的可讲述性（约280-379 汉字 of narration，使用简体中文zh-CN）
 - 视觉潜力（将使用游戏画面作为背景）
 - 原创性（优先选择较少使用的创意）
 

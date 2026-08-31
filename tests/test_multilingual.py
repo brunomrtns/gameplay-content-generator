@@ -308,15 +308,15 @@ class TestCharacterDensity:
         zh_cps = get_chars_per_second("zh-CN")
         pt_cps = get_chars_per_second("pt-BR")
         assert zh_cps < pt_cps
-        assert zh_cps == 3.5
+        assert zh_cps == 5.5  # calibrated from real XTTS output (205 chars / 37.4s)
         assert pt_cps == 13.0
 
     def test_target_char_range_mandarin_60s(self):
         from gpcg.i18n.language_context import get_target_char_range
         min_c, max_c = get_target_char_range(60, "zh-CN")
-        # ~210 chars for 60s Mandarin (3.5 cps * 60 = 210)
-        assert 150 <= min_c <= 200
-        assert 200 <= max_c <= 260
+        # ~280-379 chars for 60s Mandarin (5.5 cps * 60 = 330)
+        assert 250 <= min_c <= 320
+        assert 320 <= max_c <= 420
 
     def test_target_char_range_latin_60s(self):
         from gpcg.i18n.language_context import get_target_char_range
@@ -398,4 +398,4 @@ class TestChinesePrompts:
     def test_zh_cn_has_mandarin_density_note(self):
         """zh-CN prompts should mention the character density for Mandarin."""
         prompt = PromptRegistry.get("DRAFT_SYSTEM", language="zh-CN", domain="games")
-        assert "3.5" in prompt.text or "0.3秒" in prompt.text or "200-280" in prompt.text
+        assert "3.5" in prompt.text or "5.5" in prompt.text or "0.3秒" in prompt.text or "200-280" in prompt.text or "280" in prompt.text

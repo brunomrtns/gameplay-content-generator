@@ -30,10 +30,29 @@ from gpcg.core.models import ContentPlan, Fact
 from gpcg.domains.games.models import Game
 from gpcg.domains.games.prompts import STORY_FINDER_SYSTEM as SYSTEM_PROMPT
 from gpcg.i18n.prompt_adapter import adapt_system_prompt
+from gpcg.i18n.prompts.registry import PromptRegistry
 from gpcg.infrastructure.llm import LLMClient, LLMError
 from gpcg.logging import get_logger
 
 log = get_logger(__name__)
+
+
+# Direct imports kept as fallback when the registry has no translation.
+_DIRECT_IMPORTS = {
+    "STORY_FINDER_SYSTEM": SYSTEM_PROMPT,
+}
+
+
+def _get_prompt(name: str, language_context=None) -> str:
+    """Resolve a prompt via the PromptRegistry when a language context is
+    available, falling back to the direct import otherwise."""
+    if language_context is not None:
+        try:
+            lang = getattr(language_context, "language", str(language_context))
+            return PromptRegistry.get(name, domain="games", language=lang).text
+        except (KeyError, Exception):
+            pass
+    return _DIRECT_IMPORTS.get(name, "")
 
 
 
@@ -101,7 +120,10 @@ class StoryFinder:
 
         try:
             data = self.llm.chat_json(
-                system=adapt_system_prompt(SYSTEM_PROMPT, language_context),
+                system=adapt_system_prompt(
+                    _get_prompt("STORY_FINDER_SYSTEM", language_context),
+                    language_context,
+                ),
                 prompt=user_prompt,
                 model=s.gpcg_story_finder_model or None,
                 temperature=s.gpcg_story_finder_temperature,

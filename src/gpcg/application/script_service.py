@@ -48,6 +48,42 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+# Direct imports kept as fallback for backward compat when PromptRegistry is
+# not available or when no language_context is provided (pt-BR default).
+_DIRECT_IMPORTS = {
+    "DRAFT_SYSTEM": DRAFT_SYSTEM,
+    "OPTIMIZE_SYSTEM": OPTIMIZE_SYSTEM,
+    "PLAN_DRAFT_SYSTEM": PLAN_DRAFT_SYSTEM,
+    "REVISION_SYSTEM": REVISION_SYSTEM,
+    "REWRITE_SYSTEM": REWRITE_SYSTEM,
+}
+
+
+def _get_prompt(name: str, language_context=None) -> str:
+    """Resolve a prompt via PromptRegistry, falling back to direct import.
+
+    When a ``language_context`` is provided, the PromptRegistry is queried for
+    a language-specific prompt template (e.g. zh-CN, en-US). If the registry
+    cannot resolve the prompt (missing language pack, registry unavailable),
+    we fall back to the direct pt-BR import — preserving the previous
+    behavior for pt-BR and acting as a safety net for other languages.
+    """
+    if language_context is not None:
+        try:
+            lang = (
+                language_context.language
+                if hasattr(language_context, "language")
+                else str(language_context)
+            )
+            from gpcg.i18n.prompts.registry import PromptRegistry
+            template = PromptRegistry.get(name, domain="games", language=lang)
+            return template.text
+        except Exception:
+            # Registry unavailable or prompt not found — fall back to direct import
+            pass
+    # Fallback to direct import (pt-BR default)
+    return _DIRECT_IMPORTS[name]
+
 
 def _adapt_system_prompt(prompt: str, language_context) -> str:
     """Adapt a system prompt for the target language (delegates to i18n)."""
@@ -139,11 +175,20 @@ class ScriptService:
             lang_max = s.gpcg_narration_max_chars
 
         # Determine the model to use
-        # Priority: creative_plan.model > creative_material model > default
+        # Priority: creative_plan.model > language-recommended > default
         model_override = None
         if creative_plan is not None and creative_plan.success and creative_plan.model.model:
             model_override = creative_plan.model.model
             log.info(f"using plan-recommended model: {model_override}")
+        elif language_context is not None and not language_context.is_default:
+            # For CJK languages, use a model with native capability (qwen3:14b)
+            # instead of llama3.1:8b which has weak Chinese and tends to
+            # fall back to English/Portuguese.
+            from gpcg.i18n.language_context import get_recommended_model
+            lang_model = get_recommended_model(language_context.language)
+            if lang_model:
+                model_override = lang_model
+                log.info(f"using language-recommended model for {language_context.language}: {model_override}")
 
         # Build context — game name if game-specific, else "general curiosity"
         if plan.game is not None:
@@ -181,7 +226,7 @@ class ScriptService:
                 revision_prompt = f"{channel_block}{knowledge_block}\n{revision_prompt}"
             try:
                 rev_data = llm.chat_json(
-                    _adapt_system_prompt(REVISION_SYSTEM, language_context), revision_prompt,
+                    _get_prompt("REVISION_SYSTEM", language_context), revision_prompt,
                     model=model_override,
                     temperature=0.6, max_tokens=2500,
                 )
@@ -210,7 +255,7 @@ class ScriptService:
                         f"Return the full expanded script (not just the additions)."
                     )
                     try:
-                        expand_data = llm.chat_json(_adapt_system_prompt(OPTIMIZE_SYSTEM, language_context), expand_prompt, temperature=0.5, max_tokens=3000)
+                        expand_data = llm.chat_json(_get_prompt("OPTIMIZE_SYSTEM", language_context), expand_prompt, temperature=0.5, max_tokens=3000)
                         expanded = (expand_data.get("script") or "").strip()
                         if expanded and len(expanded) > len(final):
                             final = expanded
@@ -243,15 +288,9 @@ class ScriptService:
                     rewrite_count=0,
                     language=language_context.language if language_context else "pt-BR",
                 )
-                # Multilingual: translate the revised script to target language
-                if language_context is not None and not language_context.is_default:
-                    log.info(f"translating revised script to {language_context.language} (dedicated pass)")
-                    final = self._translate_script(final, language_context, llm, model=model_override)
-                    char_count = len(final)
-                    revised = self._translate_script(revised, language_context, llm, model=model_override)
-                    script.final = final
-                    script.optimized = revised
-                    script.char_count = char_count
+                # NOTE: The dedicated translation pass has been removed.
+                # Scripts are now generated natively in the target language
+                # via language-aware prompts (PromptRegistry, Fase 2).
                 session.add(script)
                 session.flush()
                 log.info(f"revised script #{script.id}: {char_count} chars, originality={report.score:.1f}")
@@ -263,7 +302,7 @@ class ScriptService:
         # ── Draft ──────────────────────────────────────────────────────────
         # Choose system prompt: plan-oriented if plan available, else legacy
         if creative_plan is not None and creative_plan.success:
-            draft_system = _adapt_system_prompt(PLAN_DRAFT_SYSTEM, language_context)
+            draft_system = _get_prompt("PLAN_DRAFT_SYSTEM", language_context)
             draft_prompt = self._build_plan_draft_prompt(
                 plan, fact_text, creative_plan, s, story_concept=story_concept,
                 channel_block=channel_block, knowledge_block=knowledge_block,
@@ -271,7 +310,7 @@ class ScriptService:
                 language_context=language_context,
             )
         else:
-            draft_system = _adapt_system_prompt(DRAFT_SYSTEM, language_context)
+            draft_system = _get_prompt("DRAFT_SYSTEM", language_context)
             draft_prompt = (
                 f"{context_line}"
                 f"{channel_block}{knowledge_block}"
@@ -325,7 +364,7 @@ class ScriptService:
             f"{'TOO SHORT — must expand to at least ' + str(lang_min) + ' chars.' if len(draft) < lang_min else ''}"
         )
         try:
-            opt_data = llm.chat_json(_adapt_system_prompt(OPTIMIZE_SYSTEM, language_context), opt_prompt, temperature=0.4, max_tokens=2500)
+            opt_data = llm.chat_json(_get_prompt("OPTIMIZE_SYSTEM", language_context), opt_prompt, temperature=0.4, max_tokens=2500)
             optimized = (opt_data.get("script") or "").strip()
             if not optimized:
                 optimized = draft
@@ -361,7 +400,7 @@ class ScriptService:
                 f"Return the full expanded script (not just the additions)."
             )
             try:
-                expand_data = llm.chat_json(OPTIMIZE_SYSTEM, expand_prompt, temperature=0.5, max_tokens=3000)
+                expand_data = llm.chat_json(_get_prompt("OPTIMIZE_SYSTEM", language_context), expand_prompt, temperature=0.5, max_tokens=3000)
                 expanded = (expand_data.get("script") or "").strip()
                 if expanded and len(expanded) > len(final):
                     final = expanded
@@ -411,7 +450,7 @@ class ScriptService:
                 f"Target {lang_min}-{lang_max} chars."
             )
             try:
-                rw_data = llm.chat_json(_adapt_system_prompt(REWRITE_SYSTEM, language_context), rewrite_prompt, temperature=0.8, max_tokens=1500)
+                rw_data = llm.chat_json(_get_prompt("REWRITE_SYSTEM", language_context), rewrite_prompt, temperature=0.8, max_tokens=1500)
                 rewritten = (rw_data.get("script") or "").strip()
                 if rewritten and len(rewritten) >= 100:
                     final = rewritten
@@ -436,20 +475,11 @@ class ScriptService:
                 f"(score={report.score:.1f}). Proceeding but flagging for review."
             )
 
-        # ── Multilingual: dedicated translation pass ─────────────────────────
-        # The script-generation LLM tends to follow the language of the input
-        # material (Portuguese facts, creative material, story concepts) rather
-        # than the language instructions in the prompt. A dedicated translation
-        # call that ONLY translates is far more reliable. We translate `final`
-        # (the narration text that goes to TTS) and `draft`/`optimized` for
-        # record-keeping consistency.
-        if language_context is not None and not language_context.is_default:
-            log.info(f"translating final script to {language_context.language} (dedicated pass)")
-            final = self._translate_script(final, language_context, llm, model=model_override)
-            char_count = len(final)
-            draft = self._translate_script(draft, language_context, llm, model=model_override)
-            if optimized:
-                optimized = self._translate_script(optimized, language_context, llm, model=model_override)
+        # ── Multilingual: dedicated translation pass (REMOVED) ───────────────
+        # The script-generation LLM now generates natively in the target
+        # language via language-aware prompts (PromptRegistry, Fase 2).
+        # The dedicated _translate_script pass is no longer needed in the
+        # normal flow. The method is kept as a utility for fact translation.
 
         script = Script(
             content_plan_id=content_plan_id,
@@ -493,8 +523,17 @@ class ScriptService:
         if not text or not text.strip():
             return text
 
-        from gpcg.i18n.language_context import get_language_name
+        from gpcg.i18n.language_context import get_language_name, get_recommended_model
         lang_name = get_language_name(language_context.language)
+
+        # For CJK languages, use a model with native Chinese capability
+        # (qwen3:14b) instead of the default llama3.1:8b which has weak
+        # Chinese and tends to produce English/Portuguese fallbacks.
+        if model is None:
+            lang_model = get_recommended_model(language_context.language)
+            if lang_model:
+                model = lang_model
+                log.info(f"translation using language-recommended model: {model}")
 
         system = (
             f"You are a professional translator. "

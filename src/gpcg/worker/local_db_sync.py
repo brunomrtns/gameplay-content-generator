@@ -720,6 +720,7 @@ def run_generation_locally(
                         "background_game_id": plan.background_game_id,
                         "format": plan.format,
                         "target_duration": plan.target_duration,
+                        "target_language": plan.target_language or "pt-BR",
                         "topic": plan.topic,
                         "hook": plan.hook,
                         "tone": plan.tone,
@@ -730,23 +731,33 @@ def run_generation_locally(
                     }
 
             # Extract script
-            if job_row.content_plan_id:
+            # Use the script_id from job.artifacts (the script actually used
+            # for TTS) instead of order_by(id.desc()) which can return a
+            # stale pre-populated script from the VPS (in the wrong language).
+            script = None
+            artifacts = job_row.artifacts or {}
+            script_id_from_artifacts = artifacts.get("script_id")
+            if script_id_from_artifacts:
+                script = session.get(Script, script_id_from_artifacts)
+            if not script and job_row.content_plan_id:
+                # Fallback: query by content_plan_id (legacy path)
                 script = session.query(Script).filter(
                     Script.content_plan_id == job_row.content_plan_id
                 ).order_by(Script.id.desc()).first()
-                if script:
-                    result["script"] = {
-                        "id": script.id,
-                        "content_plan_id": script.content_plan_id,
-                        "draft": script.draft,
-                        "optimized": script.optimized,
-                        "final": script.final,
-                        "status": script.status,
-                        "char_count": script.char_count,
-                        "originality_score": script.originality_score,
-                        "originality_report": script.originality_report,
-                        "rewrite_count": script.rewrite_count,
-                    }
+            if script:
+                result["script"] = {
+                    "id": script.id,
+                    "content_plan_id": script.content_plan_id,
+                    "draft": script.draft,
+                    "optimized": script.optimized,
+                    "final": script.final,
+                    "status": script.status,
+                    "language": script.language or "pt-BR",
+                    "char_count": script.char_count,
+                    "originality_score": script.originality_score,
+                    "originality_report": script.originality_report,
+                    "rewrite_count": script.rewrite_count,
+                }
 
             # Extract video
             video = session.query(Video).filter(Video.job_id == job_id).first()
@@ -759,6 +770,7 @@ def run_generation_locally(
                     "duration": video.duration,
                     "width": video.width,
                     "height": video.height,
+                    "language": video.language or "pt-BR",
                     "qa_score": video.qa_score,
                     "qa_report": video.qa_report,
                     "status": video.status,

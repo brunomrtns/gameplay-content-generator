@@ -1176,13 +1176,18 @@ def create_job_from_decision(
             pass
     voice_path = ""
     if voice_name:
-        # REFACTORY_V2: look in user's isolated directory first, then shared root
-        user_voice = settings.voices_dir / f"user_{req.user_id}" / voice_name
-        shared_voice = settings.voices_dir / voice_name
-        if user_voice.exists():
-            voice_path = str(user_voice)
-        elif shared_voice.exists():
-            voice_path = str(shared_voice)
+        # Get target_language for voice↔language validation
+        target_language = ""
+        try:
+            _prof = db.query(ChannelProfile).filter(
+                ChannelProfile.user_id == req.user_id
+            ).first()
+            if _prof and getattr(_prof, "target_language", None):
+                target_language = _prof.target_language
+        except Exception:
+            pass
+        from gpcg.api.routes import _resolve_voice_path
+        voice_path = _resolve_voice_path(voice_name, req.user_id, settings, target_language)
     subtitle_kwargs["voice_path"] = voice_path
 
     if req.job_type == "generate_short" and req.game_id:
@@ -1461,9 +1466,18 @@ def create_job_from_automation(user_id: int) -> int | None:
             if voice_name:
                 from gpcg.config import get_settings
                 settings = get_settings()
-                vp = settings.voices_dir / voice_name
-                if vp.exists():
-                    voice_path = str(vp)
+                # Get target_language for voice↔language validation
+                target_language = ""
+                try:
+                    _prof = db.query(ChannelProfile).filter(
+                        ChannelProfile.user_id == auto.user_id
+                    ).first()
+                    if _prof and getattr(_prof, "target_language", None):
+                        target_language = _prof.target_language
+                except Exception:
+                    pass
+                from gpcg.api.routes import _resolve_voice_path
+                voice_path = _resolve_voice_path(voice_name, auto.user_id, settings, target_language)
             subtitle_kwargs["voice_path"] = voice_path
 
             service = GenerationService(llm=get_llm())

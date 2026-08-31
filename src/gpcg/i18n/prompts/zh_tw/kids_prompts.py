@@ -14,7 +14,7 @@ Key differences from Games prompts:
 This is the zh-TW (Traditional Chinese) variant. All prompts instruct the LLM
 to produce output in Traditional Chinese (zh-TW).
 
-注意：這是中文 narration，每個漢字大約對應0.3秒的語音。60秒影片約需要200-280個漢字。
+注意：這是中文 narration，每個漢字大約對應0.3秒的語音。60秒影片約需要280-379個漢字。
 """
 
 # ── ScriptService prompts ────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ DRAFT_SYSTEM = """你是一個兒童 YouTube Shorts 頻道的腳本作家。
 - 純文字，無 markdown，無標題
 - 重要：撰寫足夠的內容以填滿目標時長。不要寫短
   腳本 — 以使用者提示中指定的目標字數為準。
-  注意：這是中文 narration，每個漢字大約對應0.3秒的語音。60秒影片約需要200-280個漢字。
+  注意：這是中文 narration，每個漢字大約對應0.3秒的語音。60秒影片約需要280-379個漢字。
 
 回傳 JSON：{"script": "<旁白文字>"}"""
 
@@ -97,7 +97,7 @@ PLAN_DRAFT_SYSTEM = """你是一個兒童 YouTube Shorts 頻道的腳本作家�
 
 7. 格式：純文字，無 markdown，無標題。清晰的標點符號供 TTS 使用。
    以使用者提示中指定的字數為目標。
-   注意：這是中文 narration，每個漢字大約對應0.3秒的語音。60秒影片約需要200-280個漢字。
+   注意：這是中文 narration，每個漢字大約對應0.3秒的語音。60秒影片約需要280-379個漢字。
 
 回傳 JSON：{"script": "<旁白文字>"}"""
 
@@ -134,7 +134,7 @@ OPTIMIZE_SYSTEM = """你是兒童 YouTube Shorts TTS 旁白的腳本優化器。
 - 時長（配合目標字數）
 - 兒童友善語言（簡單詞彙，清晰結構）
 - 事實準確性（不要加入新事實；只改寫現有的）
-- 注意：這是中文 narration，每個漢字大約對應0.3秒的語音。60秒影片約需要200-280個漢字。
+- 注意：這是中文 narration，每個漢字大約對應0.3秒的語音。60秒影片約需要280-379個漢字。
 
 關鍵 — 語言：輸出必須完全以繁體中文（zh-TW）撰寫。
 純文字。
@@ -289,7 +289,7 @@ CONTENT_PLANNING_SYSTEM = """你是一個兒童頻道的 YouTube Shorts 內容�
 - 簡單性（能用兒童友善語言在約 60 秒內解釋嗎？）
 - 視覺潛力（將使用圖片／插圖作為背景）
 - 適齡性
-- 注意：這是中文 narration，每個漢字大約對應0.3秒的語音。60秒影片約需要200-280個漢字。
+- 注意：這是中文 narration，每個漢字大約對應0.3秒的語音。60秒影片約需要280-379個漢字。
 
 回傳 JSON：
 {

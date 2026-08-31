@@ -1078,29 +1078,22 @@ def create_generation_job(
     if not voice:
         voice = auto_cfg.get("voice", "")
     # Auto-select voice based on channel profile language when none is set
-    if not voice:
-        try:
-            from gpcg.core.models import ChannelProfile
-            _profile = db.query(ChannelProfile).filter(
-                ChannelProfile.user_id == user.id
-            ).first()
-            if _profile and getattr(_profile, "target_language", None):
-                auto_voice = _auto_select_voice_for_language(_profile.target_language, settings)
+    target_language = ""
+    try:
+        from gpcg.core.models import ChannelProfile
+        _profile = db.query(ChannelProfile).filter(
+            ChannelProfile.user_id == user.id
+        ).first()
+        if _profile and getattr(_profile, "target_language", None):
+            target_language = _profile.target_language
+            if not voice:
+                auto_voice = _auto_select_voice_for_language(target_language, settings)
                 if auto_voice:
                     voice = auto_voice
-        except Exception:
-            pass
-    voice_path = ""
-    if voice:
-        # REFACTORY_V2: look in user's isolated directory first, then shared root
-        user_voice = settings.voices_dir / f"user_{user.id}" / voice
-        shared_voice = settings.voices_dir / voice
-        if user_voice.exists():
-            voice_path = str(user_voice)
-        elif shared_voice.exists():
-            voice_path = str(shared_voice)
-        else:
-            raise HTTPException(404, f"voice '{voice}' not found — upload it first")
+    except Exception:
+        pass
+
+    voice_path = _resolve_voice_path(voice, user.id, settings, target_language)
 
     svc = GenerationService()
     job = svc.create_job(
@@ -1199,29 +1192,22 @@ def create_curiosity_job(
     if not voice:
         voice = auto_cfg.get("voice", "")
     # Auto-select voice based on channel profile language when none is set
-    if not voice:
-        try:
-            from gpcg.core.models import ChannelProfile
-            _profile = db.query(ChannelProfile).filter(
-                ChannelProfile.user_id == user.id
-            ).first()
-            if _profile and getattr(_profile, "target_language", None):
-                auto_voice = _auto_select_voice_for_language(_profile.target_language, settings)
+    target_language = ""
+    try:
+        from gpcg.core.models import ChannelProfile
+        _profile = db.query(ChannelProfile).filter(
+            ChannelProfile.user_id == user.id
+        ).first()
+        if _profile and getattr(_profile, "target_language", None):
+            target_language = _profile.target_language
+            if not voice:
+                auto_voice = _auto_select_voice_for_language(target_language, settings)
                 if auto_voice:
                     voice = auto_voice
-        except Exception:
-            pass
-    voice_path = ""
-    if voice:
-        # REFACTORY_V2: look in user's isolated directory first, then shared root
-        user_voice = settings.voices_dir / f"user_{user.id}" / voice
-        shared_voice = settings.voices_dir / voice
-        if user_voice.exists():
-            voice_path = str(user_voice)
-        elif shared_voice.exists():
-            voice_path = str(shared_voice)
-        else:
-            raise HTTPException(404, f"voice '{voice}' not found — upload it first")
+    except Exception:
+        pass
+
+    voice_path = _resolve_voice_path(voice, user.id, settings, target_language)
 
     svc = GenerationService()
     job = svc.create_curiosity_job(
@@ -1918,19 +1904,50 @@ def regenerate_video(
 # Built-in system voices with language mapping.
 # These are shared voices available to all users, shipped with GPCG.
 # Users can also upload their own voices via /voices/upload.
+# NOTE: The voices table (core.models.Voice) is the source of truth for
+# voice metadata. This dict is a fallback for when the DB is not yet
+# initialized (e.g. fresh install before init_db runs).
 _SYSTEM_VOICES: dict[str, dict] = {
     "bruno.wav": {"language": "pt-BR", "display_name": "Bruno (Português)"},
+    "bruno-slow.wav": {"language": "pt-BR", "display_name": "Bruno (Português, lento)"},
+    "brunoamplifier-slow.wav": {"language": "pt-BR", "display_name": "Bruno Amplifier (Português, lento)"},
     "voice-en-native.mp3": {"language": "en-US", "display_name": "Native English Voice"},
     "voice-zh-native.mp3": {"language": "zh-CN", "display_name": "Native Chinese Voice (普通话)"},
 }
 
 
+def _voice_metadata(filename: str, user_id: int | None = None) -> dict | None:
+    """Look up voice metadata from the voices table.
+
+    Returns {"language": ..., "display_name": ...} or None if not found.
+    Falls back to _SYSTEM_VOICES for system voices when the DB row doesn't exist.
+    """
+    from gpcg.core.models import Voice
+    from gpcg.infrastructure.database import session_scope
+
+    try:
+        with session_scope() as session:
+            row = session.query(Voice).filter(
+                Voice.user_id == user_id if user_id is not None else Voice.user_id.is_(None),
+                Voice.filename == filename,
+            ).first()
+            if row:
+                return {"language": row.language, "display_name": row.display_name or filename}
+    except Exception:
+        pass
+    # Fallback to hardcoded dict for system voices
+    if filename in _SYSTEM_VOICES:
+        return _SYSTEM_VOICES[filename]
+    return None
+
+
 def _detect_voice_language(filename: str) -> str:
     """Detect the best content language for a voice file based on its name."""
-    name = filename.lower()
-    if name in _SYSTEM_VOICES:
-        return _SYSTEM_VOICES[name]["language"]
+    meta = _voice_metadata(filename)
+    if meta:
+        return meta["language"]
     # Heuristic: check for language hints in filename
+    name = filename.lower()
     if "en" in name or "english" in name or "ingles" in name:
         return "en-US"
     if "zh" in name or "chines" in name or "chinese" in name or "mandarin" in name:
@@ -1944,8 +1961,9 @@ def _detect_voice_language(filename: str) -> str:
 
 def _voice_display_name(filename: str) -> str:
     """Return a human-friendly display name for a voice file."""
-    if filename in _SYSTEM_VOICES:
-        return _SYSTEM_VOICES[filename]["display_name"]
+    meta = _voice_metadata(filename)
+    if meta and meta.get("display_name"):
+        return meta["display_name"]
     # For uploaded voices, use the filename without extension
     return Path(filename).stem
 
@@ -1953,10 +1971,33 @@ def _voice_display_name(filename: str) -> str:
 def _auto_select_voice_for_language(language: str, settings) -> str:
     """Auto-select a system voice that matches the target language.
 
+    Queries the voices table (user_id=NULL for system voices) and falls back
+    to _SYSTEM_VOICES dict if the table is empty.
+
     Returns the filename of the best matching voice, or empty string if
     no match is found (caller falls back to default).
     """
+    from gpcg.core.models import Voice
+    from gpcg.infrastructure.database import session_scope
+
     base = language.split("-")[0].lower()
+
+    # Try DB first (source of truth)
+    try:
+        with session_scope() as session:
+            system_voices = session.query(Voice).filter(
+                Voice.user_id.is_(None)
+            ).all()
+            for v in system_voices:
+                voice_base = v.language.split("-")[0].lower()
+                if voice_base == base:
+                    voice_path = settings.voices_dir / v.filename
+                    if voice_path.exists():
+                        return v.filename
+    except Exception:
+        pass
+
+    # Fallback to hardcoded dict
     for filename, meta in _SYSTEM_VOICES.items():
         voice_lang = meta["language"]
         voice_base = voice_lang.split("-")[0].lower()
@@ -1968,6 +2009,91 @@ def _auto_select_voice_for_language(language: str, settings) -> str:
     return ""
 
 
+def _validate_voice_language(
+    voice_filename: str,
+    target_language: str,
+    user_id: int,
+    settings,
+) -> str:
+    """Validate that a voice is compatible with the target language.
+
+    If the voice's language base matches the target language base, returns
+    the voice filename unchanged. If not, auto-selects a compatible voice
+    and logs a WARNING.
+
+    Returns the resolved voice filename (may differ from input).
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    if not voice_filename or not target_language:
+        return voice_filename
+
+    voice_meta = _voice_metadata(voice_filename, user_id=user_id)
+    if not voice_meta:
+        # Can't determine voice language — keep as-is (file existence already checked)
+        return voice_filename
+
+    voice_lang = voice_meta.get("language", "pt-BR")
+    voice_base = voice_lang.split("-")[0].lower()
+    target_base = target_language.split("-")[0].lower()
+
+    if voice_base == target_base:
+        return voice_filename  # compatible
+
+    # Incompatible — override to auto-select
+    auto_voice = _auto_select_voice_for_language(target_language, settings)
+    if auto_voice:
+        log.warning(
+            "Voice '%s' (language=%s) is incompatible with target_language=%s — "
+            "overriding to auto-selected voice '%s'",
+            voice_filename, voice_lang, target_language, auto_voice,
+        )
+        return auto_voice
+
+    # No auto-select available — keep original (better than no voice)
+    log.warning(
+        "Voice '%s' (language=%s) is incompatible with target_language=%s — "
+        "no compatible system voice found, keeping original",
+        voice_filename, voice_lang, target_language,
+    )
+    return voice_filename
+
+
+def _resolve_voice_path(
+    voice_name: str,
+    user_id: int,
+    settings,
+    target_language: str = "",
+) -> str:
+    """Unified voice resolution: validate language, find file, return path.
+
+    Used by both routes.py and automation_routes.py to avoid code duplication.
+    Returns the absolute path to the voice file, or "" if no voice is set.
+    Raises HTTPException if the voice file doesn't exist.
+    """
+    if not voice_name:
+        return ""
+
+    # Validate voice↔language compatibility
+    if target_language:
+        voice_name = _validate_voice_language(voice_name, target_language, user_id, settings)
+
+    # REFACTORY_V2: look in user's isolated directory first, then shared root
+    user_voice = settings.voices_dir / f"user_{user_id}" / voice_name
+    shared_voice = settings.voices_dir / voice_name
+    if user_voice.exists():
+        return str(user_voice)
+    elif shared_voice.exists():
+        return str(shared_voice)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Voice '{voice_name}' not found in user_{user_id}/ or shared voices dir. "
+                   f"Upload the voice or remove it from the automation config.",
+        )
+
+
 @router.get("/voices")
 def list_voices(user: User = Depends(get_current_user)):
     """List available TTS voice reference files (uploaded via /voices/upload).
@@ -1977,6 +2103,9 @@ def list_voices(user: User = Depends(get_current_user)):
 
     Built-in system voices are also listed with owner="system" and a
     ``language`` field indicating which content language they're best for.
+
+    Language metadata is read from the voices table (source of truth),
+    with filename-heuristic fallback for voices not yet in the DB.
     """
     settings = get_settings()
     user_dir = settings.voices_dir / f"user_{user.id}"
@@ -1985,30 +2114,36 @@ def list_voices(user: User = Depends(get_current_user)):
     if user_dir.exists():
         for p in sorted(user_dir.glob("*")):
             if p.suffix.lower() in (".wav", ".mp3", ".ogg", ".flac", ".m4a"):
+                meta = _voice_metadata(p.name, user_id=user.id)
                 voices.append({
                     "filename": p.name,
                     "file_size": p.stat().st_size,
                     "file_size_kb": round(p.stat().st_size / 1024, 1),
                     "owner": "self",
-                    "language": _detect_voice_language(p.name),
-                    "display_name": _voice_display_name(p.name),
+                    "language": meta["language"] if meta else _detect_voice_language(p.name),
+                    "display_name": meta["display_name"] if meta else _voice_display_name(p.name),
                 })
     # Built-in system voices (shared root, available to all users)
     for p in sorted(settings.voices_dir.glob("*")):
         if p.is_file() and p.suffix.lower() in (".wav", ".mp3", ".ogg", ".flac", ".m4a"):
+            meta = _voice_metadata(p.name)
             voices.append({
                 "filename": p.name,
                 "file_size": p.stat().st_size,
                 "file_size_kb": round(p.stat().st_size / 1024, 1),
                 "owner": "system",
-                "language": _detect_voice_language(p.name),
-                "display_name": _voice_display_name(p.name),
+                "language": meta["language"] if meta else _detect_voice_language(p.name),
+                "display_name": meta["display_name"] if meta else _voice_display_name(p.name),
             })
     return voices
 
 
 @router.post("/voices/upload")
-def upload_voice(file: UploadFile = File(...), user: User = Depends(get_current_user)):
+def upload_voice(
+    file: UploadFile = File(...),
+    language: str = "",
+    user: User = Depends(get_current_user),
+):
     """Upload a TTS voice reference file (.wav or .mp3).
 
     The file is saved to data/voices/{user_id}/ and can be selected when
@@ -2016,6 +2151,10 @@ def upload_voice(file: UploadFile = File(...), user: User = Depends(get_current_
     this as the speaker_wav reference to clone the voice.
 
     REFACTORY_V2: voices are isolated per user under data/voices/{user_id}/.
+
+    The ``language`` parameter (BCP-47 tag like "pt-BR", "en-US", "zh-CN")
+    is persisted in the voices table. If omitted, language is detected
+    from the filename as a fallback.
     """
     settings = get_settings()
     if not file.filename:
@@ -2031,10 +2170,40 @@ def upload_voice(file: UploadFile = File(...), user: User = Depends(get_current_
         dest = user_dir / f"{Path(file.filename).stem}_{int(time.time())}{suffix}"
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
+
+    # Persist voice metadata in the voices table
+    resolved_language = language or _detect_voice_language(dest.name)
+    display_name = Path(dest.name).stem
+    try:
+        from gpcg.core.models import Voice
+        from gpcg.infrastructure.database import session_scope
+        with session_scope() as session:
+            # Upsert: if a row with (user_id, filename) exists, update it
+            existing = session.query(Voice).filter(
+                Voice.user_id == user.id,
+                Voice.filename == dest.name,
+            ).first()
+            if existing:
+                existing.language = resolved_language
+                existing.display_name = display_name
+                existing.file_size = dest.stat().st_size
+            else:
+                session.add(Voice(
+                    user_id=user.id,
+                    filename=dest.name,
+                    language=resolved_language,
+                    display_name=display_name,
+                    file_size=dest.stat().st_size,
+                ))
+            session.flush()
+    except Exception:
+        pass  # non-fatal — file is already saved
+
     return {
         "filename": dest.name,
         "file_size": dest.stat().st_size,
         "file_size_kb": round(dest.stat().st_size / 1024, 1),
+        "language": resolved_language,
         "path": str(dest),
     }
 
@@ -2055,4 +2224,18 @@ def delete_voice(filename: str, user: User = Depends(get_current_user)):
     if not p.exists():
         raise HTTPException(404, "voice not found in your directory")
     p.unlink()
+    # Also remove the metadata row from the voices table
+    try:
+        from gpcg.core.models import Voice
+        from gpcg.infrastructure.database import session_scope
+        with session_scope() as session:
+            row = session.query(Voice).filter(
+                Voice.user_id == user.id,
+                Voice.filename == filename,
+            ).first()
+            if row:
+                session.delete(row)
+                session.flush()
+    except Exception:
+        pass
     return {"deleted": filename}

@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import logging
 from dataclasses import dataclass
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -52,18 +55,34 @@ class PromptRegistry:
 
         # Try the requested language, then language-family fallback, then pt_br
         module = cls._load_module(domain, lang_key)
+        resolved_lang = lang_key
         if module is None:
             # Language-family fallback (e.g. "zh" → "zh_cn")
             base = lang_key.split("_")[0]
             if base != lang_key:
                 module = cls._load_module(domain, base)
+                if module is not None:
+                    resolved_lang = base
             # Variant fallback (e.g. "zh" → "zh_cn", "en" → "en_us")
             if module is None and base in ("zh", "en", "pt"):
-                module = cls._load_module(domain, f"{base}_cn" if base == "zh" else f"{base}_us" if base == "en" else f"{base}_br")
+                variant = f"{base}_cn" if base == "zh" else f"{base}_us" if base == "en" else f"{base}_br"
+                module = cls._load_module(domain, variant)
+                if module is not None:
+                    resolved_lang = variant
         if module is None:
             module = cls._load_module(domain, "pt_br")
+            resolved_lang = "pt_br"
         if module is None:
             raise KeyError(f"Prompt '{name}' not found in domain '{domain}' (tried {lang_key} and pt_br)")
+
+        # Log WARNING when fallback to pt-BR occurs (silent fallback hides i18n bugs)
+        if resolved_lang == "pt_br" and lang_key != "pt_br":
+            log.warning(
+                "PromptRegistry: prompt '%s' (domain='%s', language='%s') "
+                "fell back to pt_br — content may be generated in Portuguese "
+                "instead of the target language",
+                name, domain, language,
+            )
 
         raw = getattr(module, name, None)
         if raw is None:
