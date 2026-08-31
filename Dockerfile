@@ -31,6 +31,8 @@ WORKDIR /app
 # Install system dependencies (cached unless apt packages change)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    fonts-noto-cjk \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies — copy only pyproject.toml first so this layer

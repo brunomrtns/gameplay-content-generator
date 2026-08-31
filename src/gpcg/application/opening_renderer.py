@@ -14,6 +14,7 @@ base image to produce the final thumbnail JPG.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -27,6 +28,9 @@ log = get_logger(__name__)
 
 # Font file for drawtext (system font, available in Docker + local)
 _FONT_FILE = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+# CJK font for Chinese/Japanese/Korean text rendering
+_CJK_FONT_FILE = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
 
 # Font size multipliers relative to video height
 _SIZE_MAP = {
@@ -91,11 +95,14 @@ class OpeningRenderer:
         ]
 
         if config.opening_text_enabled and display_title:
+            # Select CJK font for Chinese/Japanese/Korean text
+            from gpcg.i18n.language_context import is_cjk
+            cjk_font = _CJK_FONT_FILE if is_cjk(language) and os.path.exists(_CJK_FONT_FILE) else None
             drawtext = self._build_drawtext(
                 display_title, config.opening_text_position,
                 config.opening_text_color, config.opening_text_outline,
                 config.opening_text_size, w, h,
-                font_file=config.font_file or None,
+                font_file=config.font_file or cjk_font or None,
             )
             vf_parts.append(drawtext)
 
@@ -171,11 +178,14 @@ class OpeningRenderer:
         ]
 
         if config.thumbnail_text_enabled and display_title:
+            # Select CJK font for Chinese/Japanese/Korean text
+            from gpcg.i18n.language_context import is_cjk
+            cjk_font = _CJK_FONT_FILE if is_cjk(language) and os.path.exists(_CJK_FONT_FILE) else None
             drawtext = self._build_drawtext(
                 display_title, config.thumbnail_text_position,
                 config.thumbnail_text_color, config.thumbnail_text_outline,
                 config.thumbnail_text_size, w, h,
-                font_file=config.font_file or None,
+                font_file=config.font_file or cjk_font or None,
             )
             vf_parts.append(drawtext)
 
@@ -339,16 +349,19 @@ class OpeningRenderer:
         font_path = font_file or _FONT_FILE
         max_font_size = int(height * _SIZE_MAP.get(size, 0.09))
 
+        # CJK characters are ~2x wider than Latin chars
+        from gpcg.i18n.language_context import is_cjk
+        char_width_ratio = 1.0 if is_cjk(text) else 0.5
+
         # Adaptively pick a font size that fits the text in ≤3 lines.
-        # DejaVuSans-Bold avg char width ≈ 0.5 × font_size for mixed text.
         # Usable width = 85% of video width (7.5% margin each side).
         max_lines = 3
         usable_width = width * 0.85
         font_size = max_font_size
         wrapped = text
         for _ in range(10):
-            avg_char_width = font_size * 0.5
-            max_chars = max(8, int(usable_width / avg_char_width))
+            avg_char_width = font_size * char_width_ratio
+            max_chars = max(4 if is_cjk(text) else 8, int(usable_width / avg_char_width))
             wrapped = self._wrap_text(text, max_chars)
             num_lines = wrapped.count("\n") + 1
             if num_lines <= max_lines:
@@ -357,8 +370,8 @@ class OpeningRenderer:
             font_size = int(font_size * 0.85)
         else:
             # Fallback: use the last wrapped text even if >3 lines
-            avg_char_width = font_size * 0.5
-            max_chars = max(8, int(usable_width / avg_char_width))
+            avg_char_width = font_size * char_width_ratio
+            max_chars = max(4 if is_cjk(text) else 8, int(usable_width / avg_char_width))
             wrapped = self._wrap_text(text, max_chars)
 
         # Write wrapped text to a temp file to avoid escaping issues
@@ -402,10 +415,18 @@ class OpeningRenderer:
         """Wrap text into lines of at most max_chars, breaking on spaces.
 
         Preserves explicit newlines in the input. Long words are hard-broken
-        at max_chars if they don't fit.
+        at max_chars if they don't fit. CJK text (no spaces) is broken by
+        character count.
         """
         lines: list[str] = []
         for paragraph in text.split("\n"):
+            # CJK: no spaces — break by character count
+            from gpcg.i18n.language_context import is_cjk
+            if is_cjk(text) or not paragraph.strip():
+                # For CJK, just break by max_chars
+                for i in range(0, len(paragraph), max_chars):
+                    lines.append(paragraph[i:i + max_chars])
+                continue
             words = paragraph.split()
             if not words:
                 lines.append("")
