@@ -172,10 +172,16 @@ class GameplaySelector:
         query = (
             select(GameplayAsset)
             .join(GameplaySource, GameplayAsset.source_id == GameplaySource.id)
-            .where(GameplaySource.game_id == game_id)
             .where(GameplaySource.ingestion_status == "ready")
             .where(GameplaySource.enabled == True)
         )
+
+        # For GENERAL_TOPIC (game_id=None), don't filter by game_id —
+        # any gameplay can serve as background. NULL game_id in SQL
+        # never matches (= NULL is always false), so we must skip the
+        # filter entirely.
+        if game_id is not None:
+            query = query.where(GameplaySource.game_id == game_id)
 
         if public_only:
             # Public gameplays from OTHER users

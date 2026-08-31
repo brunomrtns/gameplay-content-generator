@@ -485,7 +485,10 @@ class VideoGenerateAdapter:
                     log.error(f"VG subprocess failed (rc={proc.returncode}):\nSTDOUT:{proc.stdout[-1000:]}\nSTDERR:{proc.stderr[-1000:]}")
                     raise VideoGenerateError(f"subprocess exited {proc.returncode}: {proc.stderr[-500:]}")
                 if result_file.exists():
-                    return json.loads(result_file.read_text())
+                    result = json.loads(result_file.read_text())
+                    if not result.get("success"):
+                        log.error(f"VG subprocess failed (result): {result.get('error', 'unknown')}\nSTDERR:{proc.stderr[-2000:]}")
+                    return result
                 # No result file but rc==0 — treat as failure
                 log.error(f"VG subprocess produced no result file. stderr: {proc.stderr[-500:]}")
                 return {"success": False, "error": proc.stderr[-500:] or "no result file"}
