@@ -223,6 +223,7 @@ class UpdateAutomationRequest(BaseModel):
 
 
 @router.put("/automation")
+@router.patch("/automation")
 def update_automation(
     req: UpdateAutomationRequest,
     user: User = Depends(get_current_user),

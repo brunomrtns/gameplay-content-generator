@@ -76,6 +76,7 @@ def get_channel_profile(
 
 
 @router.put("/channel/profile")
+@router.patch("/channel/profile")
 def update_channel_profile(
     data: dict,
     user: User = Depends(get_current_user),
