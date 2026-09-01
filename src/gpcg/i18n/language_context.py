@@ -185,9 +185,13 @@ class LanguageContext:
         requested = getattr(profile, "target_language", None) or getattr(s, "gpcg_default_language", DEFAULT_LANGUAGE)
 
         # Allowlist check (config stores comma-separated string)
+        # Match on both full tag (e.g. "en-US") and base code (e.g. "en")
+        # so that a config with "en" accepts "en-US", and vice-versa.
         allowed_raw = getattr(s, "gpcg_multilingual_languages", "pt-BR")
         allowed = [lang.strip() for lang in allowed_raw.split(",") if lang.strip()]
-        if requested not in allowed:
+        requested_base = requested.split("-")[0].lower()
+        allowed_bases = {lang.split("-")[0].lower() for lang in allowed}
+        if requested not in allowed and requested_base not in allowed_bases:
             return cls()
 
         # Beta-user check (config stores comma-separated string of user IDs)
