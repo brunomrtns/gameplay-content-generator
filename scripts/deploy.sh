@@ -706,9 +706,31 @@ if [[ "${API_OK:-0}" -eq 1 && -n "$MOBILE_ROOT" && -d "$MOBILE_ROOT" ]]; then
   # Ler último versionCode registrado no servidor
   SERVER_VERSION_CODE=$(curl -sf --max-time 10 https://brunointegrations.com/gpcg/api/app/version 2>/dev/null | grep -o '"versionCode":[0-9]*' | grep -o '[0-9]*' || echo "0")
 
-  if [[ "$MOBILE_CHANGED" -eq 1 ]]; then
+  # ── Detecção de mudanças no mobile via git diff ────────────────────────
+  # O cross-platform verify detecta DIVERGÊNCIAS (web vs mobile), não
+  # mudanças absolutas. Se o estado foi resetado (ex: rodou
+  # verify-cross-platform.sh standalone), MOBILE_CHANGED pode ser 0 mesmo
+  # com arquivos modificados. Como fallback confiável, comparamos os
+  # arquivos do mobile contra a última tag de versão (v*) — o estado que
+  # estava em produção no deploy anterior.
+  GIT_MOBILE_CHANGED=0
+  LAST_VERSION_TAG=$(git describe --tags --abbrev=0 --match "v*" 2>/dev/null || echo "")
+  if [[ -n "$LAST_VERSION_TAG" ]]; then
+    GIT_MOBILE_DIFF=$(git diff --name-only "$LAST_VERSION_TAG" -- mobile/ 2>/dev/null | grep -v 'node_modules/' | grep -v '\.env' || true)
+    if [[ -n "$GIT_MOBILE_DIFF" ]]; then
+      GIT_MOBILE_CHANGED=1
+      GIT_MOBILE_DIFF_COUNT=$(echo "$GIT_MOBILE_DIFF" | wc -l)
+      log "Step 9: $GIT_MOBILE_DIFF_COUNT arquivo(s) do mobile mudaram desde $LAST_VERSION_TAG"
+    fi
+  fi
+
+  if [[ "$MOBILE_CHANGED" -eq 1 || "$GIT_MOBILE_CHANGED" -eq 1 ]]; then
     SHOULD_BUILD_APK=1
-    log "Step 9: Mobile mudou — buildando APK..."
+    if [[ "$MOBILE_CHANGED" -eq 1 ]]; then
+      log "Step 9: Mobile mudou (cross-platform) — buildando APK..."
+    else
+      log "Step 9: Mobile mudou (git diff vs $LAST_VERSION_TAG) — buildando APK..."
+    fi
   elif [[ "$WEB_CHANGED" -eq 1 && "$CONSENTED" -eq 1 ]]; then
     SHOULD_BUILD_APK=1
     log "Step 9: Web mudou com consentimento — buildando APK para alinhar..."
