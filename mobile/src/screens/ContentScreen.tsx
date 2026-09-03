@@ -92,24 +92,40 @@ function MediaTab() {
   const publicSources = (allSources || []).filter((s: any) => s.is_own === false);
 
   const handleUpload = async () => {
+    let pickedFiles: any[] = [];
     try {
       const result = await DocumentPicker.pick({
         type: [DocumentPicker.types.video],
         allowMultiSelection: true,
       });
+      pickedFiles = result;
       setUploading(true);
       setUploadProgress(0);
-      for (const file of result) {
+      let uploaded = 0;
+      for (let fi = 0; fi < pickedFiles.length; fi++) {
+        const file = pickedFiles[fi];
+        // Show which file we're on in multi-file uploads
+        if (pickedFiles.length > 1) {
+          Toast.show({ type: 'info', text1: `Enviando ${fi + 1}/${pickedFiles.length}: ${file.name ?? 'file'}` });
+        }
         await gameplaysApi.upload(
           { uri: file.uri, name: file.name ?? 'file', type: file.type ?? 'video/mp4' },
           (pct) => setUploadProgress(pct),
         );
+        uploaded++;
       }
-      Toast.show({ type: 'success', text1: `${result.length} arquivo(s) enviado(s)` });
+      Toast.show({ type: 'success', text1: `${uploaded} arquivo(s) enviado(s)` });
       queryClient.invalidateQueries({ queryKey: ['gameplays'] });
     } catch (err: any) {
       if (!DocumentPicker.isCancel(err)) {
-        Toast.show({ type: 'error', text1: err.message || 'Erro no upload' });
+        // Tratar mensagens de erro conhecidas com feedback amigável
+        let msg = err.message || 'Erro no upload';
+        if (msg === 'Network Error' || msg.includes('Network error')) {
+          msg = 'Falha de conexão. Verifique sua internet e tente novamente — o upload será retomado de onde parou.';
+        } else if (err.response?.status === 409 || msg.includes('já foi enviado')) {
+          msg = 'Este arquivo já foi enviado anteriormente.';
+        }
+        Toast.show({ type: 'error', text1: msg, visibilityTime: 6000 });
       }
     } finally {
       setUploading(false);
@@ -202,7 +218,9 @@ function MediaTab() {
         </View>
         {uploading ? (
           <View style={styles.uploadProgress}>
-            <Text style={styles.muted}>Enviando... {uploadProgress}%</Text>
+            <Text style={styles.muted}>
+              {uploadProgress < 100 ? `Enviando... ${uploadProgress}%` : 'Processando no servidor...'}
+            </Text>
             <View style={styles.progressBar}>
               <View style={[styles.progressFill, { width: `${uploadProgress}%` }]} />
             </View>

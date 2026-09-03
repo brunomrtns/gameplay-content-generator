@@ -109,19 +109,16 @@ bump_version() {
 # ── Step 0: Verificar working tree ───────────────────────────────────────────
 log "Verificando pré-requisitos..."
 
-# ── Safety: aguardar worker local se estiver processando qualquer job ────────
+# ── Safety: aguardar workers (local ou remoto) se estiverem processando jobs ─
 # O deploy reinicia o container da API na VPS, o que causa 502 Bad Gateway
 # temporário. Isso interrompe qualquer job que o worker esteja processando
 # (download de gameplay, geração de vídeo, coleta de conteúdo). Aguardamos
 # até o worker estar idle para não prejudicar jobs em andamento.
 check_worker_busy() {
-  # Verifica se o serviço gpcg-worker está rodando localmente
-  if ! systemctl --user is-active gpcg-worker &>/dev/null; then
-    return 1  # worker não está rodando, pode deployar
-  fi
-
-  # Pergunta à API se há jobs rodando no worker que seriam interrompidos
-  # pelo reinício do container da API durante o deploy.
+  # Pergunta à API se há jobs rodando em QUALQUER worker (local ou remoto)
+  # que seriam interrompidos pelo reinício do container da API durante o deploy.
+  # O worker pode estar rodando em outra máquina (PC com GPU) — não assumimos
+  # que é local. Sempre consulta a VPS.
   # Inclui:
   #   - mapping em stage de download (baixando gameplay da VPS)
   #   - qualquer generate_short / curiosity_short rodando (worker fala
@@ -147,7 +144,7 @@ else:
   worker_status=$(echo "$raw_output" | grep -E '^(IDLE|\{)' | tail -1)
 
   if [[ -z "$worker_status" ]]; then
-    log "Aviso: não foi possível verificar estado do worker — continuando deploy"
+    log "Aviso: não foi possível verificar estado dos workers — continuando deploy"
     return 1
   elif [[ "$worker_status" == "IDLE" ]]; then
     return 1  # nenhum job rodando, pode deployar
@@ -165,7 +162,7 @@ while true; do
     break  # pode deployar
   fi
   if [[ $WAITED -eq 0 ]]; then
-    log "Worker local está processando job(s) — aguardando para não interromper:"
+    log "Worker está processando job(s) — aguardando para não interromper:"
     echo "$BUSY_OUTPUT" | sed 's/^/    /'
   fi
   if [[ $WAITED -ge $MAX_WAIT ]]; then

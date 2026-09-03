@@ -1,4 +1,6 @@
 import { client, saveToken, getSSOCookies, clearAuth, videoUrl, thumbUrl, presentationImageUrl } from './client';
+import * as RNFS from '@dr.pogodin/react-native-fs';
+const { DocumentDirectoryPath } = RNFS;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -515,20 +517,134 @@ export const gameplaysApi = {
     return data;
   },
 
-  /** Chunked upload with progress (gameplay files can be large) */
+  /**
+   * Resumable chunked upload — splits the file into 8 MiB chunks, uploads
+   * them one at a time with retry, and assembles on the server.
+   *
+   * This is the same protocol the web frontend uses (upload_routes.py):
+   *   POST /gameplays/upload/init    → start session, get upload_id
+   *   POST /gameplays/upload/{id}/chunk  → upload one chunk (multipart)
+   *   POST /gameplays/upload/{id}/complete → assemble + create record
+   *
+   * Why not single-shot like before? A 23-min gameplay video can be hundreds
+   * of MB. On unstable mobile connections (4G/5G), a single long POST will
+   * drop mid-upload with "Network Error" and the user has to start over.
+   * Chunked upload with per-chunk retry means a dropped connection only
+   * costs re-sending one 8 MiB chunk, not the whole file.
+   */
   async upload(file: { uri: string; name: string; type: string }, onProgress?: (pct: number) => void): Promise<void> {
-    const formData = new FormData();
-    formData.append('file', file as any);
+    const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MiB — must match server
+    const MAX_RETRIES = 3;
 
-    await client.post('/gameplays/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: (e) => {
-        if (e.total && onProgress) {
-          onProgress(Math.round((e.loaded * 100) / e.total));
+    // ── Step 0: Copy to a local temp file ────────────────────────────────
+    // On Android, DocumentPicker returns content:// URIs which RNFS.read
+    // may not handle directly. Copying to a temp file guarantees we can
+    // read chunks reliably. The copy is sequential I/O and fast.
+    const tempPath = `${RNFS.DocumentDirectoryPath}/gpcg_upload_${Date.now()}_${file.name}`;
+    await RNFS.copyFile(file.uri, tempPath);
+
+    try {
+      const fileStat = await RNFS.stat(tempPath);
+      const totalSize = fileStat.size;
+      const totalChunks = Math.ceil(totalSize / CHUNK_SIZE);
+
+      if (totalSize === 0) throw new Error('Arquivo vazio');
+
+      // ── Step 1: Init upload session ────────────────────────────────────
+      const initFd = new FormData();
+      initFd.append('filename', file.name);
+      initFd.append('file_size', String(totalSize));
+
+      // Try client-side hash for early dedup (skip for large files > 200MB
+      // to avoid freezing — server will hash after assembly anyway)
+      if (totalSize <= 200 * 1024 * 1024) {
+        try {
+          const fileHash = await RNFS.hash(tempPath, 'sha256');
+          initFd.append('file_hash', fileHash);
+        } catch {
+          // hash not available — server will compute
         }
-      },
-      timeout: 600000, // 10 min for large files
-    });
+      }
+
+      const initRes = await client.post('/gameplays/upload/init', initFd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 30000,
+      });
+
+      if (initRes.data.duplicate) {
+        throw new Error('Este arquivo já foi enviado');
+      }
+
+      const uploadId = initRes.data.upload_id;
+      const serverChunkSize = initRes.data.chunk_size || CHUNK_SIZE;
+      const serverTotalChunks = initRes.data.total_chunks;
+
+      // ── Step 2: Upload chunks with retry ───────────────────────────────
+      for (let i = 0; i < serverTotalChunks; i++) {
+        const start = i * serverChunkSize;
+        const length = Math.min(serverChunkSize, totalSize - start);
+
+        // Read chunk from file as base64
+        const base64Data = await RNFS.read(tempPath, length, start, 'base64');
+
+        // Write to a small temp chunk file (FormData needs a file URI)
+        const chunkPath = `${RNFS.DocumentDirectoryPath}/gpcg_chunk_${i}.part`;
+        await RNFS.writeFile(chunkPath, base64Data, 'base64');
+
+        try {
+          let lastErr: Error | null = null;
+          for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            try {
+              const chunkFd = new FormData();
+              chunkFd.append('index', String(i));
+              chunkFd.append('chunk', {
+                uri: `file://${chunkPath}`,
+                name: `chunk_${i}`,
+                type: 'application/octet-stream',
+              } as any);
+
+              await client.post(`/gameplays/upload/${uploadId}/chunk`, chunkFd, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+                timeout: 120000, // 2 min per chunk (8 MiB on slow connection)
+                onUploadProgress: (e) => {
+                  if (e.total && onProgress) {
+                    const overall = start + (e.loaded / e.total) * length;
+                    onProgress(Math.round((overall / totalSize) * 100));
+                  }
+                },
+              });
+              lastErr = null;
+              break;
+            } catch (e: any) {
+              lastErr = e;
+              // 401 = auth failure, don't retry
+              if (e.response?.status === 401) throw e;
+              // 403 = forbidden, don't retry
+              if (e.response?.status === 403) throw e;
+              // Wait before retry (exponential backoff: 1s, 2s, 3s)
+              await new Promise<void>((r) => setTimeout(r, 1000 * (attempt + 1)));
+            }
+          }
+          if (lastErr) throw lastErr;
+        } finally {
+          // Clean up chunk temp file
+          await RNFS.unlink(chunkPath).catch(() => undefined);
+        }
+
+        // Report progress at chunk boundary
+        if (onProgress) {
+          onProgress(Math.round(((start + length) / totalSize) * 100));
+        }
+      }
+
+      // ── Step 3: Complete — assemble on server ──────────────────────────
+      await client.post(`/gameplays/upload/${uploadId}/complete`, {}, {
+        timeout: 300000, // 5 min for assembly of large files
+      });
+    } finally {
+      // Clean up the temp copy of the source file
+      await RNFS.unlink(tempPath).catch(() => undefined);
+    }
   },
 };
 
