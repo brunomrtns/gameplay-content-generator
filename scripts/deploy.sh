@@ -711,16 +711,21 @@ if [[ "${API_OK:-0}" -eq 1 && -n "$MOBILE_ROOT" && -d "$MOBILE_ROOT" ]]; then
   # mudanças absolutas. Se o estado foi resetado (ex: rodou
   # verify-cross-platform.sh standalone), MOBILE_CHANGED pode ser 0 mesmo
   # com arquivos modificados. Como fallback confiável, comparamos os
-  # arquivos do mobile contra a última tag de versão (v*) — o estado que
-  # estava em produção no deploy anterior.
+  # arquivos do mobile contra a tag da versão do APK que está em produção
+  # no servidor — não contra a última tag de deploy (que pode ter subido
+  # sem buildar APK).
   GIT_MOBILE_CHANGED=0
-  LAST_VERSION_TAG=$(git describe --tags --abbrev=0 --match "v*" 2>/dev/null || echo "")
-  if [[ -n "$LAST_VERSION_TAG" ]]; then
-    GIT_MOBILE_DIFF=$(git diff --name-only "$LAST_VERSION_TAG" -- mobile/ 2>/dev/null | grep -v 'node_modules/' | grep -v '\.env' || true)
-    if [[ -n "$GIT_MOBILE_DIFF" ]]; then
-      GIT_MOBILE_CHANGED=1
-      GIT_MOBILE_DIFF_COUNT=$(echo "$GIT_MOBILE_DIFF" | wc -l)
-      log "Step 9: $GIT_MOBILE_DIFF_COUNT arquivo(s) do mobile mudaram desde $LAST_VERSION_TAG"
+  SERVER_APK_VERSION=$(curl -sf --max-time 10 https://brunointegrations.com/gpcg/api/app/version 2>/dev/null | grep -o '"version":"[^"]*"' | sed 's/"version":"//;s/"//' || echo "")
+  APK_BASELINE_TAG=""
+  if [[ -n "$SERVER_APK_VERSION" ]]; then
+    APK_BASELINE_TAG="v$SERVER_APK_VERSION"
+    if git rev-parse "$APK_BASELINE_TAG" &>/dev/null; then
+      GIT_MOBILE_DIFF=$(git diff --name-only "$APK_BASELINE_TAG" -- mobile/ 2>/dev/null | grep -v 'node_modules/' | grep -v '\.env' || true)
+      if [[ -n "$GIT_MOBILE_DIFF" ]]; then
+        GIT_MOBILE_CHANGED=1
+        GIT_MOBILE_DIFF_COUNT=$(echo "$GIT_MOBILE_DIFF" | wc -l)
+        log "Step 9: $GIT_MOBILE_DIFF_COUNT arquivo(s) do mobile mudaram desde $APK_BASELINE_TAG (versão do APK em produção)"
+      fi
     fi
   fi
 
@@ -729,7 +734,7 @@ if [[ "${API_OK:-0}" -eq 1 && -n "$MOBILE_ROOT" && -d "$MOBILE_ROOT" ]]; then
     if [[ "$MOBILE_CHANGED" -eq 1 ]]; then
       log "Step 9: Mobile mudou (cross-platform) — buildando APK..."
     else
-      log "Step 9: Mobile mudou (git diff vs $LAST_VERSION_TAG) — buildando APK..."
+      log "Step 9: Mobile mudou (git diff vs $APK_BASELINE_TAG) — buildando APK..."
     fi
   elif [[ "$WEB_CHANGED" -eq 1 && "$CONSENTED" -eq 1 ]]; then
     SHOULD_BUILD_APK=1
